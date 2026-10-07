@@ -1,0 +1,76 @@
+# Terraform runtime files, state, plans and secret-bearing variable inputs.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+*.tfplan
+terraform.plan
+terraform-plan*.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+# Keep .terraform.lock.hcl tracked. Placeholder examples must contain no secrets.
+!*.tfvars.example
+!*.tfvars.json.example
+
+# Local environment and authentication material.
+.env
+.env.*
+!.env.example
+!.env.*.example
+.envrc
+.direnv/
+.aws/
+.azure/
+.kube/
+credentials/
+secrets/
+credentials.json
+auth.json
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+
+# Kubeconfig variants; only explicitly named placeholder examples may be tracked.
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+kube-config
+kube-config.*
+!kubeconfig.example
+!kubeconfig.*.example
+
+# Runner state, temporary worktrees and collected evidence (outside source).
+/.opsloop/
+/.worktrees/
+/worktrees/
+/runner-worktrees/
+/var/
+/tmp/
+/artifacts/
+/evidence/
+
+# Build/test outputs and local tooling caches.
+/bin/
+/build/
+/dist/
+/coverage/
+*.test
+*.out
+coverage.xml
+coverage.html
+.cache/
+*.log
+.DS_Store
+Thumbs.db
