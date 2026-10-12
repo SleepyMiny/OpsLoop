@@ -142,6 +142,38 @@ class SurveyFixtureTests(unittest.TestCase):
                 self.assertEqual(survey.main(), 2)
             self.assertEqual(len(calls), 6)  # Only current account identity is re-read.
 
+    def test_broad_discovery_does_not_drop_new_arm_series_or_quota_families(self):
+        usage, skus = survey.region_queries("eastasia", all_arm64=True)
+        self.assertEqual(usage[usage.index("--query") + 1], "[].{name:name.value,label:name.localizedValue,current:currentValue,limit:limit}")
+        self.assertIn("CpuArchitectureType", skus[skus.index("--query") + 1])
+        self.assertNotIn("Standard_B2pls_v2", skus[skus.index("--query") + 1])
+
+    def test_broad_discovery_finds_unlisted_series_and_excludes_small_or_gen1_vm(self):
+        novel = copy.deepcopy(SKU)
+        novel.update(name="Standard_D2pds_v6", family="newArmFamily")
+        small = copy.deepcopy(novel)
+        small["name"] = "Standard_TooSmall"
+        small["capabilities"].append({"name": "MemoryGB", "value": "1"})
+        gen1 = copy.deepcopy(novel)
+        gen1["name"] = "Standard_Gen1"
+        gen1["capabilities"].append({"name": "HyperVGenerations", "value": "V1"})
+        def read(args):
+            if args[:2] == ["account", "show"]:
+                return {"id": "fixture-private-id", "name": "Fixture", "state": "Enabled"}
+            if args[:2] == ["provider", "list"]: return PROVIDERS
+            if args[:2] == ["vm", "list-usage"]: return USAGE + [{"name": "newArmFamily", "current": 0, "limit": 2}]
+            if args[:2] == ["vm", "list-skus"]: return [novel, small, gen1]
+            return IMAGE
+        with tempfile.TemporaryDirectory() as directory:
+            capture = io.StringIO()
+            argv = ["survey", "--all-arm64", "--region", "eastasia", "--cache-dir", directory]
+            with patch.object(survey.sys, "argv", argv), patch.object(survey, "az_json", side_effect=read), contextlib.redirect_stdout(capture):
+                self.assertEqual(survey.main(), 2)
+            result = json.loads(capture.getvalue())
+            self.assertEqual([c["sku"] for c in result["regions"][0]["candidates"]], ["Standard_D2pds_v6"])
+            self.assertEqual(result["regions"][0]["candidates"][0]["checks"]["family_quota"]["status"], "pass")
+            self.assertNotIn("fixture-private-id", capture.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

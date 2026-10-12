@@ -1,5 +1,7 @@
 # P1-C — Azure ARM64 후보 조사
 
+최신 허용 지역 조사와 우선 후보는 [East Asia/B2pls_v2 검증 기록](p1-c-azure-allowed-regions.md)에 있다. 아래 일본/한국 및 정책 차단 기록은 당시 증거로 보존한다.
+
 기준일: **2026-10-12**, 라이브 CLI 관측 17:22~17:24 KST 및 같은 날 공식 가격·사양 조회. 대상은 기존 기본 구독 **Azure for Students / Enabled**다. 구독 ID·tenant·토큰·자격 증명을 문서와 조사 캐시에 저장하지 않았다. Azure 리소스 생성·삭제·provider 등록·쿼터 요청은 수행하지 않았다.
 
 ## 결정에 대한 답

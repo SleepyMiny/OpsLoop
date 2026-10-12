@@ -152,11 +152,25 @@ def candidate_check(sku, region, usages, image, providers, zone, disk_gib):
             "capacity": "unverified; catalog and quota do not guarantee allocation"}
 
 
+def region_queries(region, all_arm64=False):
+    # Broad ARM discovery must also retain every quota family; a fixed family
+    # allowlist would silently make newly discovered ARM series unverifiable.
+    usage_filter = "" if all_arm64 else "[?" + " || ".join("name.value=='"+f+"'" for f in FAMILIES) + "]"
+    sku_filter = ("[?capabilities[?name=='CpuArchitectureType' && value=='Arm64']]" if all_arm64 else
+                  "[?" + " || ".join("name=='"+s+"'" for s in SKUS) + "]")
+    projection = ".{name:name,family:family,locationInfo:locationInfo,capabilities:capabilities,restrictions:restrictions}"
+    return (
+        ["vm", "list-usage", "--location", region, "--query", (usage_filter or "[]") + ".{name:name.value,label:name.localizedValue,current:currentValue,limit:limit}"],
+        ["vm", "list-skus", "--location", region, "--resource-type", "virtualMachines", "--all", "--query", sku_filter + projection],
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--region", action="append", help="Repeat for regions; default Korea Central/Japan East/Japan West")
     parser.add_argument("--subscription", help="Explicit existing subscription name or ID; never changes az default")
     parser.add_argument("--zone", choices=["1", "2", "3"], help="Optional selected zone; omission means regional deployment")
+    parser.add_argument("--all-arm64", action="store_true", help="Discover all ARM64 series with >=2 vCPU/4 GiB and Gen2; read all quota families")
     parser.add_argument("--image-version", default="24.04.202609040")
     parser.add_argument("--disk-gib", type=int, default=32)
     parser.add_argument("--cache-dir", type=Path, default=Path(".opsloop/azure-survey"))
@@ -193,10 +207,13 @@ def main():
     providers = read(["provider", "list", "--query", "[?" + " || ".join("namespace=='"+p+"'" for p in PROVIDERS) + "].{namespace:namespace,state:registrationState}"])
     urn = "Canonical:ubuntu-24_04-lts:server-arm64:" + options.image_version
     def region_read(region):
-        usage = read(["vm", "list-usage", "--location", region, "--query", "[?" + " || ".join("name.value=='"+f+"'" for f in FAMILIES) + "].{name:name.value,label:name.localizedValue,current:currentValue,limit:limit}"])
-        skus = read(["vm", "list-skus", "--location", region, "--resource-type", "virtualMachines", "--all", "--query", "[?" + " || ".join("name=='"+s+"'" for s in SKUS) + "].{name:name,family:family,locationInfo:locationInfo,capabilities:capabilities,restrictions:restrictions}"])
+        usage_args, sku_args = region_queries(region, options.all_arm64)
+        usage = read(usage_args)
+        skus = read(sku_args)
         image = read(["vm", "image", "show", "--location", region, "--urn", urn, "--query", "{version:name,architecture:architecture,generation:hyperVGeneration,plan:plan,disk_gib:osDiskImage.sizeInGb}"])
         candidates = [candidate_check(s, region, usage["data"], image["data"], providers["data"], options.zone, options.disk_gib) for s in (skus["data"] or [])]
+        if options.all_arm64:
+            candidates = [c for c in candidates if all(c["checks"][k] == "pass" for k in ("architecture", "generation", "minimum_resources"))]
         missing = sorted(set(SKUS) - {s["sku"] for s in candidates})
         return {"region": region, "quota": usage, "image": image, "sku_observed_at": skus["observed_at"],
                 "sku_cached": skus["cached"], "sku_error": skus.get("error"), "missing_skus": missing, "candidates": candidates}
@@ -204,6 +221,7 @@ def main():
         results = list(pool.map(region_read, regions))
     report = {"generated_at": utc_now(), "subscription": account, "providers": providers,
               "image_urn": urn, "disk_gib": options.disk_gib, "regions": results,
+              "catalog_scope": "all ARM64 >=2 vCPU/4 GiB Gen2" if options.all_arm64 else "reviewed SKU allowlist",
               "deployment_gate": False,
               "remaining_checks": ["actual allocation capacity", "policy and RBAC", "subscription credit and expiry",
                                    "cost ceiling and cleanup ownership", "ACR name availability", "remote backend readiness",
