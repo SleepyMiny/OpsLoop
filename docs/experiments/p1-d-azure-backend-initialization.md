@@ -2,7 +2,7 @@
 
 검증일: 2026-10-13 KST. 기준 commit: `00207e0`. 기존 [허용 지역 조사](p1-c-azure-allowed-regions.md), [Architecture v0.1](../architecture/architecture-v0.1.md), [배포 runbook](../runbooks/azure-arm64-deployment.md), [`infra/terraform/p1`](../../infra/terraform/p1)을 재사용했다. Backend 생성·Provider 등록은 이전 승인 단계의 결과이며 이번에는 재실행하지 않았다.
 
-**최신 상태는 10절을 따른다.** 1~5절은 Backend 최초 초기화 당시, 6절은 `fbe6e1b` 이후 SSH/운영 조건 확인 당시, 7절은 disk 상속 계약 확인 당시, 8절은 Saved Plan 생성 당시, 9절은 최종 Plan 감사 당시의 증거다. 과거 RSA-only·32 GiB 강제 입력·미승인 운영 제안은 최신 계약이 아니다.
+**최신 상태는 11절을 따른다.** 1~5절은 Backend 최초 초기화 당시, 6절은 `fbe6e1b` 이후 SSH/운영 조건 확인 당시, 7절은 disk 상속 계약 확인 당시, 8절은 Saved Plan 생성 당시, 9절은 최종 Plan 감사 당시, 10절은 Budget 생성 전 사전 점검 당시의 역사적 증거다. 과거 RSA-only·32 GiB 강제 입력·Budget 미생성·미승인 운영 제안은 최신 계약이 아니다.
 
 ## 1. 실제 Backend 연결 검증
 
@@ -264,7 +264,7 @@ Plan 이후 `terraform state list`의 관리 리소스는 **0개**, Entra Blob m
 | `azurerm_linux_virtual_machine.worker` | `opsloop-p1-arm-worker`, inline `opsloop-p1-osdisk` 포함 |
 | `azurerm_container_registry.testbed` | private `acr_name`, Basic |
 
-### 실제 Budget 부재와 운영 위험
+### 당시 Budget 부재와 운영 위험 — 역사적 기록
 
 Subscription Budgets REST GET 및 현재 유일한 RG인 `opsloop-state-rg`의 RG-scope GET이 모두 빈 목록이었다. 읽기 실패를 부재로 해석한 것이 아니다. **US$20 Azure Budget Alert는 현재 없다.** Billing account의 별도 알림은 조사하지 않았다. [최소 Budget 구성/승인과 48시간 절차](../runbooks/azure-arm64-deployment.md#61-48시간-운영-시계와-비용-통제)에 청구 통화 확인, 실제 수신자·기간 승인, Monthly Cost Budget/알림 초안과 종료/deallocate 검증을 준비했다. Budget/RBAC/자동 종료는 생성하지 않았다.
 
@@ -306,6 +306,8 @@ Saved Plan apply는 입력 var-file을 다시 받거나 추가 승인 prompt를 
 
 ## 10. 승인된 Budget 사전 점검과 Git Checkpoint 검증
 
+**역사적 기록:** 아래는 Budget 생성 전 사전 점검 당시 상태다. 현재 Budget 구성은 11절을 따른다.
+
 사용자는 Subscription 전체 Monthly US$20 상당 Budget, Actual 80%/100% 및 Forecasted 100% 알림, 운영자 수신 이메일과 기존 8개 파일의 commit/push를 승인했다. **수신 이메일은 공개 Git 자료에 기록하지 않는다.** 이 승인은 Apply·VM 생성·Bootstrap·SSH 규칙 제거·종료 변경 승인이 아니다.
 
 2026-10-13 **05:36 KST** 실제 활성 Azure for Students/Enabled 및 기존 private Backend의 target subscription 일치를 먼저 확인했다. 현재 subscription의 Billing Property GET이 가리키는 Billing Profile만 조회했다. Microsoft Customer Agreement이며 **`properties.currency=KRW`**다. 프로필의 currency는 해당 프로필의 실제 청구 통화다. 계정 ID·청구 주소·수신자 등 raw 결과는 출력하거나 저장소에 복사하지 않았다. [Billing Property GET](https://learn.microsoft.com/en-us/rest/api/billing/billing-property/get?view=rest-billing-2024-04-01), [Billing Profile GET 계약](https://learn.microsoft.com/en-us/rest/api/billing/billing-profiles/get?view=rest-billing-2024-04-01).
@@ -332,3 +334,39 @@ Subscription Budgets List는 성공했고 `value=[]`로 동일 이름/목적의 
 이번 요청에 따라 Python **32개 PASS**, `terraform fmt -check` PASS, `terraform validate` PASS를 재확인했다. Sandbox validate의 Provider RPC 실패는 실제 호스트에서 동일 정적 검증을 재실행해 해결했다. Backend init/새 Plan/State 변경은 수행하지 않았다. Plan SHA256은 8절의 값과 일치하고 embedded Terraform root 4개 파일 및 lockfile도 현재 파일과 byte-for-byte 일치한다. Private 파일은 Git 밖 0600으로 보존했다.
 
 최초 SSH fetch는 현재 agent/키 인증 문제로 실패했다. 실제 호스트의 기존 GitHub CLI keyring 인증은 유효해 HTTPS URL을 직접 지정하고 기존 credential helper를 일회성 사용하여 fetch에 성공했다. 저장된 origin SSH URL·key·인증 설정은 바꾸지 않았다. 원격 main은 기준 `fbe6e1b`와 같아 충돌 없이 checkpoint를 준비했다. 승인된 stage/commit/push 대상은 9절의 8개 프로젝트 파일이며 이메일·runtime/private artifact는 제외한다. 결과 SHA와 원격 일치/clean tree는 최종 실행 결과로 보고하며, 자기 참조 commit SHA를 문서에 미리 기재하지 않는다.
+
+## 11. P1 독립 감사 후 현재 상태
+
+기준 commit **`b80a747`**, 수정일 2026-10-13. 독립 감사에서 Critical/High 확정 결함은 없고 Medium 1건·Low 3건·운영 확인 조건 2건이 보고됐다. 아래 Budget·Spending Limit 상태는 **이번 수정 요청의 사용자 제공 현재 정보**이며 Azure 외부 재조회·설정 변경은 하지 않았다. 1~10절의 당시 관측값과 실행 이력은 보존한다.
+
+| 항목 | 현재 상태와 근거 |
+| --- | --- |
+| Subscription Budget | `opsloop-monthly-budget`, 월 **27,000 KRW** |
+| 알림 | **Actual 80% / Actual 100% / Forecasted 100% 설정 완료**; 실제 이메일 전달 시험은 이번에 수행하지 않음 |
+| Spending Limit | **On**; Budget/48시간 타이머와 별도 통제 |
+| 공개 정보 경계 | 이메일·Subscription ID·청구 계정 원본·private 입력을 공개 문서에 추가하지 않음 |
+| OS disk | `os_disk_size_gb=null`, 원본 이미지 크기 상속, StandardSSD_LRS; **실제 크기·과금 계층 미확정** |
+| Saved Plan | **9 create / 0 update / 0 delete 생성 완료**; 8~10절의 파일을 보존 |
+| Apply | **아직 실행하지 않았으며 미승인**; 코드 수정/테스트는 Apply 권한이 아님 |
+| Gate | private Saved Plan 준비 true, root/example false 유지; Terraform 코드·lockfile 변경 없음 |
+| 통신 보안 | 일반 Tailscale Allow All 하의 비노드 UDP8472 접근 가능성이 남음; 실제 접근 통제 검증 전 완료 주장 금지 |
+| 종료 | 수동 24/36/47시간·최대 48시간 종료 점검 유지·보강; 자동 VM Deallocate는 별도 승인 후 구성할 설계 초안뿐 |
+
+조사 CLI 기본 32 GiB 가정은 제거하고 옵션 생략 시 이미지 크기 상속으로 맞췄다. 명시적 `--disk-gib`만 이미지 minimum과 비교하며 외부 CLI의 양의 정수 옵션·상태 문자열·exit 2는 유지한다. 상속 JSON의 `disk_gib=null` 처리와 예전 32 GiB 동작을 원하는 사용자의 명시 옵션 필요성은 [scripts 계약](../../scripts/README.md)에 기록했다. Namespace 수용시험은 GET 오류와 성공한 빈 결과를 구분하고 오류/기존 Namespace에서는 생성 없이 중단한다. 임시 kubectl stub 테스트만 사용하며 실제 클러스터에 적용하지 않는다.
+
+[배포 runbook](../runbooks/azure-arm64-deployment.md)의 UDP8472 가입 전 검증·최소 권한/롤백 초안 및 48시간 수동 점검·자동 Deallocate 설계를 따른다. 기존 노드/서비스 ACL·UFW·Kubernetes·Tailscale·Observability·Backend와 Azure 리소스/예약 작업은 변경하지 않는다. 이번 작업은 commit/push 전 멈춘다.
+
+### 이번 수정의 로컬 검증 결과
+
+| 검증 | 결과 |
+| --- | --- |
+| Python baseline / 수정 후 | 수정 전 기존 **32개 PASS**, 수정 후 기존 32개 + 신규 8개 = **40개 PASS**, skip 없음 |
+| 신규 회귀 | 조사 CLI 5개: 상속/큰 이미지/크기 metadata 부재·이미지 조회 실패·명시 override·기존 옵션·잘못된 입력; Namespace 3개: 존재/부재/GET 실패. 실제 runbook Bash 블록을 임시 kubectl stub으로 실행 |
+| Terraform fmt / validate | 둘 다 PASS. sandbox validate는 Provider RPC handshake 제한으로 실패했으며 허용된 실제 호스트에서 동일 정적 validate로 PASS; init/backend 연결·외부 Azure 인증 없음 |
+| Saved Plan SHA256 | `faf73f1f4053064d252851dc0c01f4f6fcf801b237bc0db4c1b19a5e68a2a063` 일치, Plan 내용 출력/추출 없음 |
+| Saved Plan 코드 / lockfile | embedded backend.tf/main.tf/variables.tf/versions.tf와 현재 파일, embedded lockfile과 현재 lockfile 각각 byte-for-byte 일치 |
+| 구문 / 문서 / diff | 모든 저장소 Python AST·문서 Bash 30개 블록 `bash -n`·변경 문서 local file link·`git diff --check` PASS. 문서의 인프라 명령은 실행하지 않음 |
+| 노출 검사 | tracked/unignored Secret/State/Plan/private tfvars 경로 0개, 추가 내용의 credential 패턴·이메일 검사 PASS. private 파일의 UUID/이메일과 공개 파일 비교에서 일치 없음; private 값 출력 없음 |
+| 보존 범위 | baseline 대비 infra/bootstrap 변경 없음. Observability values·provider lockfile 동일; Terraform 코드·Backend·기존 Kubernetes/Tailscale/ACL/UFW 변경 없음 |
+
+남은 위험은 실제 disk 크기/과금 계층, credit 잔액·만료, Allow All 아래 비노드 UDP8472 접근 및 미래 Worker의 실제 통신/MTU·수용시험, 수동 종료 담당자의 실행 준비다. 자동 Deallocate는 미구성 초안이며 Budget 설정을 종료 보장으로 해석하지 않는다. **Apply는 계속 미승인·미실행**이고 이번 검증은 이를 해제하지 않는다. Azure/예약 작업 생성·수정·삭제, Terraform Apply/Destroy, 실제 클러스터 테스트, commit/push는 수행하지 않았다.

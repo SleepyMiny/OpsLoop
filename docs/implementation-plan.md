@@ -70,9 +70,9 @@ Phase 0 분석에서 공식 문서와 설치된 Codex CLI interface를 확인하
 
 ### 결과물
 
-Terraform·bootstrap 구성, 환경 점검표, network 검증 결과, state 보관·복구와 cleanup runbook. P1-A 정적 조사 기록에 이어 P1-B의 기존 수동 구축을 자산화한다. 사용자 기록에서 두 로컬 노드 Ready와 Control Plane → Worker DNS/Pod IP HTTP가 확인되었으며 역방향·MTU·큰 payload·WAN relay·장애 복구는 미검증이다. Azure provider·quota와 Backend 연결의 최신 값은 [10월 13일 기록](experiments/p1-d-azure-backend-initialization.md)을 따른다. ARM 생성/조인·3-Node 검증·ACR/OIDC·backup/restore가 남아 Terraform 배포 gate는 닫힌 상태로 유지한다.
+Terraform·bootstrap 구성, 환경 점검표, network 검증 결과, state 보관·복구와 cleanup runbook. P1-A 정적 조사 기록에 이어 P1-B의 기존 수동 구축을 자산화한다. 사용자 기록에서 두 로컬 노드 Ready와 Control Plane → Worker DNS/Pod IP HTTP가 확인되었으며 역방향·MTU·큰 payload·WAN relay·장애 복구는 미검증이다. Azure provider·quota와 Backend 연결의 최신 값은 [10월 13일 기록](experiments/p1-d-azure-backend-initialization.md)을 따른다. Saved Plan 준비 gate는 private 입력에서 true이나, ARM 생성/조인·3-Node 검증·ACR/OIDC·backup/restore가 남고 Apply는 미승인·미실행이다. root/example gate는 false를 유지한다.
 
-기존 로컬 `init -backend=false`에 이어 승인된 실제 Azure backend `init`, `fmt -check`, `validate` 및 빈 State 연결 검증을 통과했다. [Azure 준비 runbook](runbooks/azure-arm64-deployment.md)과 [연결 기록](experiments/p1-d-azure-backend-initialization.md)을 따른다. 초기화 전 State Blob은 없었고 초기화 후 181바이트 Blob이 존재하며 관리 리소스는 0개다. Plan은 미실행이다. 선언형 코드·정적 검증 통과는 실제 allocation·배포·삭제/재생성 성공을 뜻하지 않는다.
+기존 로컬 `init -backend=false`에 이어 승인된 실제 Azure backend `init`, `fmt -check`, `validate` 및 빈 State 연결 검증을 통과했다. [Azure 준비 runbook](runbooks/azure-arm64-deployment.md)과 [최신 상태](experiments/p1-d-azure-backend-initialization.md#11-p1-독립-감사-후-현재-상태)를 따른다. 초기화 전 State Blob은 없었고 초기화 후 181바이트 Blob·관리 리소스 0개를 관측했다. 초기화 당시 Plan 미실행 기록 이후 **Saved Plan 9 create / 0 update / 0 delete 생성 완료**, Terraform Apply는 아직 실행하지 않았다. 현재 OS disk는 `null`로 원본 이미지 크기를 상속하며 실제 디스크 크기·과금 계층은 미확정이다. Subscription Budget은 월 27,000 KRW, 세 알림 설정 완료, Spending Limit On이다. 선언형 코드·정적 검증 통과는 실제 allocation·배포·삭제/재생성 성공을 뜻하지 않는다.
 
 ## P2 — Demo API·이미지·Observability
 

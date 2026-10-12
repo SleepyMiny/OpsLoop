@@ -27,7 +27,7 @@ PROVIDERS = [{"namespace": p, "state": "Registered"} for p in survey.PROVIDERS]
 
 
 class SurveyFixtureTests(unittest.TestCase):
-    def check(self, sku=SKU, usages=USAGE, image=IMAGE, providers=PROVIDERS, zone=None, disk=32):
+    def check(self, sku=SKU, usages=USAGE, image=IMAGE, providers=PROVIDERS, zone=None, disk=None):
         return survey.candidate_check(sku, "japaneast", usages, image, providers, zone, disk)
 
     def test_zero_family_quota_blocks_despite_regional_headroom(self):
@@ -65,9 +65,57 @@ class SurveyFixtureTests(unittest.TestCase):
 
     def test_disk_minimum_unknown_and_too_small_are_distinct(self):
         image = dict(IMAGE, disk_gib=None)
-        self.assertEqual(self.check(image=image)["checks"]["disk_size"], "unknown")
+        self.assertEqual(self.check(image=image, disk=32)["checks"]["disk_size"], "unknown")
         self.assertEqual(self.check(disk=16)["checks"]["disk_size"], "blocked")
         self.assertEqual(self.check(image=None)["checks"]["image"], "unknown")
+
+    def test_inheritance_does_not_assume_32_gib_or_require_size_metadata(self):
+        for image in (dict(IMAGE, disk_gib=64), dict(IMAGE, disk_gib=None),
+                      {k: v for k, v in IMAGE.items() if k != "disk_gib"}):
+            with self.subTest(image=image):
+                result = self.check(image=image)
+                self.assertEqual(result["checks"]["disk_size"], "pass")
+                self.assertEqual(result["read_checks_status"], "pass")
+
+    def test_explicit_override_compares_with_image_minimum(self):
+        image = dict(IMAGE, disk_gib=64)
+        for disk, status in ((32, "blocked"), (64, "pass"), (128, "pass")):
+            with self.subTest(disk=disk):
+                self.assertEqual(self.check(image=image, disk=disk)["checks"]["disk_size"], status)
+
+    def test_inheritance_does_not_hide_failed_image_read(self):
+        result = self.check(image=None)
+        self.assertEqual(result["checks"]["image"], "unknown")
+        self.assertEqual(result["read_checks_status"], "unknown")
+
+    def test_cli_disk_omission_and_existing_explicit_option(self):
+        def read(args):
+            if args[:2] == ["account", "show"]:
+                return {"id": "fixture-private-id", "name": "Fixture", "state": "Enabled"}
+            if args[:2] == ["provider", "list"]: return PROVIDERS
+            if args[:2] == ["vm", "list-usage"]: return USAGE
+            if args[:2] == ["vm", "list-skus"]: return [SKU]
+            return dict(IMAGE, disk_gib=None)
+        for extra, disk, mode, status in (([], None, "inherit", "pass"),
+                                          (["--disk-gib", "32"], 32, "override", "unknown")):
+            with self.subTest(extra=extra), tempfile.TemporaryDirectory() as directory:
+                capture = io.StringIO()
+                argv = ["survey", "--region", "eastasia", "--cache-dir", directory, *extra]
+                with patch.object(survey.sys, "argv", argv), patch.object(survey, "az_json", side_effect=read), contextlib.redirect_stdout(capture):
+                    self.assertEqual(survey.main(), 2)
+                result = json.loads(capture.getvalue())
+                self.assertEqual(result["disk_gib"], disk)
+                self.assertEqual(result["disk_mode"], mode)
+                self.assertEqual(result["regions"][0]["candidates"][0]["checks"]["disk_size"], status)
+                self.assertFalse(result["deployment_gate"])
+
+    def test_cli_invalid_disk_override_is_rejected_before_azure_read(self):
+        for disk in ("0", "-1", "32.5", "null"):
+            with self.subTest(disk=disk), patch.object(survey.sys, "argv", ["survey", "--disk-gib", disk]), patch.object(survey, "az_json") as read, contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    survey.main()
+                self.assertEqual(error.exception.code, 2)
+                read.assert_not_called()
 
     def test_image_architecture_generation_and_plan_are_gates(self):
         for update in ({"architecture": "x64"}, {"generation": "V1"}, {"plan": {"name": "paid"}}):

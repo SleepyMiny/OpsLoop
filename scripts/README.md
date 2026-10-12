@@ -18,6 +18,8 @@ python3 scripts/azure-arm64-survey.py --region eastasia --refresh
 
 `--all-arm64`는 고정 7개 SKU 대신 모든 ARM64 series를 조회하고 2 vCPU/4 GiB/Gen2 조건으로 추린다. 새 series의 family quota를 놓치지 않도록 모든 quota family를 함께 읽는다. 옵션 생략 시 기존 SKU allowlist를 유지한다. 한 지역당 SKU·usage·image 조회를 재사용하며 정책 자체를 평가하거나 등록하지 않는다. 기본 Terraform은 zone을 지정하지 않는 regional 배포다. zone 선택을 바꾸려면 Terraform·SKU 계약도 함께 검토한다. quota가 비거나 provider/SKU/image 응답이 실패하면 성공으로 대체하지 않는다. 읽기 전용 조건이 통과해도 capacity·RBAC/policy·크레딧·가격/예산·backend·사용자 승인이 남아 `deployment_gate=false`, exit 2를 유지한다. 이는 조사 실패와 배포 차단 사유를 JSON으로 확인하라는 의미이며 실행 허가가 아니다. 가격과 실제 정책 검토는 [허용 지역 조사](../docs/experiments/p1-c-azure-allowed-regions.md)를 별도로 확인한다.
 
+`--disk-gib` 생략은 Terraform의 `os_disk_size_gb=null`과 같은 이미지 크기 상속이다. JSON의 기존 `disk_gib` 필드는 이때 `null`, 추가 `disk_mode`는 `inherit`다. `checks.disk_size=pass`는 override 제약이 없다는 뜻이며 실제 용량·과금 계층 확인을 뜻하지 않는다. 이미지 조회 실패는 계속 unknown이다. 기존 `--disk-gib 32` 등 양의 정수 옵션은 동일하게 지원하며 `disk_mode=override`, 알려진 이미지 최소 크기 이상이면 pass, 작으면 blocked, 최소 크기 미확인이면 unknown이다. 기존 상태 문자열과 exit 2는 유지한다. 이전에 옵션 생략을 32 GiB로 해석한 외부 CLI 사용자는 `--disk-gib 32`를 명시하고, JSON 소비자는 상속 시 null을 처리해야 한다. 문자열 `null` 옵션은 받지 않는다.
+
 인터넷·local socket 접근이 sandbox에 의해 차단되면 같은 읽기 전용 명령에 필요한 실행 권한을 요청한다. 인증 변경·provider 등록·quota 요청으로 우회하지 않는다. 로그에 raw CLI stderr·Helm values·state를 붙이지 않는다.
 
 로컬 fixture 검증은 실제 cloud/cluster에 연결하지 않는다.

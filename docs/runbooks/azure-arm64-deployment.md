@@ -26,11 +26,11 @@ Terraform root는 [`infra/terraform/p1`](../../infra/terraform/p1)다. Terraform
 
 정확한 image 조회의 `osDiskImage`는 Linux 정보만 반환해 원본 disk size를 확인하지 못했다. 현재 `os_disk_size_gb=null`로 원본 이미지 크기를 상속한다. AzureRM 4.64.0의 Optional/Computed 계약과 size override 생략 경로를 확인했다. 32/64 GiB 호환성을 증명한 것은 아니며, 명시적 증설을 선택할 때만 image minimum 검증이 필요하다. 정확한 Standard SSD 과금 tier와 총비용은 아직 미확정이다.
 
-통합 2단계에서는 미등록 세 provider를 재확인했고 Students 구독 spending limit은 On, 설정된 budget은 없었다. 구독 management-plane grant는 확인했지만 policy/deny/backend data-plane은 미검증이다. 구독에 연결된 MCA billing profile 조회에서도 학생 credit 잔액·만료를 확인하지 못했다. SKU/쿼터/가격 조사는 반복하지 않았다. 자세한 근거와 지속 운영 비용은 [2단계 결과](../experiments/p1-c-azure-arm64-candidates.md#통합-작업-2단계--미해결-배포-조건만-확인)에 기록했다. backend 실값·권한 및 최초 bootstrap 관리 경로가 준비되지 않아 현재 plan을 실행하지 않는다.
+**역사적 통합 2단계 기록:** 당시 미등록 세 provider를 재확인했고 Students 구독 spending limit은 On, 설정된 budget은 없었다. 구독 management-plane grant는 확인했지만 policy/deny/backend data-plane은 미검증이다. 구독에 연결된 MCA billing profile 조회에서도 학생 credit 잔액·만료를 확인하지 못했다. SKU/쿼터/가격 조사는 반복하지 않았다. 자세한 근거와 지속 운영 비용은 [2단계 결과](../experiments/p1-c-azure-arm64-candidates.md#통합-작업-2단계--미해결-배포-조건만-확인)에 기록했다. 당시 backend 실값·권한 및 최초 bootstrap 관리 경로가 준비되지 않아 plan을 실행하지 않았다.
 
-**2026-10-13 추가 차단 확인:** 활성 subscription Allowed Locations deny 정책은 `indonesiacentral`, `polandcentral`, `eastasia`, `norwayeast`, `malaysiawest`만 허용하며 Japan East VM은 예외가 아니다. 이전 SKU/쿼터 결과와 독립적인 차단이다. 정책을 변경/우회하지 않고 [최신 Phase A/B/C 기록](../experiments/p1-c-azure-arm64-candidates.md#2026-10-13-phase-abc-후속-확인)에 근거를 보존했다. 허용 지역의 ARM64 후보를 새로 검토하거나 적법한 정책 허용 경로를 확보하기 전 Japan East plan을 실행하거나 gate를 열지 않는다. Network/Storage/ContainerRegistry는 여전히 미등록이고 backend도 미준비다.
+**2026-10-13 초기 추가 차단 확인 — 역사적 기록:** 활성 subscription Allowed Locations deny 정책은 `indonesiacentral`, `polandcentral`, `eastasia`, `norwayeast`, `malaysiawest`만 허용하며 Japan East VM은 예외가 아니다. 이전 SKU/쿼터 결과와 독립적인 차단이다. 정책을 변경/우회하지 않고 [최신 Phase A/B/C 기록](../experiments/p1-c-azure-arm64-candidates.md#2026-10-13-phase-abc-후속-확인)에 근거를 보존했다. 허용 지역의 ARM64 후보를 새로 검토하거나 적법한 정책 허용 경로를 확보하기 전 Japan East plan을 실행하거나 gate를 열지 않는다. 당시 Network/Storage/ContainerRegistry는 미등록이고 backend도 미준비였다.
 
-**현재 후보 확정 (2026-10-13):** East Asia/B2pls_v2의 regional 0/6, Bpsv2 family 0/10, restrictions 빈 목록, ARM64/Gen2/NIC 및 exact Ubuntu image를 재확인했다. East Asia는 subscription Allowed Locations 정책 안에 있다. 세 Provider Registered, 기존 Backend의 CLI/Entra 인증·container scope RBAC·공인 IP 접근·실제 init/validate는 통과했다. 초기화 전 없던 State Blob이 초기화 후 존재하며 default workspace의 관리 리소스는 0개다. 사용자가 US$100 credit을 확인했으며 만료일은 미확인이다. 후속 확인에서 최대 48시간, 월 US$20 경고, 사용자 본인 종료 책임과 임시 /32 SSH 절차 준비를 확정했다. image 크기 상속 계약은 확인했으며, 사용자 확인 general Allow All 규칙으로 Plan 조건부 접근 검토를 완료했다. Saved Plan은 9 create/0 update/0 delete로 성공했으며 private Plan 준비 gate는 true, Apply는 미승인이다. 전체 Tailnet 정책·미래 가입/연결·실제 disk 과금 tier·capacity는 미검증이다. 전용 Ed25519 공개키와 private 입력 준비는 후속 기록을 따른다. [상세 기록](../experiments/p1-d-azure-backend-initialization.md).
+**현재 후보 확정 (2026-10-13):** East Asia/B2pls_v2의 regional 0/6, Bpsv2 family 0/10, restrictions 빈 목록, ARM64/Gen2/NIC 및 exact Ubuntu image를 재확인했다. East Asia는 subscription Allowed Locations 정책 안에 있다. 세 Provider Registered, 기존 Backend의 CLI/Entra 인증·container scope RBAC·공인 IP 접근·실제 init/validate는 통과했다. 초기화 전 없던 State Blob이 초기화 후 존재하며 default workspace의 관리 리소스는 0개다. 사용자가 US$100 credit을 확인했으며 만료일은 미확인이다. 후속 확인에서 최대 48시간, 월 US$20 경고, 사용자 본인 종료 책임과 임시 /32 SSH 절차 준비를 확정했다. image 크기 상속 계약은 확인했으며, 사용자 확인 general Allow All 규칙으로 Plan 조건부 접근 검토를 완료했다. Saved Plan은 9 create/0 update/0 delete로 성공했으며 private Plan 준비 gate는 true, Apply는 미승인이다. 전체 Tailnet 정책·미래 가입/연결·실제 disk 과금 tier·capacity는 미검증이다. 현재 Budget은 `opsloop-monthly-budget` 월 27,000 KRW·Actual 80%/100%·Forecasted 100% 알림 설정 완료, Spending Limit On이다. 이전 Budget 부재는 역사적 기록이며 이번에는 재조회하지 않았다. 전용 Ed25519 공개키와 private 입력 준비는 후속 기록을 따른다. [상세 기록](../experiments/p1-d-azure-backend-initialization.md).
 
 배포 전 운영자가 승인된 subscription UUID, region과 ARM SKU, regional total 및 해당 family 각각의 `limit-currentValue >= 2`, SKU Location/Zone restrictions, exact image/minimum OS disk, 실제 가격·잔여 credit·종료 시점, RG/network/VM/ACR 권한·정책, 세 노드 route/CIDR, backend/RBAC를 다시 확인한다. positive quota나 SKU catalogue가 실제 allocation capacity를 보장하지 않는다. Kubernetes 포트 6443 / 10250 / UDP 8472 / NodePort는 public NSG에 열지 않는다.
 
@@ -236,6 +236,37 @@ Tailscale 승인·ACL과 OS firewall에서 노드 간 TCP 6443(server), TCP 1025
 
 장기 최소 권한안은 Arch→Worker TCP22, Worker→Control Plane TCP6443, 필요한 노드 identity 사이 TCP10250/UDP8472를 역할·방향별로 제한하고 정책 tests를 마련하는 것이다. Grants는 합산되므로 좁은 규칙을 추가해도 기존 Allow All을 제한하지 않는다. 전체 Tailnet 영향 검토와 별도 승인 후 변경해야 하며 이번에는 draft 적용·정책 변경이 없다. 실제 join·MTU/direct/relay·서비스 인증 성공은 Apply/Bootstrap 이후 검증한다.
 
+#### UDP8472 위험과 k3s 가입 전 검증 gate
+
+**현재 통신 보안은 검증 완료가 아니다.** 일반 Allow All은 노드 이외의 허용된 Tailnet peer에도 UDP8472 도달 경로를 줄 수 있다. Public NSG 차단은 암호화된 Tailscale 경로 안의 peer별 권한을 제한하지 않는다. 실제 guest firewall/VXLAN 수신 조건에 따라 비노드 peer가 패킷을 주입할 위험이 있으므로, Kubernetes 인증 또는 Tailscale 암호화만으로 Flannel 접근 통제가 끝났다고 주장하지 않는다. 기존 ACL/UFW/노드/서비스는 이번에 변경하지 않는다.
+
+Azure Worker의 Tailscale 가입 이후 **k3s 설치/agent 시작/token 전달 전**, 별도 승인된 접근 시험에서 다음을 기록한다. 담당자는 SleepyMiny이며 날짜·source/destination 역할·프로토콜·경로·결과/오류만 요약하고 전체 정책/패킷 payload/credential은 Git 밖에 보관한다.
+
+| 검증 항목 | 방법과 합격 조건 |
+| --- | --- |
+| 실제 identity·정책 | 관리자 export로 전체 ACL/Grants·중첩 Allow All·device approval·태그 소유자를 보호된 경로에서 확인. 정책을 조회할 수 없으면 미검증 유지 |
+| guest 상태 | 세 노드의 UFW/nftables/iptables 유효 규칙·입력/forward 경로·인터페이스·8472 listener를 읽기 전용 확인; public NIC와 tailscale0를 구분 |
+| 노드 peer 허용 | 기존 Control Plane/Physical Worker ↔ Azure Worker의 각 방향 UDP8472 도달을 확인. 승인된 Azure guest 임시 UDP 수신/패킷 관측과 각 노드 송신으로 확인하고 기존 서비스 포트에 새 listener를 바인딩하지 않음 |
+| 비노드 peer 거부 | 승인된 일반 Tailnet peer(운영자 Host 포함) → Azure/기존 각 노드 UDP8472를 검사. 송신 증거와 목적지 firewall drop/counter 또는 정책 거부 증거를 함께 확보. 단순 무응답/UDP nc 종료 코드/패킷이 안 보인 사실만으로 차단 PASS를 주지 않음 |
+| public 접근 | 승인된 Tailnet 밖 경로 → Azure public UDP8472에서 NSG effective deny와 실제 관측을 대조; public allow 규칙을 추가하지 않음 |
+| 기존 서비스 보존 | 두 기존 노드 Ready, DNS/Pod 경로와 관측 Targets baseline 대조. direct/relay 경로를 별도로 기록; `tailscale ping`이나 TCP6443 성공은 UDP 차단의 근거가 아님 |
+
+기존 노드에 대한 패킷 송신/관측·임시 guest 수신기도 후속 시험 승인 범위에서만 수행하며 이번에는 실행하지 않았다. UDP8472가 k3s 설치 전 listen하지 않으면 위 시험은 경로/정책의 증거이며 Flannel 동작 성공 증거는 아니다. 가입 이후 별도 승인된 양방향 Pod/DNS/1 MiB 수용시험으로 실제 VXLAN과 MTU를 확인한다. 비노드 접근이 허용되거나 판정 불능이면 **k3s 가입을 보류**하고 현재 위험을 보고한다. 기존 Allow All을 그대로 둔 채 안전하다고 승인하지 않는다.
+
+**최소 권한 정책 초안 — 미적용:** 전용 Control Plane/Worker identity 소유 권한을 확인한 뒤, 허용 source를 역할별로 지정하고 나머지는 정책 기본 deny로 제한한다. 아래는 전체 Tailnet 의존성을 조사한 후 승인받을 정책 계약이며 실제 ACL/UFW 파일이 아니다.
+
+| Source → destination | 최소 허용 |
+| --- | --- |
+| 운영자 관리 identity → Azure Worker | 일반 OpenSSH TCP22; UDP8472 금지 |
+| 지정 Worker identities → Control Plane | TCP6443 |
+| Control Plane/승인된 monitoring scraper → 지정 노드 | 필요한 TCP10250만 허용; TLS/인증 별도 유지 |
+| 지정 Kubernetes 노드 identities ↔ 지정 노드 | UDP8472; 비노드 peer 제외 |
+| 기존 기타 서비스 | 검증된 의존성별 명시 허용; NodePort/관측 경로는 별도 역할 검토 |
+
+좁은 Grants 추가만으로 기존 Allow All은 사라지지 않는다. 승인된 전체 정책에서 광범위 규칙을 대체하는 방안과, guest `tailscale0` 입력에서 지정 노드 IP의 UDP8472만 허용하고 나머지를 거부하는 방안을 함께 검토한다. 기존 노드의 input/forward 순서, Established traffic, Pod forwarding·MTU, SSH 복구 경로를 확인한 뒤 정책 tests에 비노드 거부와 기존 서비스 허용을 넣는다. UFW 전체 활성화/초기화 또는 일괄 규칙 교체를 초안 실행 명령으로 제공하지 않는다. [Grants](https://tailscale.com/docs/features/access-control/grants).
+
+**롤백 초안:** 승인된 변경 직전 전체 정책·guest 유효 규칙·baseline을 private snapshot으로 보존하고 독립 관리 경로를 확보한다. 변경 후 기존 노드 Ready/관측/DNS 또는 관리 접근이 깨지면 가입을 중단하고 변경한 정책 revision/guest 규칙만 snapshot으로 복원한다. 재조회로 기존 서비스 회복을 확인한다. Allow All 복원은 원래의 비노드 위험도 되돌리므로 보안 PASS로 기록하지 않고 Azure k3s 가입 gate를 계속 닫는다. 기존 노드 재시작·방화벽 전체 해제·임의 태그 재할당으로 롤백하지 않는다.
+
 ### 5.4 승인 후 사용할 Bootstrap 실행 카드
 
 아래 명령은 **준비만 했으며 실행하지 않았다**. Saved Plan Apply, guest 설치/Tailscale 가입, SSH 예외 제거 Apply, 기존 cluster에 agent 가입/테스트는 각각 승인 범위를 확인하고 순서대로 실행한다. 실제 Azure IP와 host key가 생기기 전의 placeholder는 성공 증거가 아니다. 현재 사용자 소유 장치로 가입하며 Tailscale SSH 기능은 켜지 않는다.
@@ -379,7 +410,14 @@ set -euo pipefail
 OPSLOOP_PROBE_IMAGE=docker.io/library/busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
 OPSLOOP_TEST_NS="opsloop-arm64-nettest-$(date -u +%Y%m%d%H%M%S)"
 # 같은 이름이 있거나 get 자체가 실패하면 중단하고 원인을 조사한다.
-test -z "$("${OPSLOOP_KUBECTL[@]}" get namespace "$OPSLOOP_TEST_NS" --ignore-not-found -o name)"
+if ! OPSLOOP_NAMESPACE_RESULT="$("${OPSLOOP_KUBECTL[@]}" get namespace "$OPSLOOP_TEST_NS" --ignore-not-found -o name)"; then
+  printf 'Namespace 조회 실패: 리소스를 생성하지 않고 중단합니다.\n' >&2
+  exit 1
+fi
+if test -n "$OPSLOOP_NAMESPACE_RESULT"; then
+  printf 'Namespace가 이미 존재합니다: 리소스를 생성하지 않고 중단합니다.\n' >&2
+  exit 1
+fi
 "${OPSLOOP_KUBECTL[@]}" create namespace "$OPSLOOP_TEST_NS"
 OPSLOOP_PROBE_NODES=(opsloop-control sarmubuntuserver opsloop-azure-worker)
 for OPSLOOP_TEST_NODE in "${OPSLOOP_PROBE_NODES[@]}"; do
@@ -409,34 +447,24 @@ done
 
 ### 6.1 48시간 운영 시계와 비용 통제
 
-최종 감사에서 subscription 및 현재 유일한 Backend RG의 Budgets REST GET(`2024-08-01`)은 모두 빈 목록이었다. **월 US$20 Azure Budget Alert는 구성되지 않았다.** Billing account의 별도 알림까지 조사한 것은 아니다. 예산 약속과 실제 Budget 생성은 구분한다.
+**현재 상태 — 2026-10-13 독립 감사 수정 요청의 사용자 제공 정보:** Subscription Budget `opsloop-monthly-budget`은 **Monthly / 27,000 KRW**이고 **Actual 80%·Actual 100%·Forecasted 100% 알림은 설정 완료**, **Spending Limit은 On**이다. 이번에는 Azure 인증/GET/PUT을 실행하지 않았다. 이메일·Subscription ID·수신자 원본은 공개 문서에 추가하지 않는다. 설정 완료를 실제 이메일 전달 시험 성공으로 확대하지 않는다.
 
-**후속 승인 및 통화 확인:** 사용자는 Budget 생성과 운영자 이메일 수신을 승인했다. 2026-10-13 05:36 KST 해당 subscription의 연결된 MCA Billing Profile GET에서 실제 청구 통화 **KRW**를 확인했다. 아래 amount 20 USD 가정 초안은 그대로 실행할 수 없다. 이번 달 적용 환율과 정확한 KRW 금액을 사용자에게 확인한 뒤 생성하며, 임의 환산·scope 변경·Forecast 알림 생략은 금지한다. Subscription Budget은 계속 0개다. 이메일은 Git 밖 private 요청에서만 취급하고 공개 문서에는 복사하지 않는다. [최신 검증 기록](../experiments/p1-d-azure-backend-initialization.md#10-승인된-budget-사전-점검과-git-checkpoint-검증).
+**역사적 경과:** 최초 감사 GET 당시 Subscription/RG Budget은 빈 목록이었다. 05:36 KST에는 청구 통화 KRW를 확인했으나 승인된 원화 금액 미확정으로 생성을 보류했다. 당시 US$20 / `opsloop-monthly-warning` 제안은 현재 구성값이 아니다. 상세 조회·승인 기록은 [P1-D 9~10절](../experiments/p1-d-azure-backend-initialization.md#10-승인된-budget-사전-점검과-git-checkpoint-검증)에 보존하며 최신 상태는 11절을 따른다. 기존 Budget을 재생성하거나 덮어쓸 절차는 이번 작업에 포함하지 않는다.
 
-최소 제안은 subscription scope의 `opsloop-monthly-warning`, category Cost / timeGrain Monthly / amount 20, Actual 80%·100% 및 Forecasted 100% 알림이다. 원래 청구 통화가 USD인지 Cost Management에서 확인한 뒤 금액을 설정한다. Retail USD 가격/학생 credit 표기만으로 Budget 통화를 단정하지 않는다. 시작일은 해당 월 1일, 종료일과 실제 운영자 알림 수신자를 승인받는다. 기존 Owner 권한을 재사용하고 추가 RBAC·Action Group·Automation은 최소안에 포함하지 않는다. 사용자가 승인한 실제 수신자 주소는 Git 밖 요청 파일에만 둔다. 아래 REST 설정안은 **생성하지 않았으며**, Budget 생성·알림 수신자·기간의 별도 승인이 필요하다. [Budget API 계약](https://learn.microsoft.com/en-us/rest/api/consumption/budgets/create-or-update?view=rest-consumption-2024-08-01).
-
-```json
-{
-  "properties": {
-    "category": "Cost",
-    "amount": 20,
-    "timeGrain": "Monthly",
-    "timePeriod": {
-      "startDate": "2026-10-01T00:00:00Z",
-      "endDate": "2026-12-31T00:00:00Z"
-    },
-    "notifications": {
-      "Actual80": {"enabled": true, "operator": "GreaterThanOrEqualTo", "threshold": 80, "thresholdType": "Actual", "contactEmails": ["REPLACE_APPROVED_OPERATOR_EMAIL"]},
-      "Actual100": {"enabled": true, "operator": "GreaterThanOrEqualTo", "threshold": 100, "thresholdType": "Actual", "contactEmails": ["REPLACE_APPROVED_OPERATOR_EMAIL"]},
-      "Forecast100": {"enabled": true, "operator": "GreaterThanOrEqualTo", "threshold": 100, "thresholdType": "Forecasted", "contactEmails": ["REPLACE_APPROVED_OPERATOR_EMAIL"]}
-    }
-  }
-}
-```
-
-승인된 KRW 금액 확정 후 private `budget.request.json`(0600)의 금액/수신자/기간/통화를 검토하고 `az rest --method put --url "https://management.azure.com/subscriptions/$OPSLOOP_SUBSCRIPTION_ID/providers/Microsoft.Consumption/budgets/opsloop-monthly-warning?api-version=2024-08-01" --body "@$OPSLOOP_PRIVATE_DIR/budget.request.json" -o none`로 생성한다. 생성 전 같은 이름 존재 여부를 GET으로 확인해 기존 Budget을 덮어쓰지 않는다. 이후 GET으로 amount/notification enabled/recipient/기간을 확인하고 운영자가 수신 설정을 점검한다. Forecast API 오류 시 다른 조건으로 바꾸거나 임의 재시도하지 않고 오류를 분류해 보고한다. Azure Budget은 리소스를 정지시키지 않으며 비용 수집/평가가 지연되어 48시간 종료 타이머를 대신하지 못한다. [공식 Budget 운영 특성](https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-acm-create-budgets).
+Budget은 비용 알림이며 리소스 자동 중지 기능이 아니다. Spending Limit On도 학생 credit 한도에 따른 보호이며 월 27,000 KRW나 48시간의 사용자 지정 종료 한도와 같지 않다. 비용 데이터/알림 지연, 실제 credit 잔액·만료와 disk 과금 계층은 별도로 확인한다. [공식 Budget 운영 특성](https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-acm-create-budgets), [Spending Limit](https://learn.microsoft.com/en-us/azure/cost-management-billing/manage/spending-limit).
 
 **시간 기준:** Apply 직전 UTC를 시작 시각으로 기록해 provisioning/부분 실패 중 과금 시간도 보수적으로 포함한다. SleepyMiny가 시작+24/36/47시간의 수동 점검 알림과 최대 48시간 종료 확인을 등록한다. 알림·자동 종료 리소스는 이번 작업에서 생성하지 않았다. 아래는 Apply 승인 이후 준비할 기록 명령이다.
+
+**수동 점검 절차:** Apply 승인 전 SleepyMiny는 UTC 시작/종료·연락 가능한 대체 담당자·deallocate 실행 권한과 종료 승인을 확인하고 private 운영 기록을 준비한다. 아래 시점의 수동 확인을 현재 기본 통제로 유지한다. 연락 두절이나 인증 실패를 처리할 담당자를 확보하지 못하면 실험을 시작하지 않는다. Budget 알림이 오지 않아도 점검한다.
+
+| 시점 | 점검·조치·기록 |
+| --- | --- |
+| 시작+24시간 | 실제 누적 비용/Forecast·credit 잔액/만료·Budget 알림 설정, VM power state·actual OS disk 크기/과금 계층, 노드/서비스 상태와 실험 필요성 확인. 비용 데이터 지연은 별도 기록하며 예상 초과 시 승인된 조기 종료 |
+| 시작+36시간 | 비용 추세 재평가, 종료 UTC·담당자/대체 담당자 응답·관리-plane deallocate 권한 확인. workload/artifact 철수 계획 및 남는 disk/PIP/ACR/Backend 목록 점검 |
+| 시작+47시간 | 새 실험 중단, 종료에 필요한 artifact 보존 완료, 승인된 deallocate 착수. 담당자가 직접 완료 상태를 기다려 48시간 전에 확인할 여유 확보. 자동 장치를 나중에 구성해도 수동 확인 유지 |
+| 종료(최대 48시간) | GET instance view의 `PowerState/deallocated`와 실제 관측 UTC 확인·기록. 요청 수락/Job Completed/guest shutdown은 완료 증거가 아님. disk/PIP/ACR 잔존 비용 및 Backend 보존 확인, 추가 정리는 별도 승인 |
+
+각 점검은 private 기록에 예정/실제 UTC·담당자·관측 비용과 데이터 기준 시각·power state·오류/다음 조치를 남긴다. 인증/RBAC/API 오류나 deallocation 지연이면 즉시 대체 담당자에게 운영 절차로 인계해 승인된 동일 VM deallocate를 수행한다. 48시간 내 실제 종료 확인에 실패하면 시간 초과 사고로 기록하고 계속 확인하며 무단 연장을 허용하지 않는다. 기존 노드나 Backend를 정지/삭제하는 방법으로 처리하지 않는다.
 
 ```bash
 umask 077
@@ -461,7 +489,26 @@ az resource list --subscription "$OPSLOOP_SUBSCRIPTION_ID" --resource-group opsl
 
 기존 당일 공식 Retail 조회를 재사용한다. VM US$0.0464/h, PIP US$0.005/h, ACR Basic US$0.1666/day이며 합계 **48시간 US$2.80 / 730시간 US$42.59**에 미확정 OS disk·operations·network egress·Backend·세금 등이 더해진다. Deallocate 이후도 PIP/ACR만 월 환산 US$8.72 + disk/Backend가 남는다. 학생 US$100은 사용자 확인이며 실제 잔액/만료일은 미확인이다. 48시간 실험 승인은 지속 월간 운영이나 정리 실행 승인을 대신하지 않는다.
 
-Budget 미구성은 이번 Saved Plan의 무결성 실패가 아니라 **Apply 전 운영 통제의 미완료 항목**이다. 알림 생성 승인을 받아 구성하거나, 지연/미구성 위험을 명시적으로 수용하고 수동 감시 절차를 승인받기 전에는 Apply 준비 완료로 선언하지 않는다.
+Budget 미구성 항목은 사용자 제공 현재 상태로 해소됐다. Saved Plan 무결성 통과와 Apply 승인은 별개다. UDP8472 비노드 접근 검증 계획, 실제 disk 비용·credit 만료 위험 검토, 담당자가 실행 가능한 수동 48시간 종료 절차 및 별도 Apply 승인을 확인하기 전에는 배포 완료로 선언하지 않는다. 자동 Deallocate는 선택적 추가 안전장치이며 현재 구성되지 않았다.
+
+#### 별도 승인 후 구성할 자동 VM Deallocate 안전장치 — 설계 초안
+
+**이번에는 Automation account·identity/RBAC·runbook·schedule·알림·로컬 예약 작업을 생성하지 않는다.** 기존 Terraform root/backend/Saved Plan을 변경하지 않는 별도 운영 장치로 검토한다. 다음은 설계 선택이며 실제 구성/권한 부여/종료 시험은 각각 명시적 승인 후에만 진행한다. 현재 수동 종료 통제는 계속 필요하다.
+
+| 항목 | 제안 계약 |
+| --- | --- |
+| 실행 위치/시계 | Azure Automation cloud runbook의 UTC one-time schedule, **시작+47시간**에 실행해 48시간 전 완료 여유를 둠. Azure Worker나 운영자 Laptop의 전원/guest cron에 의존하지 않음. 실제 job 시작 지연은 수동 담당자가 감시 |
+| 고정 대상 | 승인된 private subscription/RG/VM 식별자 및 이번 실험의 VM ID와 생성 시점 일치 확인. 전체 구독 순회·이름 wildcard·다른 실험 VM 자동 중지 금지. 대상이 없거나 재생성돼 일치하지 않으면 오류/통보로 종료 |
+| 실행 identity/최소 권한 | Automation의 managed identity에 **그 VM scope만** custom role 할당: `Microsoft.Compute/virtualMachines/read`, `Microsoft.Compute/virtualMachines/instanceView/read`, `Microsoft.Compute/virtualMachines/deallocate/action`. start/delete/write, cluster/backend 접근·비밀 읽기 권한 없음. 실제 SDK의 추가 권한 요구는 승인 전 시험으로 확인하고 광범위 Contributor로 우회하지 않음 |
+| 구성 권한 | 설치 담당자의 Automation account/runbook/schedule 쓰기 및 custom role 정의/RBAC 할당 권한은 별도 확인·승인. 실행 identity에 자기 권한 부여나 subscription Owner를 부여하지 않음 |
+| 실행 동작 | UTC deadline·대상 확인 → 현재 power state GET → 이미 deallocated면 성공 → deallocate 요청 → GET instance view를 poll. guest shutdown 또는 allocated stop 사용 금지. PowerShell 구현 시 `Stop-AzVM -Force`의 deallocate 경로를 사용하고 `-StayProvisioned`를 사용하지 않음. [Stop-AzVM 계약](https://learn.microsoft.com/en-us/powershell/module/az.compute/stop-azvm) |
+| 실패 처리 | 429/일시적 5xx만 1/2/4분 간격 최대 3회 재시도, poll 포함 실행 예산 30분. 401/403·대상 불일치·예산 초과는 즉시 실패 기록/담당자 통보. job 미시작·Failed/Suspended·완료 후 Running/Stopped면 47시간 수동 절차로 인계. 자동 start나 권한 확대는 없음 |
+| 로그/알림 | private job ID·예정/실제 UTC·대상 별칭·단계·재시도·정제된 오류·최종 power state/관측 UTC 기록. 토큰/전체 API 응답/Subscription ID/수신자 이메일은 공개 로그 제외. private Job 조회 권한과 30일 보관·성공/실패 통보 경로를 승인 때 확정; 미통보도 수동 감시로 탐지 |
+| 비용 | Automation job 실행 분, 재시도/poll, 선택한 로그 저장/알림 비용을 별도 계산. 실제 구독의 무료 할당량·통화/단가 확인 전 무상으로 가정하지 않음. Deallocate 후 disk/PIP/ACR/Backend 비용 유지; 자동 destroy 없음 |
+| 실제 종료 검증 | Job Completed만으로 성공 처리 금지. runbook GET과 수동 담당자의 독립 GET 모두 `PowerState/deallocated` 및 관측 UTC를 확인. 승인된 시험 VM으로 대상 제한·이미 종료·401/403·API 지연·스케줄 미실행·알림 실패와 deadline 경과를 검증한 후 활성화 |
+| 롤백/만료 | 승인된 schedule 비활성화/연결 해제 → 진행 job·in-flight 요청 확인 → 전용 VM RBAC만 회수 → 소유한 자동 장치 정리. 이미 요청된 deallocate는 계속 완료될 수 있으며 자동 재시작하지 않음. 재시작은 별도 승인. one-time 실행 후 재예약 없이 수동 종료 절차로 복귀 |
+
+실행 코드·모듈 version·custom role·실제 schedule 시간과 알림 수신 설정은 후속 승인에서 구체화한다. Azure 스케줄러/API/알림 실패 가능성 때문에 이 초안을 보장된 48시간 종료나 현재 설치된 기능으로 기록하지 않는다. 설계 근거: [Automation schedule](https://learn.microsoft.com/en-us/azure/automation/shared-resources/schedules), [managed identity](https://learn.microsoft.com/en-us/azure/automation/enable-managed-identity-for-automation), [Compute RBAC operations](https://learn.microsoft.com/en-us/azure/role-based-access-control/resource-provider-operations#microsoftcompute), [Automation 비용](https://azure.microsoft.com/en-us/pricing/details/automation/), [VM 상태/과금](https://learn.microsoft.com/en-us/azure/virtual-machines/states-billing).
 
 ### 6.2 부분 실패와 별도 승인된 정리
 

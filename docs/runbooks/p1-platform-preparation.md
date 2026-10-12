@@ -55,7 +55,7 @@ az vm image show --location koreacentral --urn Canonical:ubuntu-24_04-lts:server
 
 testbed root에는 Entra/Azure CLI 인증을 사용하는 partial `azurerm` backend 선언과 비밀값 없는 설정 예제가 준비되어 있다. 실제 backend Storage/container/RBAC·보호/복구는 별도 준비 대상이다. [Azure 배포 준비 runbook](azure-arm64-deployment.md)의 절차로 승인된 backend 설정을 검토하고 인증은 실행 환경으로 공급한다. backend 준비 없이 plan/apply를 실행하지 않는다. 선언/인증/RBAC까지 확인된 뒤 `init` 및 plan을 실행하며 plan artifact는 source 밖 제한 권한 경로에 보관한다. 실제 변경 목록·가격·승인된 subscription을 검토한 뒤에만 **추가 사용자 승인을 받아 apply**한다. P1-A에서는 plan도 실행하지 않았다.
 
-Terraform VM `os_disk`가 managed OS disk를 관리한다. 임시 디스크는 datastore 용도로 사용하지 않는다. 기본 OS disk는 32 GiB Standard SSD LRS다. PIP는 private subnet VM의 명시적 outbound 경로이며 NSG inbound는 deny-all이다. [Azure 공식 outbound 설명](https://learn.microsoft.com/en-us/azure/virtual-network/ip-services/default-outbound-access).
+Terraform VM `os_disk`가 managed OS disk를 관리한다. 임시 디스크는 datastore 용도로 사용하지 않는다. 현재 기본 OS disk는 `os_disk_size_gb=null`로 원본 이미지 크기를 상속하는 Standard SSD LRS다. 실제 크기·과금 계층은 미확정이며 이전 32 GiB 가정은 현재 기본값이 아니다. PIP는 private subnet VM의 명시적 outbound 경로이며 NSG inbound는 deny-all이다. [Azure 공식 outbound 설명](https://learn.microsoft.com/en-us/azure/virtual-network/ip-services/default-outbound-access).
 
 ## P1-B node bootstrap — Terraform와 별도 승인
 
@@ -77,7 +77,7 @@ Terraform VM `os_disk`가 managed OS disk를 관리한다. 임시 디스크는 d
 
 ## 비용 / 승인 대상
 
-P1-A에서는 과금 리소스를 만들지 않았다. P1-B 비용 승인 대상은 ARM VM 사용 시간, 32 GiB managed SSD, Standard static Public IP, ACR SKU/저장량, 인터넷 outbound 전송, 별도 backend Storage다. 실제 가격·통화·세금·student credit 적용을 확인하지 않았으므로 월 비용을 추정 수치로 확정하지 않는다. 예산과 자동 종료/cleanup 시점을 배포 전에 정한다. deallocate는 compute 비용만 줄일 수 있고 나머지 리소스 비용은 남는다.
+P1-A에서는 과금 리소스를 만들지 않았다. 당시 P1-B 비용 검토는 ARM VM 사용 시간, 32 GiB managed SSD, Standard static Public IP, ACR SKU/저장량, 인터넷 outbound 전송, 별도 backend Storage를 가정했다. 당시 실제 가격·통화·세금·student credit 적용은 미확인이었고 월 비용을 확정하지 않았다. **현재는 disk 크기 상속·과금 계층 미확정이며 Saved Plan 9 create / 0 update / 0 delete 생성 완료, Apply 미실행**이다. Subscription Budget `opsloop-monthly-budget` 월 27,000 KRW·Actual 80%/100%·Forecasted 100% 알림 설정 완료, Spending Limit On은 사용자 제공 현재 상태다. [최신 기록](../experiments/p1-d-azure-backend-initialization.md#11-p1-독립-감사-후-현재-상태)과 [수동 48시간 점검·자동 Deallocate 초안](azure-arm64-deployment.md#61-48시간-운영-시계와-비용-통제)을 따른다. deallocate는 compute 비용만 줄일 수 있고 나머지 리소스 비용은 남는다.
 
 사용자 승인 대상은 Azure provider 등록·backend/리소스 생성 및 apply, Tailscale 장치 등록/ACL 변경, OS firewall·절전 설정, k3s 설치, ACR credential 발급·GitHub OIDC/RBAC/보호 설정, 삭제/cleanup이다. 현재 read-only 조회 및 로컬 파일 준비 승인을 이 변경들의 승인으로 확대하지 않는다.
 

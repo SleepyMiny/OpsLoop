@@ -137,10 +137,15 @@ def candidate_check(sku, region, usages, image, providers, zone, disk_gib):
     else:
         checks["image"] = "pass" if (str(image.get("architecture", "")).casefold() == "arm64" and
                                       image.get("generation") == "V2" and image.get("plan") is None) else "blocked"
-    try:
-        checks["disk_size"] = "pass" if disk_gib >= int(image["disk_gib"]) else "blocked"
-    except (KeyError, TypeError, ValueError):
-        checks["disk_size"] = "unknown"
+    if disk_gib is None:
+        # Terraform null omits the override: no minimum-size comparison is
+        # needed. This does not establish the inherited capacity/billing tier.
+        checks["disk_size"] = "pass"
+    else:
+        try:
+            checks["disk_size"] = "pass" if disk_gib >= int(image["disk_gib"]) else "blocked"
+        except (KeyError, TypeError, ValueError):
+            checks["disk_size"] = "unknown"
     registered = {p.get("namespace"): p.get("state") for p in (providers or [])}
     checks["providers"] = {p: ("pass" if registered.get(p) == "Registered" else
                                  "unknown" if p not in registered else "blocked") for p in PROVIDERS}
@@ -172,7 +177,8 @@ def main():
     parser.add_argument("--zone", choices=["1", "2", "3"], help="Optional selected zone; omission means regional deployment")
     parser.add_argument("--all-arm64", action="store_true", help="Discover all ARM64 series with >=2 vCPU/4 GiB and Gen2; read all quota families")
     parser.add_argument("--image-version", default="24.04.202609040")
-    parser.add_argument("--disk-gib", type=int, default=32)
+    parser.add_argument("--disk-gib", type=int, default=None,
+                        help="Explicit OS disk override in GiB; omit to inherit image size (Terraform default)")
     parser.add_argument("--cache-dir", type=Path, default=Path(".opsloop/azure-survey"))
     parser.add_argument("--cache-ttl-seconds", type=int, default=900)
     parser.add_argument("--refresh", action="store_true", help="Bypass cached observations before deployment review")
@@ -183,7 +189,7 @@ def main():
         parser.error("Use Azure region identifiers such as koreacentral")
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", options.image_version):
         parser.error("An exact numeric image version is required; latest is forbidden")
-    if options.disk_gib <= 0 or options.cache_ttl_seconds < 0:
+    if (options.disk_gib is not None and options.disk_gib <= 0) or options.cache_ttl_seconds < 0:
         parser.error("disk must be positive; cache TTL must be nonnegative")
     account_args = ["account", "show"]
     if options.subscription:
@@ -221,6 +227,7 @@ def main():
         results = list(pool.map(region_read, regions))
     report = {"generated_at": utc_now(), "subscription": account, "providers": providers,
               "image_urn": urn, "disk_gib": options.disk_gib, "regions": results,
+              "disk_mode": "inherit" if options.disk_gib is None else "override",
               "catalog_scope": "all ARM64 >=2 vCPU/4 GiB Gen2" if options.all_arm64 else "reviewed SKU allowlist",
               "deployment_gate": False,
               "remaining_checks": ["actual allocation capacity", "policy and RBAC", "subscription credit and expiry",

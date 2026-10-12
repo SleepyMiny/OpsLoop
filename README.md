@@ -78,7 +78,7 @@ Tailscale 실험망과 Multi-Architecture 이미지를 사용합니다. 이 구�
 - Physical Worker `sarmubuntuserver` (`100.82.241.77`): AMD64 Primary 실행 위치이며 기존 서비스·데이터를 보존합니다. Demo API는 아직 배치하지 않았습니다.
 - Azure ARM64 Worker: 고정 후보는 East Asia / `Standard_B2pls_v2` (ARM64, 2 vCPU / 4 GiB)입니다. Provider 등록과 실제 Remote Backend 초기화·연결 검증은 완료했습니다. 전용 Ed25519 키와 임시 /32 SSH 후 제거 절차, 최대 48시간 실험·월 US$20 경고·사용자 종료 책임을 확정했습니다. OS disk는 검증된 Provider 계약에 따라 원본 이미지 크기를 상속하도록 수정했습니다. 사용자 확인 일반 Allow All 규칙을 근거로 조건부 네트워크 허용을 검토했고 Saved Plan은 9개 생성·0개 수정·0개 삭제로 성공했습니다. private Plan 준비 gate는 true이며 Apply는 미승인입니다. 전체 Tailnet 정책·미래 가입/연결·디스크 과금 tier·credit 만료일은 미확인입니다. [Backend 연결 및 배포 준비 기록](docs/experiments/p1-d-azure-backend-initialization.md).
 
-Azure Budget 생성은 승인됐지만 실제 청구 통화가 KRW로 확인되어 원화 금액·환산 기준 확정 전 생성은 보류했습니다. 수신 이메일은 공개 저장소에 기록하지 않습니다. Budget은 자동 과금 차단 장치가 아닙니다.
+현재 Subscription Budget **`opsloop-monthly-budget`은 월 27,000 KRW**이며 Actual 80%·Actual 100%·Forecasted 100% 알림이 설정됐고 **Spending Limit은 On**입니다. 이는 이번 독립 감사 수정 요청에서 제공한 현재 상태이며 외부 재조회는 하지 않았습니다. 이전 Budget 미생성·KRW 금액 미확정 기록은 역사적 기록입니다. 이메일·Subscription ID는 공개 문서에 기록하지 않습니다. Budget은 알림이며 48시간 종료 타이머를 대신하지 않습니다. [최신 상태와 남은 운영 조건](docs/experiments/p1-d-azure-backend-initialization.md#11-p1-독립-감사-후-현재-상태).
 
 [관측 values](infra/observability/kube-prometheus-stack.values.yaml)는 기존 수동 배포 파일이며 chart `91.8.1`, release `opsloop-mon`, namespace `monitoring` 기준입니다. 읽기 전용 검증은 `python3 scripts/verify-platform.py --help`, Azure 조사·배포 전 조건 확인은 `python3 scripts/azure-arm64-survey.py --help`에서 시작합니다. [플랫폼 runbook](docs/runbooks/p1-platform-preparation.md)과 [Azure 배포 준비 절차](docs/runbooks/azure-arm64-deployment.md)에 승인 경계·state·bootstrap·cleanup을 기록합니다. 관리자 kubeconfig `~/.kube/opsloop.yaml`은 출력·복사·Git 추적하지 않습니다.
 
