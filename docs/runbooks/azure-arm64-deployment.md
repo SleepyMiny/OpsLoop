@@ -1,6 +1,6 @@
 # Azure ARM64 deployment / destroy runbook
 
-기준: [Architecture v0.1](../architecture/architecture-v0.1.md), [ADR-005](../adr/ADR-005-hybrid-multi-architecture-testbed.md), [P1 준비 절차](p1-platform-preparation.md), [P1-A inventory](../experiments/p1-a-environment-inventory.md), [현재 Azure ARM64 조사와 2단계 준비 결과](../experiments/p1-c-azure-arm64-candidates.md). 아래 배포·bootstrap·삭제 명령은 **후속 운영 절차**이며 이번 작업에서 실행하지 않았다. 로컬 구성 검증은 Azure 접근 권한·배포 승인·P1 완료를 대신하지 않는다.
+기준: [Architecture v0.1](../architecture/architecture-v0.1.md), [ADR-005](../adr/ADR-005-hybrid-multi-architecture-testbed.md), [P1 준비 절차](p1-platform-preparation.md), [P1-A inventory](../experiments/p1-a-environment-inventory.md), [기존 Azure 조사](../experiments/p1-c-azure-arm64-candidates.md), [최신 Backend 초기화 기록](../experiments/p1-d-azure-backend-initialization.md). 아래 VM 배포·bootstrap·삭제 명령은 **후속 운영 절차**이며 실행하지 않았다. 승인된 실제 Backend init과 연결 검증은 완료했다. 검증 통과는 VM 배포 승인·P1 완료를 대신하지 않는다.
 
 ## 1. 배포 계약과 현재 gate
 
@@ -18,7 +18,9 @@ Terraform root는 [`infra/terraform/p1`](../../infra/terraform/p1)다. Terraform
 | State | 별도 소유 remote backend; testbed destroy에 포함하지 않음 |
 | Secret 경계 | SSH private key, Tailscale auth key, k3s token, ACR pull credential, kubeconfig, Azure client secret을 Terraform·cloud-init·Git에 넣지 않음 |
 
-2026-10-12 재조회 결과: `Microsoft.Compute`는 Registered, Network / Storage / ContainerRegistry는 NotRegistered다. Korea Central regional total은 0/6, Dplsv6 family는 0/0으로 **선호 SKU quota gate가 실패**한다. 과거 `list-usage=[]` 결과를 현재 quota로 해석하지 않는다. 최신 regional/family quota와 대안은 [Azure ARM64 조사](../experiments/p1-c-azure-arm64-candidates.md)의 최종 기록에 대조한다. backend storage/config/RBAC, ACR 이름·정책·비용 승인·cleanup 책임도 준비 확인이 필요하다. `deployment_prerequisites_confirmed=false`를 유지하며 이번 작업에서는 plan을 실행하지 않았다.
+다음 10월 12일 조사 및 초기 10월 13일 정책 차단 기록은 역사적 증거다. Provider 미등록·Backend 미준비 설명은 이후 등록·구축과 이번 연결 검증으로 해소되었으며, 최신 상태는 아래 현재 후보와 [Backend 연결 기록](../experiments/p1-d-azure-backend-initialization.md)을 따른다.
+
+2026-10-12 재조회 당시 `Microsoft.Compute`는 Registered, Network / Storage / ContainerRegistry는 NotRegistered였다. Korea Central regional total은 0/6, Dplsv6 family는 0/0으로 **선호 SKU quota gate가 실패**했다. 과거 `list-usage=[]` 결과를 현재 quota로 해석하지 않는다.
 
 과거 Japan East의 B2pls_v2/B2ps_v2는 SKU object에서 Arm64 / V2 / accelerated networking 지원 / restrictions 빈 목록, regional cores 0/6, `standardBpsv2Family` 0/10 및 exact Ubuntu image를 확인했으나 이후 지역 정책 차단을 확인했다. 이는 역사적 증거이며 현재 배포 입력으로 사용하지 않는다. Terraform의 기본 D2pls_v6 값은 architecture 선호로 보존하고, 이번 실제 입력은 East Asia/B2pls_v2로 명시한다. B-series의 CPU credits/bursting은 D-series와 다르므로 Recovery Candidate의 지속 CPU 가용성을 동일하게 가정하지 않는다. 제한 없는 SKU/양수 quota도 capacity를 보장하지 않는다.
 
@@ -28,7 +30,7 @@ Terraform root는 [`infra/terraform/p1`](../../infra/terraform/p1)다. Terraform
 
 **2026-10-13 추가 차단 확인:** 활성 subscription Allowed Locations deny 정책은 `indonesiacentral`, `polandcentral`, `eastasia`, `norwayeast`, `malaysiawest`만 허용하며 Japan East VM은 예외가 아니다. 이전 SKU/쿼터 결과와 독립적인 차단이다. 정책을 변경/우회하지 않고 [최신 Phase A/B/C 기록](../experiments/p1-c-azure-arm64-candidates.md#2026-10-13-phase-abc-후속-확인)에 근거를 보존했다. 허용 지역의 ARM64 후보를 새로 검토하거나 적법한 정책 허용 경로를 확보하기 전 Japan East plan을 실행하거나 gate를 열지 않는다. Network/Storage/ContainerRegistry는 여전히 미등록이고 backend도 미준비다.
 
-**현재 후보 확정:** [허용 5개 지역 조사](../experiments/p1-c-azure-allowed-regions.md)에서 East Asia/B2pls_v2의 regional 0/6, Bpsv2 family 0/10, restrictions 빈 목록, ARM64/Gen2/NIC 및 exact Ubuntu image를 확인했다. East Asia는 위 정책 안에 있다. 기본 tfvars example과 아래 plan pair는 East Asia/B2pls_v2로 준비했다. provider/backend·image minimum disk·credit/expiry·bootstrap·capacity는 여전히 미준비/미검증이며 gate는 false다. 과거 Japan East 예제를 실행하지 않는다.
+**현재 후보 확정 (2026-10-13):** East Asia/B2pls_v2의 regional 0/6, Bpsv2 family 0/10, restrictions 빈 목록, ARM64/Gen2/NIC 및 exact Ubuntu image를 재확인했다. East Asia는 subscription Allowed Locations 정책 안에 있다. 세 Provider Registered, 기존 Backend의 CLI/Entra 인증·container scope RBAC·공인 IP 접근·실제 init/validate는 통과했다. 초기화 전 없던 State Blob이 초기화 후 존재하며 default workspace의 관리 리소스는 0개다. 사용자가 US$100 credit을 확인했지만 만료일·비용 상한·cleanup 책임은 미확정이다. image minimum disk·RSA 공개키·최초 bootstrap 경로/ACL·capacity는 미검증이고 gate는 false다. Plan은 실행하지 않았다. [상세 기록](../experiments/p1-d-azure-backend-initialization.md).
 
 배포 전 운영자가 승인된 subscription UUID, region과 ARM SKU, regional total 및 해당 family 각각의 `limit-currentValue >= 2`, SKU Location/Zone restrictions, exact image/minimum OS disk, 실제 가격·잔여 credit·종료 시점, RG/network/VM/ACR 권한·정책, 세 노드 route/CIDR, backend/RBAC를 다시 확인한다. positive quota나 SKU catalogue가 실제 allocation capacity를 보장하지 않는다. Kubernetes 포트 6443 / 10250 / UDP 8472 / NodePort는 public NSG에 열지 않는다.
 
@@ -49,7 +51,7 @@ terraform -chdir=infra/terraform/p1 validate
 
 ### 3.1 Provider 등록 — 별도 승인 후 실행할 명령
 
-현재 조사 기록에서 Compute만 Registered다. 다음 **세 namespace에 대한 등록 승인**이 먼저 필요하다. 등록은 subscription 설정 변경이며, 등록 성공은 정책/쿼터/capacity 통과를 뜻하지 않는다. 운영자는 대상이 승인된 Azure for Students 구독인지 먼저 확인하고 실패하면 즉시 중단한다. Network → Storage → ContainerRegistry 순서로 기다린 뒤 각각 상태를 확인한다. 이 문서 작성 중에는 실행하지 않았다. [공식 CLI](https://learn.microsoft.com/en-us/cli/azure/provider?view=azure-cli-latest#az-provider-register).
+현재 Compute 및 다음 세 Provider는 이미 Registered다. 아래는 이전 등록 준비 절차로 보존하며 **지금 다시 실행하지 않는다**. 향후 미등록 상태가 발견되면 해당 namespace의 별도 승인을 받은 뒤 진행한다. 등록 성공은 정책/쿼터/capacity 통과를 뜻하지 않는다. [공식 CLI](https://learn.microsoft.com/en-us/cli/azure/provider?view=azure-cli-latest#az-provider-register).
 
 ```bash
 set -euo pipefail
@@ -67,6 +69,8 @@ done
 Network는 VNet/subnet/NSG/NIC/PIP, Storage는 별도 state backend, ContainerRegistry는 기존 P1의 Basic ACR에 필요하다. 등록 담당자에게 subscription scope의 해당 `/register/action` 권한이 필요하다. 이미 Registered인 Compute를 다시 등록하거나 Terraform 자동 등록을 활성화하지 않는다.
 
 ### 3.2 최소 backend 구성과 최초 bootstrap
+
+Backend는 이미 별도 승인으로 구축되었고 이번에 실제 Terraform 연결을 확인했다. 다음 생성 절차는 재현성 기록이며 기존 Backend에는 재실행하지 않는다. 실값은 Git 밖 private 설정·운영 기록에만 보관한다.
 
 제안은 별도 `opsloop-state-rg`(eastasia), globally unique Storage account 하나, private `tfstate` container 하나다. `StorageV2`, `Standard_LRS`, Hot tier, HTTPS only, TLS ≥1.2, Azure 기본 암호화, blob anonymous access 및 Shared Key 금지로 구성한다. HNS/SFTP/NFS/Private Endpoint/NAT/PIP/VM은 backend 최소 구성에 포함하지 않는다. 공용 Blob endpoint는 활성화하되 default Deny + 운영자의 승인된 실제 public IPv4 한 개만 허용한다. Tailscale `100.x`는 public source IP가 아니며 동적 공인 IP 변경 시 승인된 규칙 갱신이 필요하다. 정책상 public endpoint가 금지되면 이 구성은 차단되고 Private Endpoint/접속 경로와 추가 비용을 별도 검토한다.
 
@@ -124,22 +128,22 @@ terraform -chdir=infra/terraform/p1 workspace show
 2. **provider preflight:** provider 등록 및 승인된 기존 RG/권한이 준비된 후, 같은 URN/ARM64 size/`storageProfile.osDisk.diskSizeGB=32`를 가진 검토된 ARM template로 `az deployment group validate --validation-level Provider`를 수행하는 방법이 있다. 별도 배포 프로젝트로 전환하지 않고 검증용 template만 사용한다. CLI 지원 여부와 Azure Policy/RBAC를 먼저 확인한다. provider의 disk-too-small 오류는 FAIL 근거지만, 성공 결과에 disk 호환성 검사가 명시되지 않으면 정확한 minimum 확인으로 간주하지 않는다. Terraform validate/plan이나 ARM의 Template-only 검증은 source image 크기 검증을 대신하지 않는다. 이번에는 template 생성이나 remote validation도 실행하지 않았다. [Provider validation CLI](https://learn.microsoft.com/en-us/cli/azure/deployment/group?view=azure-cli-latest#az-deployment-group-validate).
 3. **실제 생성 검증:** 위 경로가 충분한 근거를 제공하지 못하면 비용·리소스 생성의 별도 승인 후 실제 OS disk provisioning 및 VM boot로 확인해야 한다. 이는 현재 금지 범위이며, 지금 호환성 PASS로 기록하지 않는다. 64 GiB로 임의 증설해도 image minimum 증거가 생기지 않고 비용 tier가 바뀐다.
 
-실제 backend init/plan에 진입하기 전 다음을 모두 기록해야 한다. 부족한 항목은 승인이 있어도 검증 완료로 바꾸지 않는다.
+Backend init은 승인된 기존 account/container의 인증·접근·state 충돌 여부를 먼저 확인하고 수행한다. VM 입력·디스크·bootstrap gate와 구분하며 현재 init은 완료했다. **VM Plan**에 진입하기 전 다음을 모두 기록해야 한다. 부족한 항목은 승인이 있어도 검증 완료로 바꾸지 않는다.
 
 - 세 provider Registered; 승인된 구독/관리-plane 권한/전체 적용 Policy와 ACR global name 확인.
 - backend account/container, container Blob Data Contributor 및 firewall 접근, lease 잠금·복구/소유권 준비; 다른 state와 key 충돌 없음.
 - private tfvars의 East Asia/B2pls_v2/exact image/RSA 공개키와 32 GiB 호환성 근거; 실제 SSH 개인키·토큰은 포함하지 않음.
-- Azure for Students **잔액·만료일은 현재 미확인**. 확인 가능한 공식 경로의 근거와 비용 상한·종료 시점/cleanup 책임을 확보한다. spending limit On과 budget 없음은 충분한 운영 예산을 증명하지 않는다.
+- Azure for Students **US$100 credit은 사용자 확인, 만료일은 미확인**이다. 소비 이후 실잔액과 비용 상한·종료 시점/cleanup 책임을 확인한다. spending limit On과 budget 없음은 충분한 운영 예산을 증명하지 않는다.
 - 최초 관리 경로 승인(필요시 운영자 public /32 TCP 22만), 보호된 Tailscale 등록 및 k3s token-file 전달 절차; join은 `100.73.4.76:6443`, version은 `v1.35.9+k3s1`. Kubernetes 관리 포트는 인터넷에 열지 않음.
 - plan 직전 변화 가능한 quota/restrictions/policy/provider 상태만 재확인; 실제 allocation capacity는 apply 전 확정할 수 없다고 기록.
 
-**현재 결과:** 25개 Python 테스트 및 Terraform fmt/init(-backend=false)/validate 통과. 사용자가 만든 Observability values는 변경하지 않았다. 등록/backend/RBAC/image disk/credit·expiry/초기 bootstrap 조건이 남아 `deployment_prerequisites_confirmed=false`이며 실제 backend init/plan/apply/destroy를 실행하지 않는다. 후속 승인 범위는 (a) 세 provider 등록, (b) backend 생성·접근 제한·RBAC와 비용, (c) 보호된 입력/backend 접속 및 plan 검토다. 실제 worker 생성과 Tailscale/k3s bootstrap은 별도 후속 승인이다.
+**현재 결과:** 이번 25개 Python 테스트와 `fmt -check` / 실제 Azure Backend `init` / `validate` / `workspace show` / `state list`는 통과했다. 사용자가 만든 Observability values는 변경하지 않았다. image disk·RSA 공개키·최초 bootstrap/ACL·비용 및 종료 조건이 남아 `deployment_prerequisites_confirmed=false`이며 Plan/apply/destroy는 실행하지 않았다. 조건 충족 후 Plan은 이번 승인 범위다. 실제 worker 생성과 Tailscale/k3s bootstrap은 별도 후속 승인이다.
 
 ## 4. 계획 검토와 승인된 배포
 
 gate를 모두 충족한 후 운영자가 private tfvars의 `deployment_prerequisites_confirmed=true`를 설정한다. 이는 확인 기록이며 배포 권한을 부여하지 않는다. `p1.tfvars`의 placeholder subscription/ACR 이름/RSA 공개키를 승인된 실값으로 교체하고 exact image를 유지한다. public SSH가 필요하면 승인된 운영자 현재 public IPv4 `/32`만 넣는다. null이면 SSH 22도 닫힌다. 새 VM에는 Terraform이 Tailscale을 설치하지 않으므로 최초 bootstrap에는 이 임시 예외 또는 별도 승인된 관리 경로가 있어야 한다. tailnet 외 Kubernetes 포트를 추가하는 plan은 거부한다.
 
-다음 명령은 현재 검토 후보 **East Asia/B2pls_v2**를 명시한다. **현재는 provider/backend/image disk 등 조건이 남아 실행하지 않는다.** backend와 정책을 포함한 모든 차단 조건 해소 후에만 실행한다. private 입력의 region/size를 같은 pair로 유지한다. Korea/Japan으로 되돌리거나 zone을 선택하면 정책/SKU 계약을 새로 검토한다. provider 등록은 Terraform 밖에서 명시적 사용자 승인 후 수행하고 완료 상태를 확인한다.
+다음 명령은 현재 검토 후보 **East Asia/B2pls_v2**를 명시한다. **현재는 image disk·RSA 공개키·최초 bootstrap/ACL·비용 및 종료 조건이 남아 실행하지 않는다.** 모든 차단 조건 해소 후에만 실행한다. private 입력의 region/size를 같은 pair로 유지한다. `p1.tfvars.draft`는 미완성 초안이며 `p1.tfvars`로 사용하지 않는다. Korea/Japan으로 되돌리거나 zone을 선택하면 정책/SKU 계약을 새로 검토한다. Provider는 이미 Registered이며 Terraform 자동 등록은 금지 상태를 유지한다.
 
 ```bash
 terraform -chdir=infra/terraform/p1 plan -input=false -lock-timeout=5m -var-file="$OPSLOOP_PRIVATE_DIR/p1.tfvars" -var='location=eastasia' -var='vm_size=Standard_B2pls_v2' -out="$OPSLOOP_PRIVATE_DIR/p1.tfplan"

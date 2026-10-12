@@ -4,7 +4,7 @@
 
 OpsLoop는 Kubernetes 장애를 근거 기반 규칙으로 분류하고, 자원 상태를 고려한 Runtime Recovery를 시도하도록 설계된 프로젝트입니다. 운영 단계에서 해결되지 않는 반복 Application Failure만 독립된 Engineering Runner로 넘겨 Evidence 수집, 코드 분석·수정, Build/Test Feedback, Verification, Pull Request 생성으로 연결합니다.
 
-> **현재 상태 (2026-10-12): P1-B 로컬 AMD64 2-Node k3s와 P2 Observability 부분 구축.** 이번 읽기 전용 조회에서 `opsloop-control`·`sarmubuntuserver`의 Ready, Tailscale Node IP, k3s `v1.35.9+k3s1`, Helm values 일치, PVC Bound, 관측 Pod 정상 및 Prometheus Targets 17개 UP를 재확인했습니다. Control Plane → Worker Pod HTTP/DNS와 Grafana 화면 시각화는 사용자 제공 증거로 구분합니다. Azure ARM64·ACR/OIDC·remote state는 미완료여서 **P1 전체 미완료**, Demo API·Multi-Arch CI는 미구현이어서 **P2 전체 미완료**입니다. CRD·Controller·Runner와 P3~P8 기능도 저장소에 구현되어 있지 않습니다.
+> **현재 상태 (2026-10-13): P1-B 로컬 AMD64 2-Node k3s와 P2 Observability 부분 구축, Azure Remote Backend 연결 완료.** 10월 12일 조회에서 Helm values 일치, PVC Bound, 관측 Pod 정상 및 Prometheus Targets 17개 UP를 확인했으며 이는 당시 관측값입니다. 10월 13일에는 `opsloop-control`·`sarmubuntuserver`의 Ready, Tailscale Node IP, k3s `v1.35.9+k3s1`을 재확인했습니다. Control Plane → Worker Pod HTTP/DNS와 Grafana 화면 시각화는 사용자 제공 증거로 구분합니다. 승인된 실제 backend init/validate와 빈 Remote State 연결 검증은 통과했습니다. Azure ARM64·ACR/OIDC는 미구축이어서 **P1 전체 미완료**, Demo API·Multi-Arch CI는 미구현이어서 **P2 전체 미완료**입니다. CRD·Controller·Runner와 P3~P8 기능도 저장소에 구현되어 있지 않습니다.
 
 ## 프로젝트의 중심
 
@@ -76,7 +76,7 @@ Tailscale 실험망과 Multi-Architecture 이미지를 사용합니다. 이 구�
 - Arch Host `archgram` (`100.80.16.28`): 개발·원격 관리·Engineering Runner 실행 위치이며 Kubernetes Node가 아닙니다.
 - VM `opsloop-control` (`100.73.4.76`): 단일 Control Plane, 4 vCPU / 8 GiB / 80 GiB; 관측 스택과 향후 Recovery Candidate입니다.
 - Physical Worker `sarmubuntuserver` (`100.82.241.77`): AMD64 Primary 실행 위치이며 기존 서비스·데이터를 보존합니다. Demo API는 아직 배치하지 않았습니다.
-- Azure ARM64 Worker: 현재 우선 후보는 Japan East / `Standard_B2pls_v2` (ARM64, 2 vCPU / 4 GiB)입니다. 구독 quota·SKU·이미지 조회는 통과했으나 provider 등록·이미지 최소 disk·backend·비용/크레딧·capacity 확인이 남았으며 실제 생성·조인은 수행하지 않았습니다.
+- Azure ARM64 Worker: 고정 후보는 East Asia / `Standard_B2pls_v2` (ARM64, 2 vCPU / 4 GiB)입니다. Provider 등록과 실제 Remote Backend 초기화·연결 검증은 완료했습니다. 이미지의 32 GiB 호환성, RSA 공개키·최초 bootstrap 경로·ACL, 비용 상한·종료 책임과 credit 만료일은 미확정입니다. Plan은 실행하지 않았고 배포 gate는 false입니다. [Backend 연결 및 배포 준비 기록](docs/experiments/p1-d-azure-backend-initialization.md).
 
 [관측 values](infra/observability/kube-prometheus-stack.values.yaml)는 기존 수동 배포 파일이며 chart `91.8.1`, release `opsloop-mon`, namespace `monitoring` 기준입니다. 읽기 전용 검증은 `python3 scripts/verify-platform.py --help`, Azure 조사·배포 전 조건 확인은 `python3 scripts/azure-arm64-survey.py --help`에서 시작합니다. [플랫폼 runbook](docs/runbooks/p1-platform-preparation.md)과 [Azure 배포 준비 절차](docs/runbooks/azure-arm64-deployment.md)에 승인 경계·state·bootstrap·cleanup을 기록합니다. 관리자 kubeconfig `~/.kube/opsloop.yaml`은 출력·복사·Git 추적하지 않습니다.
 

@@ -2,7 +2,7 @@
 
 기준: [Architecture v0.1](architecture/architecture-v0.1.md), 2026-10-07.
 
-**현재 (2026-10-12) P1-B 로컬 2-Node AMD64 k3s와 P2 관측 스택이 부분 구축되었다. Azure ARM64·ACR/OIDC·remote state 및 네트워크 전체 수용시험이 남아 P1 DoD는 미완료다. Demo API·Multi-Arch CI가 없어 P2 DoD도 미완료다.** 저장소 조사에서 P3~P8 기능 코드·CRD·Runner·workflow는 발견되지 않았다. 당시 [P1-A Inventory](experiments/p1-a-environment-inventory.md)는 보존하고 [P1-B 로컬 검증](experiments/p1-b-local-platform.md), [Observability 검증](experiments/p2-observability-verification.md), [Azure 후보 조사](experiments/p1-c-azure-arm64-candidates.md)에 사용자 증거와 이번 명령 결과를 구분한다.
+**현재 (2026-10-13) P1-B 로컬 2-Node AMD64 k3s와 P2 관측 스택이 부분 구축되었고, 실제 Remote Backend 초기화·연결 검증이 완료되었다. Azure ARM64·ACR/OIDC 및 네트워크 전체 수용시험이 남아 P1 DoD는 미완료다. Demo API·Multi-Arch CI가 없어 P2 DoD도 미완료다.** 저장소 조사에서 P3~P8 기능 코드·CRD·Runner·workflow는 발견되지 않았다. 당시 [P1-A Inventory](experiments/p1-a-environment-inventory.md)는 보존하고 [P1-B 로컬 검증](experiments/p1-b-local-platform.md), [Observability 검증](experiments/p2-observability-verification.md), [Azure 후보 조사](experiments/p1-c-azure-arm64-candidates.md), [Backend 연결 검증](experiments/p1-d-azure-backend-initialization.md)에 사용자 증거와 명령 결과를 구분한다.
 
 ## 진행 원칙
 
@@ -70,9 +70,9 @@ Phase 0 분석에서 공식 문서와 설치된 Codex CLI interface를 확인하
 
 ### 결과물
 
-Terraform·bootstrap 구성, 환경 점검표, network 검증 결과, state 보관·복구와 cleanup runbook. P1-A 정적 조사 기록에 이어 P1-B의 기존 수동 구축을 자산화한다. 사용자 기록에서 두 로컬 노드 Ready와 Control Plane → Worker DNS/Pod IP HTTP가 확인되었으며 역방향·MTU·큰 payload·WAN relay·장애 복구는 미검증이다. Azure provider·quota의 최신 값은 [별도 조사](experiments/p1-c-azure-arm64-candidates.md)를 따른다. backend 준비·ARM 생성/조인·3-Node 검증·ACR/OIDC·backup/restore가 남아 Terraform 배포 gate는 닫힌 상태로 유지한다.
+Terraform·bootstrap 구성, 환경 점검표, network 검증 결과, state 보관·복구와 cleanup runbook. P1-A 정적 조사 기록에 이어 P1-B의 기존 수동 구축을 자산화한다. 사용자 기록에서 두 로컬 노드 Ready와 Control Plane → Worker DNS/Pod IP HTTP가 확인되었으며 역방향·MTU·큰 payload·WAN relay·장애 복구는 미검증이다. Azure provider·quota와 Backend 연결의 최신 값은 [10월 13일 기록](experiments/p1-d-azure-backend-initialization.md)을 따른다. ARM 생성/조인·3-Node 검증·ACR/OIDC·backup/restore가 남아 Terraform 배포 gate는 닫힌 상태로 유지한다.
 
-이번 작업의 로컬 `fmt`, `init -backend=false`, `validate` 결과는 [Azure 준비 runbook](runbooks/azure-arm64-deployment.md)에 기록한다. 선언형 코드·정적 검증 통과는 실제 allocation·배포·삭제/재생성 성공을 뜻하지 않는다.
+기존 로컬 `init -backend=false`에 이어 승인된 실제 Azure backend `init`, `fmt -check`, `validate` 및 빈 State 연결 검증을 통과했다. [Azure 준비 runbook](runbooks/azure-arm64-deployment.md)과 [연결 기록](experiments/p1-d-azure-backend-initialization.md)을 따른다. 초기화 전 State Blob은 없었고 초기화 후 181바이트 Blob이 존재하며 관리 리소스는 0개다. Plan은 미실행이다. 선언형 코드·정적 검증 통과는 실제 allocation·배포·삭제/재생성 성공을 뜻하지 않는다.
 
 ## P2 — Demo API·이미지·Observability
 

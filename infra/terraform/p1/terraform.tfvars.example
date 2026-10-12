@@ -5,10 +5,12 @@
 # ARM64, 2 vCPU/4 GiB, accelerated networking, restrictions [], regional 0/6,
 # standardBpsv2Family 0/10, exact Ubuntu image Arm64/V2/plan null confirmed.
 # B-series CPU credits differ from Dplsv6; actual capacity is unverified.
-# Compute Registered; Network/Storage/ContainerRegistry NotRegistered.
+# Compute/Network/Storage/ContainerRegistry Registered; no auto-registration.
 # Exact image minimum OS disk size is unknown; 32 GiB remains conditional.
-# Backend, credit/expiry, RBAC and bootstrap still require verification.
+# Remote backend init/connection verified; real config stays outside Git.
+# User-confirmed credit: USD 100; expiry, budget and bootstrap unresolved.
 # Evidence: docs/experiments/p1-c-azure-allowed-regions.md.
+# Latest: docs/experiments/p1-d-azure-backend-initialization.md.
 # Procedures: docs/runbooks/azure-arm64-deployment.md.
 deployment_prerequisites_confirmed = false
 # Proposed address ranges do not overlap these supplied ranges:
@@ -33,7 +35,7 @@ vm_size                   = "Standard_B2pls_v2"
 vnet_cidr                 = "10.80.0.0/16"
 subnet_cidr               = "10.80.1.0/24"
 os_disk_size_gb           = 32
-bootstrap_ssh_source_cidr = null
+bootstrap_ssh_source_cidr  = null
 # Optional temporary operator exception, never a wider prefix:
 # bootstrap_ssh_source_cidr = "203.0.113.10/32"
 # This deployment candidate is fixed; region/size changes need another review.
