@@ -1,0 +1,8 @@
+# Nonsecret P1-B template; Azure and Physical workers each need unique identity.
+node-name: REPLACE_WITH_WORKER_NODE_NAME
+node-ip: REPLACE_WITH_WORKER_TAILSCALE_IPV4
+server: https://REPLACE_WITH_LAPTOP_VM_TAILSCALE_IPV4:6443
+# Created separately on the node by the authorized bootstrap operator, mode 0600.
+# Never supply token content to Terraform, cloud-init, Git or CLI arguments.
+token-file: /etc/rancher/k3s/agent-token
+flannel-iface: tailscale0

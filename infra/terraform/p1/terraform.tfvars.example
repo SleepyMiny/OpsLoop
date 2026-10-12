@@ -1,0 +1,38 @@
+# Nonsecret example. Subscription, ACR name and SSH key are placeholders.
+# Parent inventory: exact image below confirmed in koreacentral and japaneast
+# (Arm64, V2, plan null). koreacentral is a tentative deployment candidate.
+# WARNING: Keep deployment_prerequisites_confirmed=false until P1-B verification;
+# quota is unresolved and the Zone 2 restriction below remains in effect.
+# D2pls_v6 koreacentral restriction: Zone 2 NotAvailableForSubscription, not
+# a Location restriction. This does not prove capacity or usable quota.
+# Japan fallback: japaneast Standard_D2pls_v5, restrictions [], 2 vCPU / 4 GiB;
+# absence of SKU restrictions does not confirm quota or deployment capacity.
+# southeastasia excluded: Location NotAvailableForSubscription restriction.
+# Compute, Network, ContainerRegistry and Storage were NotRegistered.
+# Empty quota results in three regions remain unresolved, not confirmed zero.
+deployment_prerequisites_confirmed = false
+# Proposed address ranges do not overlap these supplied ranges:
+# LAN 192.168.45.0/24, Docker 172.17.0.0/16, Tailscale 100.64.0.0/10,
+# Pod 10.42.0.0/16, Service 10.43.0.0/16. These are not Azure resources.
+# Additional host/VPN routes and subnet containment need inventory review if
+# these defaults change; Terraform schema validation does not verify routing.
+subscription_id = "00000000-0000-0000-0000-000000000000"
+location        = "koreacentral"
+acr_name        = "REPLACEWITHUNIQUENAME"
+acr_sku         = "Basic"
+ssh_public_key  = "REPLACE_WITH_OPENSSH_RSA_PUBLIC_KEY"
+
+ubuntu_image = {
+  publisher = "Canonical"
+  offer     = "ubuntu-24_04-lts"
+  sku       = "server-arm64"
+  version   = "24.04.202609040"
+}
+
+vm_size                   = "Standard_D2pls_v6"
+vnet_cidr                 = "10.80.0.0/16"
+subnet_cidr               = "10.80.1.0/24"
+os_disk_size_gb            = 32
+bootstrap_ssh_source_cidr = null
+# Optional temporary operator exception, never a wider prefix:
+# bootstrap_ssh_source_cidr = "203.0.113.10/32"

@@ -2,7 +2,7 @@
 
 기준: [Architecture v0.1](architecture/architecture-v0.1.md), 2026-10-07.
 
-**현재 상태는 P0 설계·문서화다. P1~P8 기능·환경은 미구현이며 아래 DoD는 향후 수용 기준이다.** 문서에 적힌 명령·시나리오가 실행되거나 통과했다는 의미가 아니다.
+**현재 P1-A 환경 조사와 검토용 Terraform 정적 구성을 준비했다. 실제 플랫폼은 미구축이고 P1 DoD는 미완료다. P2~P8 기능·환경은 미구현이다.** 실제 증거는 [P1-A Inventory](experiments/p1-a-environment-inventory.md)와 [P1 runbook](runbooks/p1-platform-preparation.md)에 한정한다.
 
 ## 진행 원칙
 
@@ -19,7 +19,7 @@
 | Phase | 범위 | 선행조건 | 상태 |
 | --- | --- | --- | --- |
 | P0 | Architecture·ADR·계약·범위·환경 가정 | 요구사항 | 설계 기준 문서화 |
-| P1 | Terraform·Tailscale·3-Node k3s·ACR·OIDC 기반 | P0, 환경 적합성 | 미착수 |
+| P1 | Terraform·Tailscale·3-Node k3s·ACR·OIDC 기반 | P0, 환경 적합성 | P1-A 조사·정적 준비; P1-B 미실행 |
 | P2 | Demo API·Multi-Arch pipeline·관측 stack | P1 | 미착수 |
 | P3 | ObserveOnly Controller·분류·후보 평가·정책 | P2 | 미착수 |
 | P4 | Runtime 실행·검증·guardrail·Demo A | P3 | 미착수 |
@@ -70,7 +70,7 @@ Phase 0 분석에서 공식 문서와 설치된 Codex CLI interface를 확인하
 
 ### 결과물
 
-Terraform·bootstrap 구성, 환경 점검표, network 검증 결과, state 보관·복구와 cleanup runbook. 현재 문서화 작업에서는 생성하지 않는다.
+Terraform·bootstrap 구성, 환경 점검표, network 검증 결과, state 보관·복구와 cleanup runbook. P1-A에서 검토용 Terraform·non-secret node 예제·Inventory·runbook을 작성했다. provider 미등록·quota 미확인·두 Ubuntu 노드 미식별로 배포 gate는 닫혀 있다. backend·bootstrap·3-Node·network 실행 검증은 P1-B에 남는다.
 
 ## P2 — Demo API·이미지·Observability
 

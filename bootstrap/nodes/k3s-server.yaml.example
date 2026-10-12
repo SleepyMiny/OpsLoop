@@ -1,0 +1,16 @@
+# Nonsecret P1-B template; not installed or executed in P1-A.
+# Replace node identity/IP and verify a supported, pinned k3s version first.
+node-name: REPLACE_WITH_LAPTOP_VM_NODE_NAME
+node-ip: REPLACE_WITH_LAPTOP_VM_TAILSCALE_IPV4
+flannel-iface: tailscale0
+flannel-backend: vxlan
+disable:
+  - traefik
+  - servicelb
+cluster-cidr: 10.42.0.0/16
+service-cidr: 10.43.0.0/16
+cluster-dns: 10.43.0.10
+tls-san:
+  - REPLACE_WITH_LAPTOP_VM_TAILSCALE_IPV4
+write-kubeconfig-mode: "0600"
+# Keep the generated server token and kubeconfig outside Git/Terraform.

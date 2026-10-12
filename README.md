@@ -4,7 +4,7 @@
 
 OpsLoop는 Kubernetes 장애를 근거 기반 규칙으로 분류하고, 자원 상태를 고려한 Runtime Recovery를 시도하도록 설계된 프로젝트입니다. 운영 단계에서 해결되지 않는 반복 Application Failure만 독립된 Engineering Runner로 넘겨 Evidence 수집, 코드 분석·수정, Build/Test Feedback, Verification, Pull Request 생성으로 연결합니다.
 
-> **현재 상태: Phase 0 Architecture v0.1 문서화.** 기능, CRD, Controller, Runner, CI/CD, Terraform, Kubernetes 환경은 아직 구현하거나 구축하지 않았습니다. 이 저장소의 동작 설명은 구현 목표와 수용 기준이며, 시연 성공이나 성능 측정 결과가 아닙니다.
+> **현재 상태: Phase 1-A 환경 조사와 검토용 Terraform 준비.** Terraform 정적 구성과 non-secret 예제는 작성했으며 실제 Azure·Kubernetes 환경은 구축하지 않았습니다. 기능, CRD, Controller, Runner, CI/CD는 미구현입니다. provider 등록·quota·두 Ubuntu 노드 확인이 필요하며 P1 배포 준비 완료를 뜻하지 않습니다.
 
 ## 프로젝트의 중심
 
@@ -71,7 +71,7 @@ Tailscale 실험망과 Multi-Architecture 이미지를 사용합니다. 이 구�
 | [ADR-004: Engineering 경계](docs/adr/ADR-004-engineering-recovery-boundary.md) | Runner, Codex, 검증·게시 권한 분리 |
 | [ADR-005: Hybrid / Multi-Arch Testbed](docs/adr/ADR-005-hybrid-multi-architecture-testbed.md) | Tailscale, Azure, ACR, CI/CD, Production 구분 |
 
-개발 순서는 **환경 적합성 확인 → 플랫폼 → ObserveOnly → Runtime Demo A → Incident Bundle → Engineering Demo B**입니다. 현재 실행 가능한 설치·빌드 명령은 제공하지 않습니다. 향후 실제 파일과 검증 결과가 생기면 해당 Phase에서 추가합니다.
+개발 순서는 **환경 적합성 확인 → 플랫폼 → ObserveOnly → Runtime Demo A → Incident Bundle → Engineering Demo B**입니다. P1-A 결과는 [환경 Inventory](docs/experiments/p1-a-environment-inventory.md), [P1 runbook](docs/runbooks/p1-platform-preparation.md), [Terraform 구성](infra/terraform/p1/main.tf)에 기록했습니다. 로컬 fmt/init/validate만 수행하며 실제 설치·배포는 P1-B의 별도 승인 대상입니다.
 
 ## P1 전에 필요한 환경 확인
 
