@@ -4,7 +4,7 @@
 
 ## 결정에 대한 답
 
-**현재 읽기 전용 근거로는 Japan East / Standard_B2pls_v2가 첫 후보**다. 2 vCPU / 4 GiB / ARM64 / Gen2 / Accelerated Networking 지원, 지역·family 쿼터 여유와 빈 SKU restrictions를 함께 확인했다. 이는 배포 허가나 allocation 성공 보장이 아니다. Network·Storage·ContainerRegistry 미등록, OS 이미지 최소 디스크 크기 미확인, 실제 capacity·RBAC/policy·잔여 credit·backend·비용 상한이 남아 **배포 gate는 닫혀 있다**.
+**2026-10-12 조사에서는 Japan East / Standard_B2pls_v2가 첫 후보였지만, 2026-10-13에는 구독의 활성 지역 deny 정책으로 배포 불가임을 확인했다.** SKU의 2 vCPU / 4 GiB / ARM64 / Gen2 / Accelerated Networking 지원, 빈 restrictions 및 이전 쿼터 여유는 정책 허용을 대신하지 않는다. 아래 Phase A/B/C 후속 기록에서 현재 제약을 확인한다. Network·Storage·ContainerRegistry 미등록, OS 이미지 최소 디스크 크기 미확인, 잔여 credit·backend 등도 남아 **배포 gate는 닫혀 있다**.
 
 ADR-005의 선호 Standard_D2pls_v6는 유지되는 설계 기준이다. 현 구독에서는 조사한 세 지역 모두 해당 family limit=0이어서 즉시 사용할 후보로 추천할 수 없다. Bpsv2 선택은 burstable 성능을 수용하는 실험상의 대안이며 실제 native ARM Demo·부하·복구 검증 후 결정해야 한다. 이 조사로 architecture를 변경하거나 P1 완료를 선언하지 않는다.
 
@@ -139,3 +139,38 @@ python3 -m unittest discover -s tests -p 'test_azure_arm64_survey.py' -v
 [Students 일반 조건](https://learn.microsoft.com/en-us/azure/cost-management-billing/manage/azurestudents-subscription-disabled)은 US$100/12개월이며 이는 현재 잔액이 아니다. 실제 사용 가능한 잔액을 `R` USD로 확인한 후 위 30일 비교값 기준 유지 가능 기간을 `30 × R / 42.102`일 이하로 추산하되, credit 만료일과 다른 사용료를 함께 적용한다. 실제 잔액·만료 확인 전 지속 운영을 승인할 비용 근거가 부족하다. credit/기간 소진 시 구독이 비활성화될 수 있어 recovery candidate 가용성에도 영향을 준다.
 
 **현재 Azure 배포 불가: 조건부 후보를 준비했으나 provider·exact image disk·backend·credit/budget·bootstrap/정책 조건이 남는다.** 실제 capacity는 읽기 전용 조회로 보장할 수 없으며 이후 승인된 allocation 시 결과를 분리 기록한다. 이번 단계에는 backend init 연결, Terraform plan/apply/destroy, provider 등록 및 VM/network/storage/ACR 생성·변경을 실행하지 않았다. P1/P2 전체 완료 상태를 변경하지 않았다.
+
+## 2026-10-13 Phase A/B/C 후속 확인
+
+Azure snapshot은 **2026-10-13 01:19 KST**(2026-10-12 16:19 UTC), 이후 정책 조건을 추가 검토했다. 대상 commit은 `4a4abd9`, `f26c125`다. 기존 다중 지역 SKU/쿼터/가격 조사는 반복하지 않고 현재 Japan East SKU restrictions·exact image·provider·spending limit·budget·정책·deny 및 backend에 필요한 기존 Storage 유무를 확인했다.
+
+### 새로 확정한 지역 정책 차단
+
+subscription scope에 적용되는 정책 1개가 `enforcementMode=Default`, `effect=deny`, `listOfAllowedLocations`를 사용한다. assignment의 실 파라미터와 definition 조건을 읽고 Japan East VM에 적용됨을 확인했다. 허용 지역은 다음뿐이다.
+
+```text
+indonesiacentral
+polandcentral
+eastasia
+norwayeast
+malaysiawest
+```
+
+definition의 `allOf`는 location이 허용 목록 밖이며 global이 아니고, type이 `Microsoft.AzureActiveDirectory/b2cDirectories`가 아닌 경우를 검사한다. VM은 type 예외가 아니다. 따라서 **Japan East B2pls_v2 VM은 활성 정책에 의해 차단**된다. Korea Central과 Japan West도 허용 목록 밖이다. 현재 구독 scope의 deny assignments 응답은 0개였지만 Azure Policy deny는 별개이며 이를 서로 상쇄하지 않는다. 정책/RBAC를 변경하거나 우회하지 않았다.
+
+Japan East SKU 조회는 ARM64, 2 vCPU, 4 GiB, Hyper-V `V1,V2`, accelerated networking True, restrictions `[]`, zone `[1]`를 반환했다. exact Ubuntu image는 Arm64/V2/Linux/plan null로 계속 조회됐다. 이 두 조회 성공은 **정책상 배포 가능성이나 capacity를 입증하지 않는다**. 기존 쿼터 수치(2026-10-12 regional 0/6, Bpsv2 family 0/10)를 재사용했으며 최신 실측으로 날짜를 바꾸지 않았다.
+
+### 나머지 준비 상태 및 검증
+
+- Provider: Compute Registered; Network/Storage/ContainerRegistry NotRegistered. 필요한 별도 승인 목록은 Network(VNet/subnet/NSG/NIC/PIP), Storage(remote backend), ContainerRegistry(기존 root의 Basic ACR)다. 자동 등록은 계속 금지한다.
+- 구독: Azure for Students Enabled, spendingLimit On, configured budgets 0개. 이전 청구 API로 확인되지 않은 학생 credit 잔액·만료일을 성공으로 바꾸지 않고 동일한 조회를 반복하지 않았다.
+- Backend: 현 구독 Storage account 0개, ACR 0개. 예상 private 경로 `~/.config/opsloop/private/`의 backend.hcl/p1.tfvars가 없고 활성 `.terraform/terraform.tfstate` backend metadata도 없다. 운영자가 별도로 지정한 다른 구독 backend는 확인되지 않았다. Entra/CLI 인증과 container 범위 Storage Blob Data Contributor, 접근 제한·blob 잠금·복구 준비가 필요하다.
+- Image/disk: 고정 version 재확인, 최소 OS disk 요구는 여전히 unknown. API schema의 크기 필드 부재와 일반 Ubuntu 30 GiB 설명을 exact ARM build 증거로 확대하지 않는다. 32 GiB E4는 조건부 비용 가정이다.
+- Security: 기존 Terraform의 NSG deny-all(priority 200), optional 단일 public IPv4 /32 SSH(priority 100), password off, ACR admin/anonymous off를 유지했다. 6443/10250/8472/NodePort를 인터넷에 허용하는 rule은 없다. 실제 VM/NSG가 없으므로 배포된 effective rules를 검증했다고 주장하지 않는다.
+- Bootstrap: Terraform에 개인키/auth key/join token을 넣지 않는다. 보호된 SSH key 파일, 별도 Tailscale 승인, root 전용 k3s token-file 및 ACL 전달 절차가 필요하다. 승인 없이 설치/인증/방화벽 변경을 실행하지 않았다.
+- Local validation: Terraform 1.15.9 / AzureRM 4.64.0의 fmt, init -backend=false -input=false -lockfile=readonly, validate 통과. init/validate sandbox 제한은 승인된 외부 실행으로 해소했다. 기존 source/23개 테스트의 변경이 없으므로 테스트를 반복하지 않았다. remote backend init과 plan은 실행하지 않았고 plan 파일도 만들지 않았다.
+- Costs: 2026-10-12 공식 단가와 계산을 그대로 재사용했다. 30일 720h 기준 VM US$31.104, E4 US$2.40, PIP US$3.60, Basic ACR US$4.998, 합계 US$42.102. backend/operations/egress/세금/환율/추가 사용료 제외이며 지금 Japan East에 배포할 수 있다는 뜻이 아니다. 허용 지역으로 변경하면 가격/SKU/쿼터/이미지를 해당 지역에서 별도로 확인해야 한다.
+
+GitHub 공개 HTTPS 조회의 remote main은 `52e1c47368a1b748219b1c1196ab4a2dbffff182`, 로컬 HEAD는 `f26c1258f4e2b278cbf75f43290d6e2e680afd9d`다. 두 commit이 fast-forward 가능한 차이이며 push 대상 27파일의 두 commit 버전(54개 blob)을 점검해 credential/state를 발견하지 않았고 사용자 values hash도 일치했다. 최종 검증 뒤 승인된 `git push origin main`을 실행했으나 exit 128, `Permission denied (publickey)`로 실패했다. SSH agent가 현재 세션에 없고 ssh-askpass도 없으며 gh는 미로그인이다. remote/auth 설정은 바꾸지 않았다. 이 후속 문서 변경은 아직 commit/push하지 않았다.
+
+다음 순서는 GitHub 인증 준비 → 기존 두 commit push와 remote SHA 확인, 별도로 **허용 지역 ARM64 후보 선택/검증 또는 승인된 정책 허용 경로 확보** → provider 등록 승인 → backend 구성/RBAC 승인 → private 입력·비용/credit·bootstrap 확인 → 조건부 plan 검토다. 기존 Japan East plan 명령을 그대로 실행하지 않는다.

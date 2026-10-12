@@ -9,7 +9,7 @@ Terraform root는 [`infra/terraform/p1`](../../infra/terraform/p1)다. Terraform
 | 항목 | 계약 |
 | --- | --- |
 | 기본 ARM 후보 | Korea Central / `Standard_D2pls_v6`, 2 vCPU / 4 GiB; family quota 확인 전 배포 불가 |
-| 현재 quota-positive 대안 | Japan East / `Standard_B2pls_v2`(2 vCPU / 4 GiB); `Standard_B2ps_v2`(2 vCPU / 8 GiB)도 별도 비용·자원 검토 대안 |
+| 2026-10-12 quota-positive 후보 | Japan East / `Standard_B2pls_v2`(2 vCPU / 4 GiB); 2026-10-13 활성 구독 지역 deny 정책으로 차단. B2ps_v2도 동일 지역 제약 적용 |
 | OS image | `Canonical:ubuntu-24_04-lts:server-arm64:24.04.202609040`; region에서 Arm64 / Gen2 / plan 없음 / 최소 disk 재확인 |
 | Network | VNet `10.80.0.0/16`, worker subnet `10.80.1.0/24`; Terraform validation으로 고정 |
 | Cluster | Pod `10.42.0.0/16`, Service `10.43.0.0/16`, DNS `10.43.0.10`; Tailscale underlay |
@@ -25,6 +25,8 @@ Japan East의 B2pls_v2/B2ps_v2는 SKU object에서 Arm64 / V2 / accelerated netw
 정확한 image 조회의 `osDiskImage`는 Linux 정보만 반환해 최소 disk size를 확인하지 못했다. **32 GiB 기본값의 이미지 호환성을 검증한 것으로 기록하지 않는다.** image minimum을 신뢰할 수 있는 metadata/공식 경로로 확인해 `os_disk_size_gb`가 그 이상인지 검토한 뒤 gate를 연다.
 
 통합 2단계에서는 미등록 세 provider를 재확인했고 Students 구독 spending limit은 On, 설정된 budget은 없었다. 구독 management-plane grant는 확인했지만 policy/deny/backend data-plane은 미검증이다. 구독에 연결된 MCA billing profile 조회에서도 학생 credit 잔액·만료를 확인하지 못했다. SKU/쿼터/가격 조사는 반복하지 않았다. 자세한 근거와 지속 운영 비용은 [2단계 결과](../experiments/p1-c-azure-arm64-candidates.md#통합-작업-2단계--미해결-배포-조건만-확인)에 기록했다. backend 실값·권한 및 최초 bootstrap 관리 경로가 준비되지 않아 현재 plan을 실행하지 않는다.
+
+**2026-10-13 추가 차단 확인:** 활성 subscription Allowed Locations deny 정책은 `indonesiacentral`, `polandcentral`, `eastasia`, `norwayeast`, `malaysiawest`만 허용하며 Japan East VM은 예외가 아니다. 이전 SKU/쿼터 결과와 독립적인 차단이다. 정책을 변경/우회하지 않고 [최신 Phase A/B/C 기록](../experiments/p1-c-azure-arm64-candidates.md#2026-10-13-phase-abc-후속-확인)에 근거를 보존했다. 허용 지역의 ARM64 후보를 새로 검토하거나 적법한 정책 허용 경로를 확보하기 전 Japan East plan을 실행하거나 gate를 열지 않는다. Network/Storage/ContainerRegistry는 여전히 미등록이고 backend도 미준비다.
 
 배포 전 운영자가 승인된 subscription UUID, region과 ARM SKU, regional total 및 해당 family 각각의 `limit-currentValue >= 2`, SKU Location/Zone restrictions, exact image/minimum OS disk, 실제 가격·잔여 credit·종료 시점, RG/network/VM/ACR 권한·정책, 세 노드 route/CIDR, backend/RBAC를 다시 확인한다. positive quota나 SKU catalogue가 실제 allocation capacity를 보장하지 않는다. Kubernetes 포트 6443 / 10250 / UDP 8472 / NodePort는 public NSG에 열지 않는다.
 
@@ -64,7 +66,7 @@ terraform -chdir=infra/terraform/p1 workspace show
 
 gate를 모두 충족한 후 운영자가 private tfvars의 `deployment_prerequisites_confirmed=true`를 설정한다. 이는 확인 기록이며 배포 권한을 부여하지 않는다. `p1.tfvars`의 placeholder subscription/ACR 이름/RSA 공개키를 승인된 실값으로 교체하고 exact image를 유지한다. public SSH가 필요하면 승인된 운영자 현재 public IPv4 `/32`만 넣는다. null이면 SSH 22도 닫힌다. 새 VM에는 Terraform이 Tailscale을 설치하지 않으므로 최초 bootstrap에는 이 임시 예외 또는 별도 승인된 관리 경로가 있어야 한다. tailnet 외 Kubernetes 포트를 추가하는 plan은 거부한다.
 
-다음 명령은 현재 우선 후보 **Japan East/B2pls_v2**를 명시하며 backend와 모든 차단 조건 해소 후에만 실행한다. 기본 예제의 Korea Central/D2pls_v6를 그대로 plan하지 않는다. provider 등록은 Terraform 밖에서 명시적 사용자 승인 후 수행하고 완료 상태를 확인한다.
+다음 명령은 기존 검토 후보 **Japan East/B2pls_v2**를 명시한다. **현재는 구독 지역 정책으로 차단되어 실행하지 않는다.** backend와 정책을 포함한 모든 차단 조건 해소 후에만 실행하며, 허용 지역 대안으로 결정하면 먼저 해당 지역 SKU/쿼터/이미지/가격을 검증하고 아래 region/size pair와 private 입력을 함께 수정한다. 기본 예제의 Korea Central/D2pls_v6도 현 정책에서 제외되므로 그대로 plan하지 않는다. provider 등록은 Terraform 밖에서 명시적 사용자 승인 후 수행하고 완료 상태를 확인한다.
 
 ```bash
 terraform -chdir=infra/terraform/p1 plan -input=false -lock-timeout=5m -var-file="$OPSLOOP_PRIVATE_DIR/p1.tfvars" -var='location=japaneast' -var='vm_size=Standard_B2pls_v2' -out="$OPSLOOP_PRIVATE_DIR/p1.tfplan"
