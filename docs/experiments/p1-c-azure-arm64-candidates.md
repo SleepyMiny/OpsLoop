@@ -79,7 +79,7 @@ Bpsv2는 Ampere Altra 기반 burstable ARM이다. B2pls_v2는 VM 전체 기준 b
 
 가격 재현용 공식 GET endpoint는 `https://prices.azure.com/api/retail/prices`이며 `api-version=2023-01-01-preview`, `currencyCode=USD`를 사용했다. 지역은 각 `armRegionName`, compute는 `serviceName='Virtual Machines'`, 정확한 `armSkuName`, `priceType='Consumption'`으로 필터했다. 추가 meter는 `Standard SSD Managed Disks / E4 LRS / E4 LRS Disk`, `IP Addresses / Standard / Standard IPv4 Static Public IP`, `Container Registry / Basic / Basic Registry Unit`의 이름·단위·type을 확인했다. 결과를 임의 가격표로 추정하지 않았고 원본의 선택된 공개 필드는 `/tmp/opsloop-azure-prices.json`, `/tmp/opsloop-azure-acr-prices.json`에만 보관했다.
 
-[Students 공식 안내](https://azure.microsoft.com/en-us/free/students/)의 일반 credit 조건은 이 구독의 잔액·만료 증거가 아니다. **잔여 credit, 만료일, spending limit, cost ceiling은 미조회/미확정**이다. portal에서 해당 구독의 실제 값을 확인하고 실험 유지 시간·비용 상한·cleanup 담당자를 정해야 한다. VM stop/deallocate만으로 유지 중인 disk/PIP/ACR/backend 비용이 사라진다고 가정하지 않는다.
+[Students 공식 안내](https://azure.microsoft.com/en-us/free/students/)의 일반 credit 조건은 이 구독의 잔액·만료 증거가 아니다. 최초 조사에서는 잔여 credit, 만료일, spending limit, cost ceiling을 확인하지 못했다. **아래 2단계에서 spending limit은 On으로 확인했으며 잔여 credit·만료일·운영 비용 상한은 여전히 미확정**이다. VM stop/deallocate만으로 유지 중인 disk/PIP/ACR/backend 비용이 사라진다고 가정하지 않는다.
 
 ## 재사용 가능한 읽기 전용 survey / preflight
 
@@ -105,3 +105,37 @@ python3 -m unittest discover -s tests -p 'test_azure_arm64_survey.py' -v
 - 남음: provider 등록 별도 승인, image 최소 disk 해소, actual subscription credit·expiry·cost ceiling, backend·ACR·OIDC/RBAC/policy·network/CIDR 확인, 별도 배포 승인과 native ARM 실험. Japan East에서 조회 근거를 얻었으므로 추가 region API를 확장하지 않았다.
 
 배포 준비 계약은 [Azure ARM64 runbook](../runbooks/azure-arm64-deployment.md)에 연결한다. 본 보고서와 스크립트는 Terraform state/plan, cluster·Helm·Tailscale 또는 사용자 observability 값을 변경하지 않았다.
+
+## 통합 작업 2단계 — 미해결 배포 조건만 확인
+
+2026-10-12 **21:29 KST**의 구독·provider·권한·예산 조회와 후속 청구 속성 GET 결과다. 앞선 SKU/쿼터/이미지/가격 및 클러스터 관측을 재사용하고 해당 대량 조회는 반복하지 않았다. 읽기 전용 명령 실행에는 기존 Azure CLI의 로컬 session metadata 접근을 위한 sandbox 외 실행 승인을 사용했다. Azure 리소스 변경 권한이나 배포 승인을 요청·사용한 것은 아니다.
+
+| 조건 | 실제 조회 결과 | 남은 조건 |
+| --- | --- | --- |
+| 학생 구독 | Enabled; offer `AzureForStudents_2018-01-01`; `spendingLimit=On` | 잔여 credit·만료일 미확인; On은 사용 가능 잔액을 뜻하지 않음 |
+| Provider | Network / Storage / ContainerRegistry 모두 NotRegistered | 별도 명시적 등록 승인 필요; 자동 등록 금지 유지 |
+| Subscription budgets | Budgets List 응답 `value=[]`, next page 없음 | 설정된 budget 없음; 잔여 credit/사용액 0으로 해석하지 않음 |
+| ARM 권한 | subscription Permissions GET의 grant가 RG·VM·VNet·NIC·NSG·PIP·Storage·ACR 생성 및 role assignment action을 허용 | 실제 쓰기 시험 없음; deny assignment·조건·Azure Policy·backend data-plane 미검증 |
+| 청구 연결 | Subscription Billing Property GET 성공; 연결된 Microsoft Customer Agreement billing profile 확인 | Available Balance GET에 `properties.amount` 없음; 0으로 대체하지 않으며 학생 credit 잔액·만료 미확인 |
+| Backend | partial `azurerm` 선언·Entra/CLI 인증 example·runbook 존재; 이전 Storage count=0 근거 재사용 | 계정/container 실값, 네트워크 접근, Blob Data Contributor, 잠금·복구 절차 미준비/미검증 |
+| Bootstrap | Terraform에 auth key/join token/custom-data 없음; agent 예제는 `token-file` 사용 | 초기 VM 접속 경로, Tailscale device 승인/ACL, 보호된 token 전달, ARM64 installer/checksum 및 설치 절차 실행 승인 필요 |
+
+권한 조회는 read-only로 반환된 `actions/notActions`만 비교했다. subscription scope의 management-plane grant를 backend Blob 접근권이나 실제 resource 생성 성공으로 확대하지 않는다. 청구 account 목록의 다른 profile을 임의로 조회하지 않고 현재 구독의 Billing Property가 연결한 profile만 조회했다. 실 구독·tenant·billing identifiers 및 CLI raw stderr는 출력하거나 Git에 저장하지 않았다. 요약 JSON은 ignored `.opsloop/azure-survey/prerequisites-latest.json`(0600)에만 저장했으며 인증정보는 포함하지 않는다.
+
+[Subscription policies GET](https://learn.microsoft.com/en-us/rest/api/resources/subscriptions/get?view=rest-resources-2022-12-01), [Subscription budgets GET](https://learn.microsoft.com/en-us/rest/api/consumption/budgets/list?view=rest-consumption-2024-08-01), [Subscription Billing Property GET](https://learn.microsoft.com/en-us/rest/api/billing/billing-property/get?view=rest-billing-2024-04-01), [Billing-profile Available Balance GET](https://learn.microsoft.com/en-us/rest/api/billing/available-balances/get-by-billing-profile?view=rest-billing-2024-04-01)을 사용했다. Available Balance는 MCA 청구서 정산용 credit/payment balance API이므로 값이 있더라도 학생 구독의 남은 프로모션 credit로 자동 해석할 수 없다.
+
+### 정확한 이미지와 OS disk의 확인 한계
+
+기존 exact URN `Canonical:ubuntu-24_04-lts:server-arm64:24.04.202609040`의 Arm64/V2/plan-null 결과를 유지한다. [Canonical 공식 mapping](https://ubuntu.com/azure/docs/azure-how-to/instances/find-ubuntu-images/#ubuntu-24-04-lts-noble-numbat)도 Ubuntu 24.04 Server ARM64 Gen2에 `server-arm64`를 사용한다. [Microsoft VM Images GET schema](https://learn.microsoft.com/en-us/rest/api/compute/virtual-machine-images/get?view=rest-compute-2025-04-01#osdiskimage)의 `OSDiskImage`는 `operatingSystem`만 정의하므로 같은 CLI 명령 반복으로 이 exact build의 최소 disk 크기를 얻을 수 없다.
+
+[Microsoft 일반 Ubuntu Server 이미지 예시](https://learn.microsoft.com/en-us/azure/virtual-machines/ephemeral-os-disks#size-requirements)는 약 30 GiB OS image를 설명하지만 해당 ARM64 exact build의 증거는 아니다. **32 GiB Standard SSD는 계획 입력이며 exact image 최소 요구를 검증한 PASS가 아니다.** 공식 이미지의 해당 build 크기 근거를 확보하거나, 이후 별도 승인된 검증에서 해소하기 전 gate를 열지 않는다. 현재 작업에서 image용 VM/disk를 생성하지 않았다.
+
+### Japan East 계획 입력·비용·결론
+
+이번 배포 검토 후보는 `location=japaneast`, `vm_size=Standard_B2pls_v2`, 위 exact image, `os_disk_size_gb=32`(호환성 미확인), `acr_sku=Basic`다. VNet/Subnet 및 Tailscale/k3s 책임 경계를 유지한다. Terraform 기본 D2pls_v6를 변경하지 않았으므로 [runbook의 plan 명령](../runbooks/azure-arm64-deployment.md#4-계획-검토와-승인된-배포)에 Japan East/B2pls pair를 명시했다. `deployment_prerequisites_confirmed=false`를 유지했다.
+
+기존 같은 날 공식 단가를 재사용한 **비교 가정**은 compute 730시간 US$31.536 + E4 기본 US$2.40 + PIP 730시간 US$3.65 + ACR 30일 US$4.998 = **US$42.58**다. 730시간과 30일을 조합한 비교값이며 달력 월 청구 총액이 아니다. backend·disk operations·egress·추가 저장·세금·환율은 제외한다. 24시간씩 30일 유지하는 동일 기본 항목은 compute US$31.104 + E4 US$2.40 + PIP US$3.60 + ACR US$4.998 = **US$42.10/30일**(약 US$1.40/일)이며 추가 사용료가 늘 수 있다. 실험 시간 단축과 승인된 cleanup 시점을 비용 계획에 반영한다.
+
+[Students 일반 조건](https://learn.microsoft.com/en-us/azure/cost-management-billing/manage/azurestudents-subscription-disabled)은 US$100/12개월이며 이는 현재 잔액이 아니다. 실제 사용 가능한 잔액을 `R` USD로 확인한 후 위 30일 비교값 기준 유지 가능 기간을 `30 × R / 42.102`일 이하로 추산하되, credit 만료일과 다른 사용료를 함께 적용한다. 실제 잔액·만료 확인 전 지속 운영을 승인할 비용 근거가 부족하다. credit/기간 소진 시 구독이 비활성화될 수 있어 recovery candidate 가용성에도 영향을 준다.
+
+**현재 Azure 배포 불가: 조건부 후보를 준비했으나 provider·exact image disk·backend·credit/budget·bootstrap/정책 조건이 남는다.** 실제 capacity는 읽기 전용 조회로 보장할 수 없으며 이후 승인된 allocation 시 결과를 분리 기록한다. 이번 단계에는 backend init 연결, Terraform plan/apply/destroy, provider 등록 및 VM/network/storage/ACR 생성·변경을 실행하지 않았다. P1/P2 전체 완료 상태를 변경하지 않았다.

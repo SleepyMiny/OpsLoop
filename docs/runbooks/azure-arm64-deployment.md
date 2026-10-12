@@ -1,6 +1,6 @@
 # Azure ARM64 deployment / destroy runbook
 
-기준: [Architecture v0.1](../architecture/architecture-v0.1.md), [ADR-005](../adr/ADR-005-hybrid-multi-architecture-testbed.md), [P1 준비 절차](p1-platform-preparation.md), [P1-A inventory](../experiments/p1-a-environment-inventory.md), [현재 Azure ARM64 조사](../experiments/p1-c-azure-arm64-candidates.md). 아래 배포·bootstrap·삭제 명령은 **후속 운영 절차**이며 이번 작업에서 실행하지 않았다. 로컬 구성 검증은 Azure 접근 권한·배포 승인·P1 완료를 대신하지 않는다.
+기준: [Architecture v0.1](../architecture/architecture-v0.1.md), [ADR-005](../adr/ADR-005-hybrid-multi-architecture-testbed.md), [P1 준비 절차](p1-platform-preparation.md), [P1-A inventory](../experiments/p1-a-environment-inventory.md), [현재 Azure ARM64 조사와 2단계 준비 결과](../experiments/p1-c-azure-arm64-candidates.md). 아래 배포·bootstrap·삭제 명령은 **후속 운영 절차**이며 이번 작업에서 실행하지 않았다. 로컬 구성 검증은 Azure 접근 권한·배포 승인·P1 완료를 대신하지 않는다.
 
 ## 1. 배포 계약과 현재 gate
 
@@ -23,6 +23,8 @@ Terraform root는 [`infra/terraform/p1`](../../infra/terraform/p1)다. Terraform
 Japan East의 B2pls_v2/B2ps_v2는 SKU object에서 Arm64 / V2 / accelerated networking 지원 / restrictions 빈 목록이 확인됐고 regional cores 0/6, `standardBpsv2Family` 0/10이다. 같은 exact Ubuntu image도 확인했다. Terraform은 이 두 SKU를 허용하지만 기본 D2pls_v6 값과 닫힌 gate는 유지한다. 지역을 `japaneast`, size를 B 후보로 **함께** 변경하고 나머지 선행조건을 검토한다. B-series의 CPU credits/bursting은 D-series와 다르므로 Recovery Candidate의 지속 CPU 가용성을 동일하게 가정하지 않는다. Korea Central의 B SKU 조회 빈 목록은 실제 SKU 존재·가용성을 증명하지 않는다. 제한 없는 SKU/양수 quota도 capacity를 보장하지 않는다.
 
 정확한 image 조회의 `osDiskImage`는 Linux 정보만 반환해 최소 disk size를 확인하지 못했다. **32 GiB 기본값의 이미지 호환성을 검증한 것으로 기록하지 않는다.** image minimum을 신뢰할 수 있는 metadata/공식 경로로 확인해 `os_disk_size_gb`가 그 이상인지 검토한 뒤 gate를 연다.
+
+통합 2단계에서는 미등록 세 provider를 재확인했고 Students 구독 spending limit은 On, 설정된 budget은 없었다. 구독 management-plane grant는 확인했지만 policy/deny/backend data-plane은 미검증이다. 구독에 연결된 MCA billing profile 조회에서도 학생 credit 잔액·만료를 확인하지 못했다. SKU/쿼터/가격 조사는 반복하지 않았다. 자세한 근거와 지속 운영 비용은 [2단계 결과](../experiments/p1-c-azure-arm64-candidates.md#통합-작업-2단계--미해결-배포-조건만-확인)에 기록했다. backend 실값·권한 및 최초 bootstrap 관리 경로가 준비되지 않아 현재 plan을 실행하지 않는다.
 
 배포 전 운영자가 승인된 subscription UUID, region과 ARM SKU, regional total 및 해당 family 각각의 `limit-currentValue >= 2`, SKU Location/Zone restrictions, exact image/minimum OS disk, 실제 가격·잔여 credit·종료 시점, RG/network/VM/ACR 권한·정책, 세 노드 route/CIDR, backend/RBAC를 다시 확인한다. positive quota나 SKU catalogue가 실제 allocation capacity를 보장하지 않는다. Kubernetes 포트 6443 / 10250 / UDP 8472 / NodePort는 public NSG에 열지 않는다.
 
@@ -60,10 +62,12 @@ terraform -chdir=infra/terraform/p1 workspace show
 
 ## 4. 계획 검토와 승인된 배포
 
-gate를 모두 충족한 후 운영자가 private tfvars의 `deployment_prerequisites_confirmed=true`를 설정한다. 이는 확인 기록이며 배포 권한을 부여하지 않는다. public SSH가 필요하면 승인된 운영자 현재 public IPv4 `/32`만 넣는다. null이면 SSH 22도 닫힌다. tailnet 외 Kubernetes 포트를 추가하는 plan은 거부한다.
+gate를 모두 충족한 후 운영자가 private tfvars의 `deployment_prerequisites_confirmed=true`를 설정한다. 이는 확인 기록이며 배포 권한을 부여하지 않는다. `p1.tfvars`의 placeholder subscription/ACR 이름/RSA 공개키를 승인된 실값으로 교체하고 exact image를 유지한다. public SSH가 필요하면 승인된 운영자 현재 public IPv4 `/32`만 넣는다. null이면 SSH 22도 닫힌다. 새 VM에는 Terraform이 Tailscale을 설치하지 않으므로 최초 bootstrap에는 이 임시 예외 또는 별도 승인된 관리 경로가 있어야 한다. tailnet 외 Kubernetes 포트를 추가하는 plan은 거부한다.
+
+다음 명령은 현재 우선 후보 **Japan East/B2pls_v2**를 명시하며 backend와 모든 차단 조건 해소 후에만 실행한다. 기본 예제의 Korea Central/D2pls_v6를 그대로 plan하지 않는다. provider 등록은 Terraform 밖에서 명시적 사용자 승인 후 수행하고 완료 상태를 확인한다.
 
 ```bash
-terraform -chdir=infra/terraform/p1 plan -input=false -lock-timeout=5m -var-file="$OPSLOOP_PRIVATE_DIR/p1.tfvars" -out="$OPSLOOP_PRIVATE_DIR/p1.tfplan"
+terraform -chdir=infra/terraform/p1 plan -input=false -lock-timeout=5m -var-file="$OPSLOOP_PRIVATE_DIR/p1.tfvars" -var='location=japaneast' -var='vm_size=Standard_B2pls_v2' -out="$OPSLOOP_PRIVATE_DIR/p1.tfplan"
 terraform -chdir=infra/terraform/p1 show -no-color "$OPSLOOP_PRIVATE_DIR/p1.tfplan"
 ```
 
@@ -98,7 +102,7 @@ SQLite datastore와 server token은 Terraform state와 별개로 함께 보호·
 삭제 담당자는 workload 철수·실험 종료와 backend 보존을 확인하고, Tailscale device·ACR node pull token·후속 OIDC/RBAC 정리를 각 소유자에게 요청한다. 이 인증 자원은 현재 testbed root가 관리하지 않는다. 승인된 testbed state와 같은 inputs를 사용해 삭제 계획을 먼저 만든다.
 
 ```bash
-terraform -chdir=infra/terraform/p1 plan -destroy -input=false -lock-timeout=5m -var-file="$OPSLOOP_PRIVATE_DIR/p1.tfvars" -out="$OPSLOOP_PRIVATE_DIR/p1-destroy.tfplan"
+terraform -chdir=infra/terraform/p1 plan -destroy -input=false -lock-timeout=5m -var-file="$OPSLOOP_PRIVATE_DIR/p1.tfvars" -var='location=japaneast' -var='vm_size=Standard_B2pls_v2' -out="$OPSLOOP_PRIVATE_DIR/p1-destroy.tfplan"
 terraform -chdir=infra/terraform/p1 show -no-color "$OPSLOOP_PRIVATE_DIR/p1-destroy.tfplan"
 ```
 
