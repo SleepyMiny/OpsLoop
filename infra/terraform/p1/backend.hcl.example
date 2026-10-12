@@ -1,0 +1,9 @@
+# Nonsecret placeholders. Do not initialize against this example.
+# Copy outside the repository and replace with independently prepared storage.
+# Standard Blob endpoints are assumed; no access-key lookup is configured.
+storage_account_name = "REPLACE_WITH_EXISTING_STATE_ACCOUNT"
+container_name       = "REPLACE_WITH_EXISTING_STATE_CONTAINER"
+key                  = "opsloop/p1/testbed.tfstate"
+tenant_id            = "00000000-0000-0000-0000-000000000000"
+subscription_id      = "00000000-0000-0000-0000-000000000000"
+# Never add access_key, sas_token, client_secret or certificate material here.

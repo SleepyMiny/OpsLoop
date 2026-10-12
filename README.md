@@ -4,7 +4,7 @@
 
 OpsLoop는 Kubernetes 장애를 근거 기반 규칙으로 분류하고, 자원 상태를 고려한 Runtime Recovery를 시도하도록 설계된 프로젝트입니다. 운영 단계에서 해결되지 않는 반복 Application Failure만 독립된 Engineering Runner로 넘겨 Evidence 수집, 코드 분석·수정, Build/Test Feedback, Verification, Pull Request 생성으로 연결합니다.
 
-> **현재 상태: Phase 1-A 환경 조사와 검토용 Terraform 준비.** Terraform 정적 구성과 non-secret 예제는 작성했으며 실제 Azure·Kubernetes 환경은 구축하지 않았습니다. 기능, CRD, Controller, Runner, CI/CD는 미구현입니다. provider 등록·quota·두 Ubuntu 노드 확인이 필요하며 P1 배포 준비 완료를 뜻하지 않습니다.
+> **현재 상태 (2026-10-12): P1-B 로컬 AMD64 2-Node k3s와 P2 Observability 부분 구축.** 이번 읽기 전용 조회에서 `opsloop-control`·`sarmubuntuserver`의 Ready, Tailscale Node IP, k3s `v1.35.9+k3s1`, Helm values 일치, PVC Bound, 관측 Pod 정상 및 Prometheus Targets 17개 UP를 재확인했습니다. Control Plane → Worker Pod HTTP/DNS와 Grafana 화면 시각화는 사용자 제공 증거로 구분합니다. Azure ARM64·ACR/OIDC·remote state는 미완료여서 **P1 전체 미완료**, Demo API·Multi-Arch CI는 미구현이어서 **P2 전체 미완료**입니다. CRD·Controller·Runner와 P3~P8 기능도 저장소에 구현되어 있지 않습니다.
 
 ## 프로젝트의 중심
 
@@ -71,15 +71,22 @@ Tailscale 실험망과 Multi-Architecture 이미지를 사용합니다. 이 구�
 | [ADR-004: Engineering 경계](docs/adr/ADR-004-engineering-recovery-boundary.md) | Runner, Codex, 검증·게시 권한 분리 |
 | [ADR-005: Hybrid / Multi-Arch Testbed](docs/adr/ADR-005-hybrid-multi-architecture-testbed.md) | Tailscale, Azure, ACR, CI/CD, Production 구분 |
 
-개발 순서는 **환경 적합성 확인 → 플랫폼 → ObserveOnly → Runtime Demo A → Incident Bundle → Engineering Demo B**입니다. P1-A 결과는 [환경 Inventory](docs/experiments/p1-a-environment-inventory.md), [P1 runbook](docs/runbooks/p1-platform-preparation.md), [Terraform 구성](infra/terraform/p1/main.tf)에 기록했습니다. 로컬 fmt/init/validate만 수행하며 실제 설치·배포는 P1-B의 별도 승인 대상입니다.
+개발 순서는 **환경 적합성 확인 → 플랫폼 → ObserveOnly → Runtime Demo A → Incident Bundle → Engineering Demo B**입니다. 과거 [P1-A Inventory](docs/experiments/p1-a-environment-inventory.md)는 당시 조사 기록으로 보존합니다. 최신 근거는 [P1-B 로컬 구축 검증](docs/experiments/p1-b-local-platform.md), [Observability 검증](docs/experiments/p2-observability-verification.md), [Azure 후보 조사](docs/experiments/p1-c-azure-arm64-candidates.md)에 있습니다.
 
-## P1 전에 필요한 환경 확인
+- Arch Host `archgram` (`100.80.16.28`): 개발·원격 관리·Engineering Runner 실행 위치이며 Kubernetes Node가 아닙니다.
+- VM `opsloop-control` (`100.73.4.76`): 단일 Control Plane, 4 vCPU / 8 GiB / 80 GiB; 관측 스택과 향후 Recovery Candidate입니다.
+- Physical Worker `sarmubuntuserver` (`100.82.241.77`): AMD64 Primary 실행 위치이며 기존 서비스·데이터를 보존합니다. Demo API는 아직 배치하지 않았습니다.
+- Azure ARM64 Worker: 현재 우선 후보는 Japan East / `Standard_B2pls_v2` (ARM64, 2 vCPU / 4 GiB)입니다. 구독 quota·SKU·이미지 조회는 통과했으나 provider 등록·이미지 최소 disk·backend·비용/크레딧·capacity 확인이 남았으며 실제 생성·조인은 수행하지 않았습니다.
+
+[관측 values](infra/observability/kube-prometheus-stack.values.yaml)는 기존 수동 배포 파일이며 chart `91.8.1`, release `opsloop-mon`, namespace `monitoring` 기준입니다. 읽기 전용 검증은 `python3 scripts/verify-platform.py --help`, Azure 조사·배포 전 조건 확인은 `python3 scripts/azure-arm64-survey.py --help`에서 시작합니다. [플랫폼 runbook](docs/runbooks/p1-platform-preparation.md)과 [Azure 배포 준비 절차](docs/runbooks/azure-arm64-deployment.md)에 승인 경계·state·bootstrap·cleanup을 기록합니다. 관리자 kubeconfig `~/.kube/opsloop.yaml`은 출력·복사·Git 추적하지 않습니다.
+
+## P1 완료 전에 남은 환경 확인
 
 - Azure 구독의 ARM64 SKU·region·quota·Ubuntu 이미지 및 역할 할당 권한.
-- Laptop VM·Host의 자원 여유, 절전 방지, Physical Server의 장애 후 관리 경로.
+- Host 절전 방지, Physical Server 장애 후 관리 경로, VM NAT 방화벽 영구화의 실제 적용.
 - LAN·VNet·Pod·Service CIDR 충돌 여부와 Tailscale ACL·연결·MTU 검증 계획.
 - GitHub Actions·main 보호 규칙·OIDC subject와 ACR 게시 identity 구성 권한.
-- k3s, Terraform provider, Helm chart, Go, Codex CLI, orchestration kit의 고정 version 선정.
+- 기존 k3s `v1.35.9+k3s1`·Helm chart `91.8.1`을 기준으로 ARM bootstrap과 이미지 호환 검증; 후속 Go·Codex/kit 버전 고정.
 
 세부 준비 사항과 미확정 값은 [Architecture의 외부 환경 항목](docs/architecture/architecture-v0.1.md#external-environment)을 참고합니다.
 

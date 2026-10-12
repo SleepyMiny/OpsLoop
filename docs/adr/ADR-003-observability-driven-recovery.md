@@ -1,6 +1,6 @@
 # ADR-003 — Observability-driven Recovery
 
-- 상태: Accepted — Architecture v0.1 설계 결정, 미구현
+- 상태: Accepted — Architecture v0.1 설계 결정; 관측 스택 구축, Evaluator·freshness·resource 판단 미구현
 - 날짜: 2026-10-07
 - 관련: [Architecture](../architecture/architecture-v0.1.md), [ADR-002](ADR-002-runtime-recovery-placement.md), [Implementation Plan](../implementation-plan.md)
 
@@ -58,3 +58,7 @@ P3에서 경계값·단위·누락·NaN·stale·API 불일치와 ObserveOnly 결
 
 - [Prometheus Querying Basics](https://prometheus.io/docs/prometheus/latest/querying/basics/)
 - [Kubernetes Resource Management](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/)
+
+## 구현 상태 기록 (2026-10-12)
+
+설계 책임 경계는 유지한다. 기존 수동 구축과 이번 읽기 전용 재검증의 범위는 [P1-B 기록](../experiments/p1-b-local-platform.md) 및 [관측 기록](../experiments/p2-observability-verification.md)을 따른다. 일부 구현은 ADR의 모든 수용시험 통과 또는 P1/P2 전체 완료를 뜻하지 않는다.

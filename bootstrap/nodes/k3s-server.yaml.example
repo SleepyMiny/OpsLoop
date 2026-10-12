@@ -1,7 +1,9 @@
 # Nonsecret P1-B template; not installed or executed in P1-A.
-# Replace node identity/IP and verify a supported, pinned k3s version first.
+# Install exactly v1.35.9+k3s1; YAML is configuration, not a version selector.
+# Replace node identity/IP and validate the existing cluster before bootstrap.
 node-name: REPLACE_WITH_LAPTOP_VM_NODE_NAME
 node-ip: REPLACE_WITH_LAPTOP_VM_TAILSCALE_IPV4
+advertise-address: REPLACE_WITH_LAPTOP_VM_TAILSCALE_IPV4
 flannel-iface: tailscale0
 flannel-backend: vxlan
 disable:

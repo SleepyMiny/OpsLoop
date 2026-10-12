@@ -2,7 +2,7 @@
 
 기준: [Architecture v0.1](architecture/architecture-v0.1.md), 2026-10-07.
 
-**현재 P1-A 환경 조사와 검토용 Terraform 정적 구성을 준비했다. 실제 플랫폼은 미구축이고 P1 DoD는 미완료다. P2~P8 기능·환경은 미구현이다.** 실제 증거는 [P1-A Inventory](experiments/p1-a-environment-inventory.md)와 [P1 runbook](runbooks/p1-platform-preparation.md)에 한정한다.
+**현재 (2026-10-12) P1-B 로컬 2-Node AMD64 k3s와 P2 관측 스택이 부분 구축되었다. Azure ARM64·ACR/OIDC·remote state 및 네트워크 전체 수용시험이 남아 P1 DoD는 미완료다. Demo API·Multi-Arch CI가 없어 P2 DoD도 미완료다.** 저장소 조사에서 P3~P8 기능 코드·CRD·Runner·workflow는 발견되지 않았다. 당시 [P1-A Inventory](experiments/p1-a-environment-inventory.md)는 보존하고 [P1-B 로컬 검증](experiments/p1-b-local-platform.md), [Observability 검증](experiments/p2-observability-verification.md), [Azure 후보 조사](experiments/p1-c-azure-arm64-candidates.md)에 사용자 증거와 이번 명령 결과를 구분한다.
 
 ## 진행 원칙
 
@@ -19,8 +19,8 @@
 | Phase | 범위 | 선행조건 | 상태 |
 | --- | --- | --- | --- |
 | P0 | Architecture·ADR·계약·범위·환경 가정 | 요구사항 | 설계 기준 문서화 |
-| P1 | Terraform·Tailscale·3-Node k3s·ACR·OIDC 기반 | P0, 환경 적합성 | P1-A 조사·정적 준비; P1-B 미실행 |
-| P2 | Demo API·Multi-Arch pipeline·관측 stack | P1 | 미착수 |
+| P1 | Terraform·Tailscale·3-Node k3s·ACR·OIDC 기반 | P0, 환경 적합성 | P1-B 로컬 2-Node 구축; Azure·기반 인증·전체 수용 검증 미완료 |
+| P2 | Demo API·Multi-Arch pipeline·관측 stack | P1 | 관측 stack 구축; Demo API·Multi-Arch CI 미구현 |
 | P3 | ObserveOnly Controller·분류·후보 평가·정책 | P2 | 미착수 |
 | P4 | Runtime 실행·검증·guardrail·Demo A | P3 | 미착수 |
 | P5 | 반복 Application Failure·Bundle·격리 | P4 | 미착수 |
@@ -70,7 +70,9 @@ Phase 0 분석에서 공식 문서와 설치된 Codex CLI interface를 확인하
 
 ### 결과물
 
-Terraform·bootstrap 구성, 환경 점검표, network 검증 결과, state 보관·복구와 cleanup runbook. P1-A에서 검토용 Terraform·non-secret node 예제·Inventory·runbook을 작성했다. provider 미등록·quota 미확인·두 Ubuntu 노드 미식별로 배포 gate는 닫혀 있다. backend·bootstrap·3-Node·network 실행 검증은 P1-B에 남는다.
+Terraform·bootstrap 구성, 환경 점검표, network 검증 결과, state 보관·복구와 cleanup runbook. P1-A 정적 조사 기록에 이어 P1-B의 기존 수동 구축을 자산화한다. 사용자 기록에서 두 로컬 노드 Ready와 Control Plane → Worker DNS/Pod IP HTTP가 확인되었으며 역방향·MTU·큰 payload·WAN relay·장애 복구는 미검증이다. Azure provider·quota의 최신 값은 [별도 조사](experiments/p1-c-azure-arm64-candidates.md)를 따른다. backend 준비·ARM 생성/조인·3-Node 검증·ACR/OIDC·backup/restore가 남아 Terraform 배포 gate는 닫힌 상태로 유지한다.
+
+이번 작업의 로컬 `fmt`, `init -backend=false`, `validate` 결과는 [Azure 준비 runbook](runbooks/azure-arm64-deployment.md)에 기록한다. 선언형 코드·정적 검증 통과는 실제 allocation·배포·삭제/재생성 성공을 뜻하지 않는다.
 
 ## P2 — Demo API·이미지·Observability
 
@@ -90,6 +92,12 @@ Go Demo API와 `/`, `/health`, `/ready`, `/metrics`, metadata 응답을 구현�
 - Prometheus/Grafana는 Laptop VM에 배치하며 저장량·retention·requests를 제한한다.
 - 고정 NodePort/Service 경로를 Host에서 호출할 수 있다.
 - cold/warm cache와 direct/relay의 측정 구분을 준비한다.
+
+### 현재 부분 결과와 후속 작업
+
+기존 `infra/observability/kube-prometheus-stack.values.yaml`을 보존했다. 사용자 제공 기록은 release `opsloop-mon`, chart `91.8.1`, Prometheus 10 GiB/Grafana 2 GiB local-path PVC Bound, Control Plane 배치, Node Exporter 각 노드 1개, 주요 Targets UP와 Grafana 시각화를 확인한다. 최신 실측·Helm values 비교는 [Observability 기록](experiments/p2-observability-verification.md)을 따른다. 당시 2 Nodes / 10 Pods를 현재 Pod 수로 사용하지 않는다.
+
+실제 scrape/evaluation interval은 values의 30초이며 Architecture의 초기 10초/최대 sample age 30초 가정과 함께 P3에서 재측정·조정해야 한다. 관측 동작만으로 Candidate Evaluator freshness 검증을 완료 처리하지 않는다. Demo API의 Go 코드·테스트, 리소스 requests/limits·metadata, Multi-Arch 이미지/CI·native ARM 실행은 다음 구현 대상이다.
 
 ## P3 — ObserveOnly 평가기
 
@@ -204,4 +212,4 @@ RecoveryPolicy·RecoveryIncident의 최소 CRD, Monitor, deterministic Classifie
 4. GitHub Actions, main 보호, OIDC trust 설정 권한과 실제 subject를 확인한다.
 5. tool version 고정, state·secret 보관 위치, 비용·부하 한도를 정한다.
 
-현재 단계에서 이러한 자원을 생성하거나 설치할 필요는 없다. [외부 환경 목록](architecture/architecture-v0.1.md#external-environment)의 확인 결과를 다음 Phase의 입력으로 사용한다.
+이번 작업에서는 추가 자원을 생성하거나 기존 서비스를 변경하지 않는다. 이미 구축된 로컬 환경은 유지하고 Azure/provider·backend·bootstrap 변경은 별도 명시적 승인 후 수행한다. [외부 환경 목록](architecture/architecture-v0.1.md#external-environment)의 확인 결과를 다음 Phase의 입력으로 사용한다.

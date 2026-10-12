@@ -1,15 +1,23 @@
 # Nonsecret example. Subscription, ACR name and SSH key are placeholders.
-# Parent inventory: exact image below confirmed in koreacentral and japaneast
+# Initial P1-A inventory: exact image below confirmed in koreacentral and japaneast
 # (Arm64, V2, plan null). koreacentral is a tentative deployment candidate.
-# WARNING: Keep deployment_prerequisites_confirmed=false until P1-B verification;
-# quota is unresolved and the Zone 2 restriction below remains in effect.
+# WARNING: Keep deployment_prerequisites_confirmed=false until verification.
+# 2026-10-12 recheck: Compute Registered, Network/ContainerRegistry/Storage
+# NotRegistered; koreacentral total 0/6 but Dplsv6 family 0/0 blocks this size.
+# Current evidence/procedures: docs/runbooks/azure-arm64-deployment.md.
+# Latest survey: docs/experiments/p1-c-azure-arm64-candidates.md.
+# Quota-positive alternative confirmed in japaneast: Standard_B2pls_v2
+# (Arm64/V2, 2 vCPU/4 GiB, accelerated networking true, restrictions []).
+# Regional total 0/6 and standardBpsv2Family 0/10; actual capacity unproven.
+# B-series CPU credits/bursting differ from Dplsv6; review recovery experiments.
+# Exact image minimum OS disk size was not returned; 32 GiB compatibility
+# remains unverified and is a prerequisite before opening the deployment gate.
 # D2pls_v6 koreacentral restriction: Zone 2 NotAvailableForSubscription, not
 # a Location restriction. This does not prove capacity or usable quota.
 # Japan fallback: japaneast Standard_D2pls_v5, restrictions [], 2 vCPU / 4 GiB;
 # absence of SKU restrictions does not confirm quota or deployment capacity.
 # southeastasia excluded: Location NotAvailableForSubscription restriction.
-# Compute, Network, ContainerRegistry and Storage were NotRegistered.
-# Empty quota results in three regions remain unresolved, not confirmed zero.
+# Historical P1-A empty quota responses did not prove zero or unlimited quota.
 deployment_prerequisites_confirmed = false
 # Proposed address ranges do not overlap these supplied ranges:
 # LAN 192.168.45.0/24, Docker 172.17.0.0/16, Tailscale 100.64.0.0/10,
@@ -29,10 +37,15 @@ ubuntu_image = {
   version   = "24.04.202609040"
 }
 
-vm_size                   = "Standard_D2pls_v6"
-vnet_cidr                 = "10.80.0.0/16"
-subnet_cidr               = "10.80.1.0/24"
-os_disk_size_gb            = 32
+vm_size                  = "Standard_D2pls_v6"
+vnet_cidr                = "10.80.0.0/16"
+subnet_cidr              = "10.80.1.0/24"
+os_disk_size_gb           = 32
 bootstrap_ssh_source_cidr = null
 # Optional temporary operator exception, never a wider prefix:
 # bootstrap_ssh_source_cidr = "203.0.113.10/32"
+# Optional reviewed Japan alternative: replace BOTH the existing location and
+# vm_size assignments above; never add duplicate assignments or open the gate
+# before provider/backend/policy/image/disk/cost and bootstrap prerequisites pass.
+# location = "japaneast"
+# vm_size  = "Standard_B2pls_v2"

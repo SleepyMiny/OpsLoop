@@ -6,7 +6,7 @@ resource "azurerm_resource_group" "testbed" {
   lifecycle {
     precondition {
       condition     = var.deployment_prerequisites_confirmed
-      error_message = "Deployment is gated until P1-B verifies prerequisites. Microsoft.Compute, Microsoft.Network, Microsoft.ContainerRegistry and Microsoft.Storage were NotRegistered; quota results in three regions were empty and remain unresolved. Confirm registration, regional ARM64 SKU/quota/image compatibility and state readiness before setting deployment_prerequisites_confirmed=true."
+      error_message = "Deployment is gated until the operator verifies provider registration, subscription/policy/RBAC, regional and ARM64 family quota, SKU/image/disk compatibility, reviewed CIDRs, cost/cleanup ownership and remote state readiness. See docs/runbooks/azure-arm64-deployment.md. The attestation does not authorize deployment."
     }
   }
 }

@@ -1,4 +1,5 @@
 # Nonsecret P1-B template; Azure and Physical workers each need unique identity.
+# Install exactly v1.35.9+k3s1; YAML is configuration, not a version selector.
 node-name: REPLACE_WITH_WORKER_NODE_NAME
 node-ip: REPLACE_WITH_WORKER_TAILSCALE_IPV4
 server: https://REPLACE_WITH_LAPTOP_VM_TAILSCALE_IPV4:6443

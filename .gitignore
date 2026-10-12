@@ -7,6 +7,9 @@
 *.tfplan
 terraform.plan
 terraform-plan*.json
+# Backend deployment configuration stays local; reviewed placeholders are tracked.
+backend*.hcl
+!backend*.hcl.example
 crash.log
 crash.*.log
 override.tf
@@ -74,3 +77,7 @@ coverage.html
 *.log
 .DS_Store
 Thumbs.db
+
+# Read-only verification Python bytecode.
+__pycache__/
+*.py[cod]

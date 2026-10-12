@@ -1,6 +1,6 @@
 # ADR-005 — Hybrid Multi-Architecture Testbed
 
-- 상태: Accepted — Architecture v0.1 설계 결정, 미구현
+- 상태: Accepted — Architecture v0.1 설계 결정; 로컬 AMD64 2-Node 구현, Azure ARM64·Multi-Arch 미구현
 - 날짜: 2026-10-07
 - 관련: [Architecture](../architecture/architecture-v0.1.md), [ADR-001](ADR-001-k3s-single-control-plane.md), [Implementation Plan](../implementation-plan.md)
 
@@ -62,3 +62,7 @@ P1에서 region·quota·image, network·MTU·public 미노출·명시적 egress�
 - [Docker Multi-platform Builds](https://docs.docker.com/build/building/multi-platform/)
 - [GitHub Azure OIDC](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-azure)
 - [ACR Repository Permissions](https://learn.microsoft.com/en-us/azure/container-registry/container-registry-token-based-repository-permissions)
+
+## 구현 상태 기록 (2026-10-12)
+
+설계 책임 경계는 유지한다. 기존 수동 구축과 이번 읽기 전용 재검증의 범위는 [P1-B 기록](../experiments/p1-b-local-platform.md) 및 [관측 기록](../experiments/p2-observability-verification.md)을 따른다. 일부 구현은 ADR의 모든 수용시험 통과 또는 P1/P2 전체 완료를 뜻하지 않는다.

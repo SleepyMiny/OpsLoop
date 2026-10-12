@@ -6,9 +6,11 @@
 | 기준일 | 2026-10-07 |
 | 범위 | Hybrid Kubernetes Failure-Recovery Testbed |
 | 선행 결과 | 요구사항 검토, 전문가 설계 검토, 통합안 독립 검토 |
-| 실행 검증 | 실제 cluster 구축·장애 실험·기능 테스트는 아직 수행하지 않음 |
+| 실행 검증 | Phase 0 당시 미수행; 2026-10-12 로컬 구축·관측 결과는 별도 실험 기록 참조 |
 
 이 문서는 Phase 0에서 확정한 책임 경계와 수용 기준을 보존합니다. “한다”는 표현은 구현해야 할 계약입니다. 수치 기본값은 초기 실험 가정이며 측정 결과가 아닙니다. 책임·권한·상태 전이·지원 범위를 바꾸는 경우 이 문서와 관련 ADR을 함께 개정합니다. 버전·region·quota처럼 외부 환경에 의존하는 값은 사전 확인 없이 확정된 것으로 취급하지 않습니다.
+
+현재 구현 상태: 로컬 AMD64 2-Node 및 관측 스택 부분 구축, Azure ARM64·Demo API·Controller·Runner는 미구현이다. [P1-B](../experiments/p1-b-local-platform.md)와 [관측 검증](../experiments/p2-observability-verification.md)에 사용자 증거/이번 명령 결과를 구분한다. 설계의 초기 수치 가정(예: scrape 10초)을 현재 실측으로 취급하지 않는다.
 
 관련 문서: [README](../../README.md), [Implementation Plan](../implementation-plan.md), [ADR-001](../adr/ADR-001-k3s-single-control-plane.md), [ADR-002](../adr/ADR-002-runtime-recovery-placement.md), [ADR-003](../adr/ADR-003-observability-driven-recovery.md), [ADR-004](../adr/ADR-004-engineering-recovery-boundary.md), [ADR-005](../adr/ADR-005-hybrid-multi-architecture-testbed.md).
 
@@ -599,7 +601,7 @@ Production 방향은 후속 설계 주제이며 이번 프로젝트에 AKS·VPN�
 | Engineering | Codex 인증·모델 접근·CLI/kit revision, sandbox와 provider 인증 격리, GitHub App |
 | 실험 | 부하 한도, cleanup, artifact 보존 공간, 비용 상한 |
 
-구독·장비를 실제 조회하지 않았으므로 준비 완료를 주장하지 않는다. Engineering 전용 준비는 P6의 선행조건이며 P1에서 Codex 실행을 시작할 필요는 없다.
+이 표는 Phase 0의 확인 요구사항이다. 후속 구독·장비 조회 및 수동 구축 결과는 실험 기록을 따르며, 부분 구축만으로 전체 준비 완료를 주장하지 않는다. Engineering 전용 준비는 P6의 선행조건이며 P1에서 Codex 실행을 시작할 필요는 없다.
 
 ## 21. 향후 Repository 구조
 

@@ -19,6 +19,10 @@ variable "location" {
   description = "Required Azure region selected after subscription SKU, quota and image checks."
   type        = string
   nullable    = false
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9]+$", var.location))
+    error_message = "Use an Azure location identifier such as koreacentral or japaneast, after prerequisite checks."
+  }
 }
 
 variable "name_prefix" {
@@ -31,7 +35,7 @@ variable "name_prefix" {
 }
 
 variable "vm_size" {
-  description = "Preferred ARM64 candidate; availability and alternate SKU compatibility are not guaranteed."
+  description = "ARM64 candidates with accelerated networking. D2pls_v6 remains the architecture preference; Japan East Bpsv2 is a quota-positive burstable alternative requiring separate review."
   type        = string
   default     = "Standard_D2pls_v6"
   validation {
@@ -41,8 +45,10 @@ variable "vm_size" {
       "Standard_D2plds_v6",
       "Standard_D2ps_v6",
       "Standard_D2ps_v5",
+      "Standard_B2pls_v2",
+      "Standard_B2ps_v2",
     ], var.vm_size)
-    error_message = "Select an ARM64 candidate: Standard_D2pls_v6, Standard_D2pls_v5, Standard_D2plds_v6, Standard_D2ps_v6 or Standard_D2ps_v5; regional availability still requires verification."
+    error_message = "Select an allowed ARM64 Dpl/Dps or B2pls_v2/B2ps_v2 candidate; regional availability, accelerated networking, quota and image compatibility still require verification."
   }
 }
 
@@ -66,8 +72,16 @@ variable "ubuntu_image" {
 }
 
 variable "admin_username" {
-  type    = string
-  default = "opsloop"
+  type     = string
+  default  = "opsloop"
+  nullable = false
+  validation {
+    condition = (
+      can(regex("^[a-z][a-z0-9_-]{0,31}$", var.admin_username)) &&
+      !contains(["root", "admin", "administrator", "guest", "user", "test"], var.admin_username)
+    )
+    error_message = "Use a nonreserved lowercase Linux admin name, beginning with a letter, up to 32 characters."
+  }
 }
 
 variable "ssh_public_key" {
@@ -94,12 +108,12 @@ variable "bootstrap_ssh_source_cidr" {
 }
 
 variable "vnet_cidr" {
-  description = "Proposed VNet range; changes require overlap review against LAN, Docker, tailnet, Pod and Service networks."
+  description = "P1 fixed VNet range; changes require an architecture/CIDR review before changing this validation."
   type        = string
   default     = "10.80.0.0/16"
   validation {
-    condition     = can(cidrnetmask(var.vnet_cidr))
-    error_message = "Use an IPv4 CIDR."
+    condition     = var.vnet_cidr == "10.80.0.0/16"
+    error_message = "P1 VNet must remain 10.80.0.0/16."
   }
 }
 
@@ -107,8 +121,8 @@ variable "subnet_cidr" {
   type    = string
   default = "10.80.1.0/24"
   validation {
-    condition     = can(cidrnetmask(var.subnet_cidr))
-    error_message = "Use an IPv4 CIDR within the VNet."
+    condition     = var.subnet_cidr == "10.80.1.0/24"
+    error_message = "P1 worker subnet must remain 10.80.1.0/24, within the fixed VNet."
   }
 }
 

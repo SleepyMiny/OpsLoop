@@ -1,6 +1,6 @@
 # ADR-001 — k3s Single Control Plane
 
-- 상태: Accepted — Architecture v0.1 설계 결정, 미구현
+- 상태: Accepted — Architecture v0.1 설계 결정; 로컬 단일 Control Plane 구현, backup/restore 미검증
 - 날짜: 2026-10-07
 - 관련: [Architecture](../architecture/architecture-v0.1.md), [Implementation Plan](../implementation-plan.md), [ADR-005](ADR-005-hybrid-multi-architecture-testbed.md)
 
@@ -48,3 +48,7 @@ P1에서 Node 3개의 Ready·architecture·identity, API 접근 제한, version 
 
 - [K3s Cluster Datastore](https://docs.k3s.io/datastore)
 - [K3s Requirements](https://docs.k3s.io/installation/requirements)
+
+## 구현 상태 기록 (2026-10-12)
+
+설계 책임 경계는 유지한다. 기존 수동 구축과 이번 읽기 전용 재검증의 범위는 [P1-B 기록](../experiments/p1-b-local-platform.md) 및 [관측 기록](../experiments/p2-observability-verification.md)을 따른다. 일부 구현은 ADR의 모든 수용시험 통과 또는 P1/P2 전체 완료를 뜻하지 않는다.
