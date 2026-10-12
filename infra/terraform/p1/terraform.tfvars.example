@@ -6,9 +6,11 @@
 # standardBpsv2Family 0/10, exact Ubuntu image Arm64/V2/plan null confirmed.
 # B-series CPU credits differ from Dplsv6; actual capacity is unverified.
 # Compute/Network/Storage/ContainerRegistry Registered; no auto-registration.
-# Exact image minimum OS disk size is unknown; 32 GiB remains conditional.
+# Null OS disk size inherits the image size; exact capacity/billing tier unknown.
 # Remote backend init/connection verified; real config stays outside Git.
-# User-confirmed credit: USD 100; expiry, budget and bootstrap unresolved.
+# User-confirmed credit: USD 100; expiry and future Worker ACL unresolved.
+# Confirmed operating criteria: max 48h, USD 20 monthly warning, user cleanup.
+# Dedicated Ed25519 key selected privately; temporary operator /32 SSH design.
 # Evidence: docs/experiments/p1-c-azure-allowed-regions.md.
 # Latest: docs/experiments/p1-d-azure-backend-initialization.md.
 # Procedures: docs/runbooks/azure-arm64-deployment.md.
@@ -22,7 +24,7 @@ subscription_id = "00000000-0000-0000-0000-000000000000"
 location        = "eastasia"
 acr_name        = "REPLACEWITHUNIQUENAME"
 acr_sku         = "Basic"
-ssh_public_key  = "REPLACE_WITH_OPENSSH_RSA_PUBLIC_KEY"
+ssh_public_key  = "REPLACE_WITH_OPENSSH_RSA_OR_ED25519_PUBLIC_KEY"
 
 ubuntu_image = {
   publisher = "Canonical"
@@ -34,7 +36,7 @@ ubuntu_image = {
 vm_size                   = "Standard_B2pls_v2"
 vnet_cidr                 = "10.80.0.0/16"
 subnet_cidr               = "10.80.1.0/24"
-os_disk_size_gb           = 32
+os_disk_size_gb           = null
 bootstrap_ssh_source_cidr  = null
 # Optional temporary operator exception, never a wider prefix:
 # bootstrap_ssh_source_cidr = "203.0.113.10/32"

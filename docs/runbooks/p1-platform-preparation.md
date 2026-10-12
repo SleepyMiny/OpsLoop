@@ -51,7 +51,7 @@ az vm image show --location koreacentral --urn Canonical:ubuntu-24_04-lts:server
 
 ## P1-B Terraform 실행 — 별도 승인 이후에만
 
-`infra/terraform/p1/terraform.tfvars.example`은 non-secret 템플릿이다. UUID, region, 글로벌 고유 ACR 이름과 **공개** RSA key를 운영자 로컬 설정으로 채운다. 확인된 Ubuntu exact version을 재확인하고 `latest`는 사용하지 않는다. `bootstrap_ssh_source_cidr=null`이면 public SSH도 닫힌다.
+`infra/terraform/p1/terraform.tfvars.example`은 non-secret 템플릿이다. UUID, region, 글로벌 고유 ACR 이름과 **공개** RSA(2048-bit 이상) 또는 Ed25519 key를 운영자 로컬 설정으로 채운다. 확인된 Ubuntu exact version을 재확인하고 `latest`는 사용하지 않는다. `bootstrap_ssh_source_cidr=null`이면 public SSH도 닫힌다.
 
 testbed root에는 Entra/Azure CLI 인증을 사용하는 partial `azurerm` backend 선언과 비밀값 없는 설정 예제가 준비되어 있다. 실제 backend Storage/container/RBAC·보호/복구는 별도 준비 대상이다. [Azure 배포 준비 runbook](azure-arm64-deployment.md)의 절차로 승인된 backend 설정을 검토하고 인증은 실행 환경으로 공급한다. backend 준비 없이 plan/apply를 실행하지 않는다. 선언/인증/RBAC까지 확인된 뒤 `init` 및 plan을 실행하며 plan artifact는 source 밖 제한 권한 경로에 보관한다. 실제 변경 목록·가격·승인된 subscription을 검토한 뒤에만 **추가 사용자 승인을 받아 apply**한다. P1-A에서는 plan도 실행하지 않았다.
 

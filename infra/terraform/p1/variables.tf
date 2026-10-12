@@ -85,12 +85,12 @@ variable "admin_username" {
 }
 
 variable "ssh_public_key" {
-  description = "Required nonsecret OpenSSH RSA public key (at least 2048 bits); never a private key or file path."
+  description = "Required nonsecret OpenSSH RSA (at least 2048 bits) or Ed25519 public key; never a private key or file path. AzureRM validates the key material."
   type        = string
   nullable    = false
   validation {
-    condition     = can(regex("^ssh-rsa [A-Za-z0-9+/]+={0,3}( .*)?$", trimspace(var.ssh_public_key)))
-    error_message = "Supply an OpenSSH RSA public key; Azure Linux VM requires RSA of at least 2048 bits."
+    condition     = can(regex("^(ssh-rsa|ssh-ed25519) [A-Za-z0-9+/]+={0,2}( [^\\r\\n]*)?$", trimspace(var.ssh_public_key)))
+    error_message = "Supply one OpenSSH RSA (at least 2048 bits) or Ed25519 public key; certificates, private keys and multiline input are not accepted."
   }
 }
 
@@ -127,11 +127,13 @@ variable "subnet_cidr" {
 }
 
 variable "os_disk_size_gb" {
-  type    = number
-  default = 32
+  description = "Null inherits the source image OS disk size. An explicit override requires separate image-minimum and billing-tier review."
+  type        = number
+  default     = null
+  nullable    = true
   validation {
-    condition     = var.os_disk_size_gb >= 30 && floor(var.os_disk_size_gb) == var.os_disk_size_gb
-    error_message = "Disk size must be a whole number of GiB >= 30 and at least the selected image minimum."
+    condition     = var.os_disk_size_gb == null ? true : (var.os_disk_size_gb >= 30 && var.os_disk_size_gb <= 4095 && floor(var.os_disk_size_gb) == var.os_disk_size_gb)
+    error_message = "Disk size must be null (inherit image size) or a whole number of GiB from 30 to 4095; an override must also meet the separately verified image minimum."
   }
 }
 

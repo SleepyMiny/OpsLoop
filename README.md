@@ -76,7 +76,9 @@ Tailscale 실험망과 Multi-Architecture 이미지를 사용합니다. 이 구�
 - Arch Host `archgram` (`100.80.16.28`): 개발·원격 관리·Engineering Runner 실행 위치이며 Kubernetes Node가 아닙니다.
 - VM `opsloop-control` (`100.73.4.76`): 단일 Control Plane, 4 vCPU / 8 GiB / 80 GiB; 관측 스택과 향후 Recovery Candidate입니다.
 - Physical Worker `sarmubuntuserver` (`100.82.241.77`): AMD64 Primary 실행 위치이며 기존 서비스·데이터를 보존합니다. Demo API는 아직 배치하지 않았습니다.
-- Azure ARM64 Worker: 고정 후보는 East Asia / `Standard_B2pls_v2` (ARM64, 2 vCPU / 4 GiB)입니다. Provider 등록과 실제 Remote Backend 초기화·연결 검증은 완료했습니다. 이미지의 32 GiB 호환성, RSA 공개키·최초 bootstrap 경로·ACL, 비용 상한·종료 책임과 credit 만료일은 미확정입니다. Plan은 실행하지 않았고 배포 gate는 false입니다. [Backend 연결 및 배포 준비 기록](docs/experiments/p1-d-azure-backend-initialization.md).
+- Azure ARM64 Worker: 고정 후보는 East Asia / `Standard_B2pls_v2` (ARM64, 2 vCPU / 4 GiB)입니다. Provider 등록과 실제 Remote Backend 초기화·연결 검증은 완료했습니다. 전용 Ed25519 키와 임시 /32 SSH 후 제거 절차, 최대 48시간 실험·월 US$20 경고·사용자 종료 책임을 확정했습니다. OS disk는 검증된 Provider 계약에 따라 원본 이미지 크기를 상속하도록 수정했습니다. 사용자 확인 일반 Allow All 규칙을 근거로 조건부 네트워크 허용을 검토했고 Saved Plan은 9개 생성·0개 수정·0개 삭제로 성공했습니다. private Plan 준비 gate는 true이며 Apply는 미승인입니다. 전체 Tailnet 정책·미래 가입/연결·디스크 과금 tier·credit 만료일은 미확인입니다. [Backend 연결 및 배포 준비 기록](docs/experiments/p1-d-azure-backend-initialization.md).
+
+Azure Budget 생성은 승인됐지만 실제 청구 통화가 KRW로 확인되어 원화 금액·환산 기준 확정 전 생성은 보류했습니다. 수신 이메일은 공개 저장소에 기록하지 않습니다. Budget은 자동 과금 차단 장치가 아닙니다.
 
 [관측 values](infra/observability/kube-prometheus-stack.values.yaml)는 기존 수동 배포 파일이며 chart `91.8.1`, release `opsloop-mon`, namespace `monitoring` 기준입니다. 읽기 전용 검증은 `python3 scripts/verify-platform.py --help`, Azure 조사·배포 전 조건 확인은 `python3 scripts/azure-arm64-survey.py --help`에서 시작합니다. [플랫폼 runbook](docs/runbooks/p1-platform-preparation.md)과 [Azure 배포 준비 절차](docs/runbooks/azure-arm64-deployment.md)에 승인 경계·state·bootstrap·cleanup을 기록합니다. 관리자 kubeconfig `~/.kube/opsloop.yaml`은 출력·복사·Git 추적하지 않습니다.
 

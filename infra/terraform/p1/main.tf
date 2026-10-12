@@ -115,6 +115,8 @@ resource "azurerm_linux_virtual_machine" "worker" {
   }
 
   # Managed OS disk is owned inline by the VM; no duplicate managed_disk.
+  # Null omits the size override; AzureRM 4.64.0 inherits the source image size.
+  # StandardSSD_LRS remains explicit, but its capacity/billing tier is unknown.
   os_disk {
     name                 = "${var.name_prefix}-osdisk"
     caching              = "ReadWrite"
