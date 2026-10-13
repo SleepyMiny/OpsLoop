@@ -46,7 +46,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          # Pin by digest so a retag cannot change the privileged binfmt image.
+          image: docker.io/tonistiigi/binfmt:qemu-v10.2.3-68@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # Pin by digest so a retag cannot change the builder.
+          driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
       - name: controller multi-arch build (no push)
         run: docker buildx build --platform linux/amd64,linux/arm64 --build-arg APP=cmd/opsloop-controller --build-arg "VERSION=$GITHUB_SHA" .
       - name: demo-api smoke (QEMU emulated)
@@ -79,7 +85,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: base images pinned by digest
+        run: awk 'toupper($1)=="FROM" || tolower($0) ~ /^#[ \t]*syntax[ \t]*=/{n+=toupper($1)=="FROM"; if ($0 !~ /@sha256:[0-9a-f]{64}/) bad=1} END{exit bad || !n}' Dockerfile
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # Pin by digest so a retag cannot change the builder.
+          driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
