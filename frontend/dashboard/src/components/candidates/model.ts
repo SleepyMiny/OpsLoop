@@ -525,7 +525,10 @@ export function evaluateNow(snapshot: DashboardSnapshot) {
     policy: snapshot.policy.spec,
     now: snapshot.observedAt,
     cooldowns: snapshot.policy.status.cooldowns,
-    recentFailures: failuresFromAttempts(incident?.status.runtime.attempts),
+    recentFailures: [
+      ...(snapshot.policy.status.recentFailures ?? []),
+      ...failuresFromAttempts(incident?.status.runtime.attempts),
+    ],
     ...(trigger?.type === 'NodeNotReady' ? { failedNodeName: trigger.nodeName } : {}),
   };
   return evaluateCandidates(input);

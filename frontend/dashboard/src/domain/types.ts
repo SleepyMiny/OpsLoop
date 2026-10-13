@@ -229,6 +229,8 @@ export interface RecoveryPolicyStatus {
   activeIncidentRef: string | null;
   incidentSequence: number;
   cooldowns: CooldownEntry[];
+  /** Policy-wide failed actions (Go status.recentFailures) for the score penalty. */
+  recentFailures?: Array<{ nodeName: string; at: number }>;
 }
 
 export interface RecoveryPolicy {
@@ -356,6 +358,8 @@ export const RUNTIME_PHASES = [
   'SUPERSEDED',
   'UNSUPPORTED_WORKLOAD',
   'MANUAL_REQUIRED',
+  /** ObserveOnly terminal state in the Go CRD: decided, never acted. */
+  'OBSERVED',
 ] as const;
 export type RuntimePhase = (typeof RUNTIME_PHASES)[number];
 
@@ -493,7 +497,8 @@ export interface IncidentEvent {
 
 export type IncidentTrigger =
   | { type: 'NodeNotReady'; nodeName: string; observedAt: number }
-  | { type: 'RepeatedRestart'; podName: string; restarts: number; observedAt: number };
+  /** restarts is absent when the source records only that the threshold was reached. */
+  | { type: 'RepeatedRestart'; podName: string; restarts?: number; observedAt: number };
 
 export interface RecoveryIncident {
   name: string;

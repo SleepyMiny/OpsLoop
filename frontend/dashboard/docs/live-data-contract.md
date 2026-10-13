@@ -1,6 +1,6 @@
 # Live 데이터 계약 (초안)
 
-대시보드가 실제 데이터를 받으려면 **읽기 전용 BFF**가 필요하다. 이 문서는 그 BFF가 돌려줄 JSON 형태를 정의한다. 아직 저장소에 BFF는 없고, 이 문서는 [architecture v0.1](../../../docs/architecture/architecture-v0.1.md)의 계약을 화면 관점에서 옮긴 초안이다.
+대시보드가 실제 데이터를 받으려면 **읽기 전용 BFF**가 필요하다. 이 문서는 그 BFF가 돌려줄 JSON 형태를 정의한다. 아직 저장소에 BFF는 없고, 이 문서는 [architecture v0.1](../../../docs/architecture/architecture-v0.1.md)과 Go `api/v1alpha1` CRD를 화면 관점에서 연결한 초안이다.
 
 ## 왜 BFF인가
 
@@ -39,18 +39,34 @@ TypeScript 정의가 기준이다: [`src/domain/types.ts`](../src/domain/types.t
 
 `source`는 BFF가 무엇을 보내든 대시보드가 `live`로 덮어쓴다.
 
-## Go `api/v1alpha1`과 맞출 항목
+## Go `api/v1alpha1` CRD를 그대로 받기
 
-CRD Go 타입은 별도 브랜치에서 작성 중이다. 타입이 커밋되면 **Go json 태그가 기준**이고 `types.ts`를 맞춘다. 차이가 예상되는 지점과 처리 방향은 다음과 같다.
+Go CRD 타입은 백엔드 브랜치 `claude/orchestrate-project-status-e3aa92`의 커밋 `f47c7d1`(`api/v1alpha1`)에 있다. BFF는 `policy`, `activeIncident`, `recentIncidents[]`에 **CRD 객체를 변환 없이** 넣어도 된다(`kind: RecoveryPolicy` / `kind: RecoveryIncident`로 구분). 대시보드가 [`src/data/live/fromCrd.ts`](../src/data/live/fromCrd.ts)에서 화면 모델로 바꾼다. 화면 모델 형태(`kind` 없음)로 보내도 그대로 받는다.
 
-| 항목 | 대시보드 | Kubernetes 관례 | 처리 |
-| --- | --- | --- | --- |
-| 시각 | epoch ms `number` | `metav1.Time` (RFC 3339 문자열) | BFF에서 변환 또는 `parseSnapshot`에 변환 추가 |
-| 메모리·CPU | bytes·millicores 정수 | `resource.Quantity` 문자열 | BFF에서 정수로 변환 |
-| 비율 | 0..1 | 정해지지 않음 | 0..1 유지 제안 |
-| reject reason | `NODE_NOT_READY` 등 문자열 | 같음 | 그대로 |
-| history 길이 | events 40개, attempts는 예산 이내 | bounded | Controller 상한을 따름 |
-| `decision.sourceNodeName` | 결정 시점에 workload가 있던 노드 | §5 필드 목록에 없음 | §7 기준 상태 저장의 일부로 Go 계약에 추가 제안. 이전 Pod가 삭제된 뒤에도 경로 출발점을 알 수 있음 |
+| CRD 형식 | 화면 모델 | 변환 |
+| --- | --- | --- |
+| `metav1.Time` (RFC 3339) | epoch ms | `Date.parse`, 실패 시 필드 경로를 담은 오류 |
+| `metav1.Duration` (`"20s"`, `"30m"`) | 초 | Go duration 파서 |
+| `resource.Quantity` (`"512Mi"`) | bytes | Ki/Mi/Gi/Ti, k/M/G/T, 정수 |
+| 정책 percent(`maxCPUUtilizationPercent: 85`), 가중치 합 100 | 0..1 | ÷ 100 |
+| `cpuUtilizationPermille`, `*HeadroomPermille` | 0..1 | ÷ 1000 |
+| `scoreMilli`, `penaltyMilli` | 점 | ÷ 1000. 가중 기여도는 `spec.policy` 가중치로 다시 계산 |
+| `memAvailableBytes` / `memTotalBytes` | Memory 사용률 | 1 − available/total |
+| `phase: ""` | `DETECTED` | `TARGET_SELECTED`는 Controller가 저장하지 않으므로 화면에도 지속 단계로 나오지 않는다. `OBSERVED`(ObserveOnly 종료)는 그대로 |
+| `actionType: Relocation \| None` | `relocation \| null` | v1alpha1에는 restart가 없다(Demo A 범위) |
+| `attempts[].outcome` | `result` | Reserved·Patched → pending(PodReady 이후 placed), Succeeded → verified, Failed·Superseded·Cancelled → failed |
+| `status.recentFailures[]` + `budget.cooldown` | `cooldowns[]`, 감점 입력 | 실패 시각 + cooldown. 정책은 workload 하나를 대상으로 하므로 workload UID를 붙인다 |
+| `spec.detectedAt`, 첫 attempt의 `decision.decidedAt`·`podReadyAt`, `status.runtime.completedAt` | `timings` | CRD에는 timings 객체가 없어 흩어진 시각을 모은다 |
+| `spec.baseline.hostname` | `decision.sourceNodeName` | 경로 출발점 |
+| (없음) | `events[]` | CRD 시각만으로 만든 사건 목록(로그 본문 없음) |
+
+CRD에 없어서 BFF가 함께 보내야 하는 값:
+
+- `driverReports: [{ incident, faultInjectedAt }]`: Demo Driver의 장애 주입 시각(§18). 없으면 T_detect·T_recover를 "API 장애 신호 기준"으로 표시한다.
+- `policyHash`: 현재 정책 spec의 hash. 없으면 활성 Incident의 `spec.policyHash`를 쓴다.
+- `cluster.nodes`, `workload`, `http.probes`: Kubernetes API·Prometheus·Demo Driver에서 조합한다(위 표).
+
+v1alpha1에 아직 없는 정책 항목(격리, Engineering)은 화면에서 "비활성"으로 표시한다.
 
 ## 실패 시 동작
 

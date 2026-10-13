@@ -77,7 +77,7 @@ src/
 │   ├── useDashboard.ts    # React 구독 훅
 │   ├── createDataSource.ts
 │   ├── demo/              # 결정적 시뮬레이션 엔진과 시나리오
-│   └── live/              # 읽기 전용 BFF용 HTTP 어댑터(스텁)
+│   └── live/              # 읽기 전용 BFF용 HTTP 어댑터와 Go CRD 변환(fromCrd)
 ├── components/    # 화면 영역: cluster, candidates, incident, engineering, policy, shared
 ├── app/           # 셸: 헤더, 해설, 재생 바, 탭, 오류 경계, 단축키
 └── styles/        # 디자인 토큰(밝은/어두운 테마)
@@ -89,7 +89,7 @@ src/
 
 1. CRD·Prometheus를 읽어 [`docs/live-data-contract.md`](docs/live-data-contract.md) 형태의 snapshot을 돌려주는 읽기 전용 BFF를 만든다.
 2. `.env.local`에 `VITE_OPSLOOP_SOURCE=live`, `VITE_OPSLOOP_API_BASE=<BFF 주소>`를 둔다(이 파일은 Git에 올리지 않는다).
-3. Go `api/v1alpha1` 타입이 확정되면 `src/domain/types.ts`의 필드명을 json 태그에 맞추고 `parseSnapshot`에 시각·수량 변환을 추가한다.
+3. BFF는 Go `api/v1alpha1` CRD 객체를 그대로 보내도 된다. 단위·시각·phase 변환은 `src/data/live/fromCrd.ts`가 맡는다(백엔드 커밋 `f47c7d1` 기준). CRD에 없는 장애 주입 시각은 `driverReports`로 함께 보낸다.
 
 다른 형태의 출처(예: WebSocket)가 필요하면 `DashboardDataSource`를 구현하는 클래스를 하나 더 만들고 `createDataSource`에서 고르면 된다.
 

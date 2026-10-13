@@ -56,6 +56,7 @@ export const RUNTIME_PHASE_LABEL: Record<RuntimePhase, string> = {
   SUPERSEDED: '외부 변경으로 중단',
   UNSUPPORTED_WORKLOAD: '지원하지 않는 workload',
   MANUAL_REQUIRED: '수동 판단 필요',
+  OBSERVED: '관찰만 함 (ObserveOnly)',
 };
 
 export const ENGINEERING_PHASE_LABEL: Record<EngineeringPhase, string> = {

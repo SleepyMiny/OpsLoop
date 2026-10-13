@@ -108,8 +108,11 @@ export function describeTrigger(trigger: IncidentTrigger): TriggerView {
     code: trigger.type,
     label: '반복 재시작',
     subject: trigger.podName,
-    detail: `정해진 시간 안에 ${trigger.restarts}번 다시 시작했습니다.`,
-    extra: `${trigger.restarts}회 재시작`,
+    detail:
+      trigger.restarts === undefined
+        ? '정해진 시간 안에 재시작 기준 횟수에 도달했습니다.'
+        : `정해진 시간 안에 ${trigger.restarts}번 다시 시작했습니다.`,
+    extra: trigger.restarts === undefined ? '재시작 기준 도달' : `${trigger.restarts}회 재시작`,
   };
 }
 

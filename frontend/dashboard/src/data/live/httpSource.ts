@@ -1,4 +1,6 @@
 import type { DashboardSnapshot } from '../../domain/types';
+import type { DriverReport } from './crd';
+import { incidentFromCrd, isCrdIncident, isCrdPolicy, policyFromCrd } from './fromCrd';
 import type { DashboardDataSource, SourceStatus } from '../source';
 
 /**
@@ -141,19 +143,26 @@ export class HttpDataSource implements DashboardDataSource {
  * message instead of being rendered with NaN or an unknown label. It is not a
  * full schema validator; the BFF remains responsible for content.
  */
-export function parseSnapshot(body: unknown): DashboardSnapshot {
-  if (!isRecord(body)) throw new Error('snapshot is not an object');
-  const { observedAt, cluster, workload, policy, http } = body;
+export function parseSnapshot(input: unknown): DashboardSnapshot {
+  if (!isRecord(input)) throw new Error('snapshot is not an object');
+  // Work on a copy: CRD conversion replaces fields and must not mutate the response.
+  const body: Record<string, unknown> = { ...input };
+  const { observedAt, cluster, workload, http } = body;
   if (!isFiniteNumber(observedAt)) throw new Error('snapshot.observedAt must be epoch ms');
   if (!isRecord(cluster) || !Array.isArray(cluster.nodes)) throw new Error('snapshot.cluster.nodes missing');
   cluster.nodes.forEach((node, i) => validateNode(node, `cluster.nodes[${i}]`));
   if (!isRecord(workload) || typeof workload.name !== 'string') throw new Error('snapshot.workload missing');
   validateQuantity(workload.requests, 'workload.requests');
+  normalizeCrdObjects(body, workload);
+  const policy = body.policy;
   if (!isRecord(policy) || !isRecord(policy.spec)) throw new Error('snapshot.policy.spec missing');
   validatePolicy(policy);
   validateOptionalArray(workload.tolerations, 'workload.tolerations', isRecord);
   validateOptionalArray(workload.unsupportedConstraints, 'workload.unsupportedConstraints', (x) => typeof x === 'string');
   if (!isRecord(http) || !Array.isArray(http.probes)) throw new Error('snapshot.http.probes missing');
+  // BFF-only join fields are consumed by the conversion above.
+  delete body.driverReports;
+  delete body.policyHash;
   const snapshot = body as unknown as DashboardSnapshot;
   // Live data never carries demo narration, and is always labeled live.
   const { narration: _ignored, ...rest } = snapshot;
@@ -163,6 +172,28 @@ export function parseSnapshot(body: unknown): DashboardSnapshot {
     activeIncident: snapshot.activeIncident ?? null,
     recentIncidents: Array.isArray(snapshot.recentIncidents) ? snapshot.recentIncidents : [],
   };
+}
+
+/**
+ * The BFF may forward the Go CRD objects (kind RecoveryPolicy / RecoveryIncident)
+ * as-is; they are converted to the view model here, in place, before validation.
+ * `driverReports` carries Demo Driver fault-injection times (§18) and
+ * `policyHash` the hash of the live policy spec, neither of which the CRDs hold.
+ */
+function normalizeCrdObjects(body: Record<string, unknown>, workload: Record<string, unknown>): void {
+  const reports = Array.isArray(body.driverReports) ? (body.driverReports as DriverReport[]) : [];
+  const report = (name: string) => reports.find((r) => r.incident === name);
+  const convert = (x: unknown) => (isCrdIncident(x) ? incidentFromCrd(x, report(x.metadata.name)) : x);
+  body.activeIncident = convert(body.activeIncident ?? null);
+  if (Array.isArray(body.recentIncidents)) body.recentIncidents = body.recentIncidents.map(convert);
+  if (isCrdPolicy(body.policy)) {
+    const active = body.activeIncident as { spec?: { policyHash?: string } } | null;
+    const hash = typeof body.policyHash === 'string' ? body.policyHash : active?.spec?.policyHash;
+    body.policy = policyFromCrd(body.policy, {
+      workloadUid: String(workload.uid ?? ''),
+      ...(hash ? { policyHash: hash } : {}),
+    });
+  }
 }
 
 function isRecord(x: unknown): x is Record<string, unknown> {
