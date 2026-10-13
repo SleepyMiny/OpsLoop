@@ -148,6 +148,10 @@ func TestReportFalsePaths(t *testing.T) {
 		"wrong selected node":    func(in *ReportInput) { in.ExpectNode = "opsloop-azure-worker" },
 		"not recovered":          func(in *ReportInput) { in.Incident.Status.Runtime.Phase = "FAILED" },
 		"no recover run":         func(in *ReportInput) { in.Probe = in.Probe[:13] },
+		"stale incident detected before inject": func(in *ReportInput) {
+			in.Incident.Spec.DetectedAt.Time = in.InjectAt.Add(-2 * time.Second)
+		},
+		"zero detectedAt": func(in *ReportInput) { in.Incident.Spec.DetectedAt.Time = time.Time{} },
 		"retry": func(in *ReportInput) {
 			rt := &in.Incident.Status.Runtime
 			failed := rt.Attempts[0]
@@ -170,6 +174,17 @@ func TestReportFalsePaths(t *testing.T) {
 				t.Errorf("imageDigestMatch = true")
 			}
 		})
+	}
+}
+
+func TestReportDetectedAtSecondResolution(t *testing.T) {
+	// detectedAt is truncated to the second, so a sub-second injectAt may be up to 1s later.
+	for _, offset := range []time.Duration{-time.Second, -900 * time.Millisecond, 0} {
+		in := baseInput(t)
+		in.InjectAt = in.Incident.Spec.DetectedAt.Time.Add(-offset)
+		if s := Report(in); slices.Contains(s.Notes, "FAIL: incident detectedAt is before injectAt-1s") {
+			t.Errorf("detectedAt %v from injectAt: notes %v", offset, s.Notes)
+		}
 	}
 }
 
@@ -302,8 +317,10 @@ func TestRunReportExpectNodeRequired(t *testing.T) {
 	if err := run(append(args, "-mode", "Enforce", "-scenario", "azure-loaded"), io.Discard); err == nil {
 		t.Fatal("Enforce without -expect-node: want error")
 	}
-	if err := run(append(args, "-mode", "Enforce", "-scenario", "azure-loaded", "-expect-reject", "bad"), io.Discard); err == nil {
-		t.Fatal("malformed -expect-reject: want error")
+	err := run(append(args, "-mode", "Enforce", "-scenario", "azure-loaded", "-expect-node", "opsloop-control",
+		"-expect-reject", "bad"), io.Discard)
+	if err == nil || !strings.Contains(err.Error(), `want <node>=<REASON>, got "bad"`) {
+		t.Fatalf("malformed -expect-reject: err %v, want format error", err)
 	}
 }
 

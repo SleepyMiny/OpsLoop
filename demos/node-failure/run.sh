@@ -120,17 +120,32 @@ if [[ " ${LOADS[*]} " == *" reserve-control-requests.yaml "* ]]; then
 fi
 preflight_exit
 
-if [[ "$OPSLOOP_SCENARIO" == all-rejected && -n "$(k get node opsloop-azure-worker --ignore-not-found -o name)" ]]; then
+AZURE_NODE="$(k get node opsloop-azure-worker --ignore-not-found -o name)" || fail "cannot query Node opsloop-azure-worker"
+if [[ "$OPSLOOP_SCENARIO" == all-rejected && -n "$AZURE_NODE" ]]; then
   REJECTS+=(opsloop-azure-worker=CPU_PRESSURE)
   LOADS+=(load-azure-cpu.yaml)
   NODES+=(opsloop-azure-worker)
 fi
+# primary-only is the reduced 2-node run; a third candidate would make it a FAIL round instead.
+if [[ "$OPSLOOP_SCENARIO" == primary-only && -n "$AZURE_NODE" ]]; then
+  fail "primary-only needs no opsloop-azure-worker Node, but it exists"
+fi
 
 for n in "${NODES[@]}"; do node_ready "$n" || fail "node $n is not Ready"; done
 
-IFS='|' read -r P_ENABLED P_MODE P_ACTIVE P_CIRCUITS P_FAILURES P_SEQ P_DEADLINE < <(k -n "$NS" get recoverypolicy "$POLICY" \
-  -o jsonpath='{.spec.enabled}|{.spec.mode}|{.status.activeIncident.name}|{.status.circuits}|{.status.recentFailures}|{.status.incidentSequence}|{.spec.budget.incidentDeadline}{"\n"}') ||
+# O8: expected and rejected candidates must carry the Policy candidateSelector label.
+for n in $EXPECT_NODE "${REJECTS[@]%%=*}"; do
+  if lbl="$(k get node "$n" -o jsonpath='{.metadata.labels.opsloop\.io/recovery-candidate}')"; then
+    [[ "$lbl" == true ]] || fail "node $n lacks label opsloop.io/recovery-candidate=true (O8)"
+  else
+    fail "cannot read labels of node $n"
+  fi
+done
+
+IFS='|' read -r P_UID P_ENABLED P_MODE P_ACTIVE P_CIRCUITS P_FAILURES P_SEQ P_DEADLINE < <(k -n "$NS" get recoverypolicy "$POLICY" \
+  -o jsonpath='{.metadata.uid}|{.spec.enabled}|{.spec.mode}|{.status.activeIncident.name}|{.status.circuits}|{.status.recentFailures}|{.status.incidentSequence}|{.spec.budget.incidentDeadline}{"\n"}') ||
   fail "cannot read RecoveryPolicy $NS/$POLICY"
+[[ -n "${P_UID:-}" ]] || fail "policy metadata.uid is empty"
 [[ "${P_ENABLED:-}" == true ]] || fail "policy spec.enabled is not true"
 [[ "${P_MODE:-}" == "$OPSLOOP_MODE" ]] || fail "policy spec.mode is '${P_MODE:-}', want $OPSLOOP_MODE"
 [[ -z "${P_ACTIVE:-}" ]] || fail "policy has activeIncident ${P_ACTIVE}"
@@ -142,7 +157,11 @@ if DEADLINE_S="$(dur_seconds "${P_DEADLINE:-}")"; then POLL_SECONDS=$((DEADLINE_
 
 single_primary_pod_ready || fail "want exactly one Ready demo-api Pod on $PRIMARY"
 for p in "${LOAD_PODS[@]}"; do
-  [[ -z "$(k -n "$NS" get pod "$p" --ignore-not-found -o name)" ]] || fail "load Pod $p already exists"
+  if out="$(k -n "$NS" get pod "$p" --ignore-not-found -o name)"; then
+    [[ -z "$out" ]] || fail "load Pod $p already exists"
+  else
+    fail "cannot query load Pod $p"
+  fi
 done
 
 if code="$(curl -sS --max-time 5 -o "$RUN_DIR/preflight-response.json" -w '%{http_code}' "$OPSLOOP_URL")"; then
@@ -162,6 +181,13 @@ done
 
 # The reset trap must never wait for a sudo password.
 psh sudo -n true </dev/null || fail "ssh $OPSLOOP_PRIMARY_SSH 'sudo -n true' failed (NOPASSWD sudo needed)"
+# Injection must stop k3s-agent on the Primary itself, never on another Node.
+if ssh_host="$(psh hostname </dev/null)"; then
+  [[ "$ssh_host" == "$PRIMARY" ]] ||
+    fail "ssh $OPSLOOP_PRIMARY_SSH reaches host '$ssh_host', not Node $PRIMARY"
+else
+  fail "ssh $OPSLOOP_PRIMARY_SSH hostname failed"
+fi
 
 preflight_exit
 
@@ -210,7 +236,7 @@ stop_probe() {
 }
 
 reset_all() {
-  local rc=$? i
+  local rc=$? i active
   trap - EXIT INT TERM
   stop_probe
   log "reset: starting k3s-agent on the Primary (harmless if never stopped)"
@@ -220,7 +246,8 @@ reset_all() {
 
   k -n "$NS" patch recoverypolicy "$POLICY" --type=merge -p '{"spec":{"enabled":false}}' || reset_die "disable policy"
   for ((i = 0; i < 30; i++)); do
-    [[ -z "$(k -n "$NS" get recoverypolicy "$POLICY" -o jsonpath='{.status.activeIncident.name}')" ]] && break
+    # A failed get also prints nothing; only a successful empty read means released.
+    if active="$(k -n "$NS" get recoverypolicy "$POLICY" -o jsonpath='{.status.activeIncident.name}')" && [[ -z "$active" ]]; then break; fi
     sleep 2
   done
   ((i < 30)) || reset_die "activeIncident not released within 60s"
@@ -278,14 +305,15 @@ PHASE=""
 TIMED_OUT=1
 end=$(($(date +%s) + POLL_SECONDS))
 while (($(date +%s) < end)); do
-  while IFS='|' read -r name seq phase; do
-    if [[ -n "$name" ]] && ((seq > PREV_SEQ)); then
+  # The uid match drops Incidents left by an earlier Policy object with the same name.
+  while IFS='|' read -r name puid seq phase; do
+    if [[ -n "$name" && "$puid" == "$P_UID" ]] && ((seq > PREV_SEQ)); then
       INCIDENT=$name
       PHASE=$phase
       break
     fi
   done < <(k -n "$NS" get recoveryincidents.opsloop.io -l "opsloop.io/policy=$POLICY" --sort-by=.spec.sequence \
-    -o jsonpath='{range .items[*]}{.metadata.name}|{.spec.sequence}|{.status.runtime.phase}{"\n"}{end}')
+    -o jsonpath='{range .items[*]}{.metadata.name}|{.spec.policyRef.uid}|{.spec.sequence}|{.status.runtime.phase}{"\n"}{end}')
   [[ -n "$PHASE" && "$TERMINAL_PHASES" == *" $PHASE "* ]] && { TIMED_OUT=0; break; }
   sleep 5
 done

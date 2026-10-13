@@ -196,6 +196,8 @@ func Report(in ReportInput) Summary {
 			s.Notes = append(s.Notes, "FAIL: "+what)
 		}
 	}
+	// An Incident detected before injection (beyond the +-1s VM clock resolution) is not this run's.
+	check(!inc.Spec.DetectedAt.Time.Before(in.InjectAt.Add(-time.Second)), "incident detectedAt is before injectAt-1s")
 
 	if dec != nil {
 		s.ImageIndexDigest = dec.ImageIndexDigest

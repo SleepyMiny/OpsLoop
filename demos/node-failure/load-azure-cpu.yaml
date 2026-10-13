@@ -10,6 +10,12 @@ spec:
   nodeSelector:
     kubernetes.io/hostname: opsloop-azure-worker
   automountServiceAccountToken: false
+  # Meets the opsloop-demo namespace's restricted Pod Security level.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault
   containers:
     - name: burn-1
       image: docker.io/library/busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
@@ -17,9 +23,19 @@ spec:
       resources:
         requests: {cpu: 10m, memory: 8Mi}
         limits: {cpu: 900m, memory: 32Mi}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
     - name: burn-2
       image: docker.io/library/busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
       command: ["sh", "-c", "while :; do :; done"]
       resources:
         requests: {cpu: 10m, memory: 8Mi}
         limits: {cpu: 900m, memory: 32Mi}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
