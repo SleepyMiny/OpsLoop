@@ -104,7 +104,22 @@ export function ruleGroups(policy: RecoveryPolicy): RuleGroup[] {
     {
       id: 'score',
       title: '점수 가중치',
-      rows: [{ label: '최근 실패 감점', value: `실패 1회당 ${s.score.recentFailurePenalty}점`, field: 'recentFailurePenalty' }],
+      rows: [
+        { label: '최근 실패 감점', value: `실패 1회당 ${s.score.recentFailurePenalty}점`, field: 'recentFailurePenalty' },
+        {
+          label: '감점 상한',
+          value: typeof s.score.recentFailurePenaltyCap === 'number' ? `${s.score.recentFailurePenaltyCap}점` : '정하지 않음',
+          field: 'recentFailurePenaltyCap',
+        },
+        {
+          label: '실패 이력 구간',
+          value:
+            typeof s.score.failureHistoryWindowSeconds === 'number'
+              ? secondsLabel(s.score.failureHistoryWindowSeconds)
+              : '정하지 않음',
+          field: 'failureHistoryWindowSeconds',
+        },
+      ],
     },
     {
       id: 'budget',

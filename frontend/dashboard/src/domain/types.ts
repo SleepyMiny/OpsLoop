@@ -195,10 +195,11 @@ export interface RecoveryPolicySpec {
     recentFailurePenalty: number;
     /**
      * Upper bound and history window for the penalty. §8 requires both to be
-     * explicit but leaves the values open; the demo policy picks its own.
+     * explicit but leaves the values open; the demo policy picks its own. Not in
+     * the Go CRD yet: when absent, there is no cap and every failure counts.
      */
-    recentFailurePenaltyCap: number;
-    failureHistoryWindowSeconds: number;
+    recentFailurePenaltyCap?: number;
+    failureHistoryWindowSeconds?: number;
   };
   budget: {
     maxActionsPerIncident: number;

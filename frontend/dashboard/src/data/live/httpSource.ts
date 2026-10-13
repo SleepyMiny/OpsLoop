@@ -150,6 +150,9 @@ export function parseSnapshot(body: unknown): DashboardSnapshot {
   if (!isRecord(workload) || typeof workload.name !== 'string') throw new Error('snapshot.workload missing');
   validateQuantity(workload.requests, 'workload.requests');
   if (!isRecord(policy) || !isRecord(policy.spec)) throw new Error('snapshot.policy.spec missing');
+  validatePolicy(policy);
+  validateOptionalArray(workload.tolerations, 'workload.tolerations', isRecord);
+  validateOptionalArray(workload.unsupportedConstraints, 'workload.unsupportedConstraints', (x) => typeof x === 'string');
   if (!isRecord(http) || !Array.isArray(http.probes)) throw new Error('snapshot.http.probes missing');
   const snapshot = body as unknown as DashboardSnapshot;
   // Live data never carries demo narration, and is always labeled live.
@@ -200,4 +203,54 @@ function validateNode(node: unknown, path: string): void {
   validateSample(node.usage.memory, `${path}.usage.memory`);
   validateSample(node.usage.memAvailableBytes, `${path}.usage.memAvailableBytes`);
   if (!Array.isArray(node.pods)) throw new Error(`${path}.pods missing`);
+  validateOptionalArray(
+    node.taints,
+    `${path}.taints`,
+    (t) => isRecord(t) && typeof t.key === 'string' && TAINT_EFFECTS.has(t.effect as string),
+  );
+}
+
+const TAINT_EFFECTS = new Set(['NoSchedule', 'PreferNoSchedule', 'NoExecute']);
+
+function validateOptionalArray(value: unknown, path: string, item: (x: unknown) => boolean): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || !value.every(item)) throw new Error(`${path} must be an array of valid entries`);
+}
+
+function requireNumbers(record: unknown, keys: string[], path: string): void {
+  if (!isRecord(record)) throw new Error(`${path} missing`);
+  for (const key of keys) {
+    if (!isFiniteNumber(record[key])) throw new Error(`${path}.${key} must be a number`);
+  }
+}
+
+function validatePolicy(policy: Record<string, unknown>): void {
+  const spec = policy.spec as Record<string, unknown>;
+  requireNumbers(
+    spec.filter,
+    [
+      'maxCPUUtilization',
+      'maxMemoryUtilization',
+      'minimumAvailableMemoryBytes',
+      'startupMemoryBudgetBytes',
+      'requestedCapacityReserve',
+      'maxSampleAgeSeconds',
+    ],
+    'policy.spec.filter',
+  );
+  requireNumbers(spec.score, ['cpuWeight', 'memoryWeight', 'requestsWeight', 'recentFailurePenalty'], 'policy.spec.score');
+  const score = spec.score as Record<string, unknown>;
+  for (const optional of ['recentFailurePenaltyCap', 'failureHistoryWindowSeconds']) {
+    if (score[optional] !== undefined && !isFiniteNumber(score[optional])) {
+      throw new Error(`policy.spec.score.${optional} must be a number when present`);
+    }
+  }
+  if (!Array.isArray(spec.requiredPlatforms)) throw new Error('policy.spec.requiredPlatforms missing');
+  const status = policy.status;
+  if (!isRecord(status) || !Array.isArray(status.cooldowns)) throw new Error('policy.status.cooldowns missing');
+  status.cooldowns.forEach((c, i) => {
+    if (!isRecord(c) || typeof c.workloadUid !== 'string' || typeof c.nodeName !== 'string' || !isFiniteNumber(c.until)) {
+      throw new Error(`policy.status.cooldowns[${i}] must be {workloadUid, nodeName, until: epoch ms}`);
+    }
+  });
 }

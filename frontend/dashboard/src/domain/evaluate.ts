@@ -186,7 +186,8 @@ export function evaluateCandidate(node: ClusterNode, input: EvaluationInput): Ca
   if (node.name === input.failedNodeName) evaluation.exclusion = 'FAILED_NODE';
 
   if (reasons.size === 0 && !evaluation.exclusion && cpu !== null && mem !== null) {
-    const windowMs = policy.score.failureHistoryWindowSeconds * 1000;
+    const windowSeconds = policy.score.failureHistoryWindowSeconds;
+    const windowMs = typeof windowSeconds === 'number' ? windowSeconds * 1000 : Number.POSITIVE_INFINITY;
     const failures = (input.recentFailures ?? []).filter(
       (f) => f.nodeName === node.name && f.at <= now && now - f.at <= windowMs,
     ).length;
@@ -219,7 +220,7 @@ export function scoreCandidate(args: {
     memory: round(100 * memoryWeight * memoryHeadroom, 2),
     requests: round(100 * requestsWeight * requestedHeadroom, 2),
   };
-  const penalty = Math.min(recentFailurePenalty * args.failures, recentFailurePenaltyCap);
+  const penalty = Math.min(recentFailurePenalty * args.failures, recentFailurePenaltyCap ?? Number.POSITIVE_INFINITY);
   return {
     cpuHeadroom: round(cpuHeadroom),
     memoryHeadroom: round(memoryHeadroom),

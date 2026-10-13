@@ -123,6 +123,8 @@ export class DemoSimulation {
   private narration: Narration | undefined;
   private crashing = false;
   private faultInjectedAt: number | undefined;
+  /** Start of the current consecutive-success streak per attempt (stability window). */
+  private streakSince = new Map<string, number>();
   private cached: DashboardSnapshot | null = null;
   /** Cue failures in this run; tests assert zero, the booth keeps playing. */
   cueErrors = 0;
@@ -155,6 +157,7 @@ export class DemoSimulation {
     this.crashing = false;
     this.cueErrors = 0;
     this.faultInjectedAt = undefined;
+    this.streakSince = new Map();
     this.incident = null;
     this.narration = undefined;
     this.probes = [];
@@ -364,11 +367,15 @@ export class DemoSimulation {
       const attempt = this.currentAttempt();
       if (attempt && attempt.podUid === serving.uid && attempt.result === 'placed') {
         attempt.httpSuccesses = Math.min(attempt.httpSuccesses + 1, 99);
+        if (!this.streakSince.has(attempt.actionId)) this.streakSince.set(attempt.actionId, at);
       }
     } else {
       // "Consecutive" successes: any failed probe during verification resets the count.
       const attempt = this.currentAttempt();
-      if (attempt && attempt.result === 'placed') attempt.httpSuccesses = 0;
+      if (attempt && attempt.result === 'placed') {
+        attempt.httpSuccesses = 0;
+        this.streakSince.delete(attempt.actionId);
+      }
     }
     this.probes = pushBounded(this.probes, probe, PROBE_POINTS);
   }
@@ -609,7 +616,7 @@ export class DemoSimulation {
         const attempt = rt.attempts.at(-1);
         // A script may only declare recovery the policy would accept (§7, §8).
         const required = self.policy.spec.verification.consecutiveSuccesses;
-        const stableSince = rt.timings.placedAt;
+        const stableSince = attempt ? self.streakSince.get(attempt.actionId) : undefined;
         const stabilityMs = self.policy.spec.verification.stabilityWindowSeconds * 1000;
         if (!attempt || attempt.httpSuccesses < required || stableSince === undefined || self.nowMs - stableSince < stabilityMs) {
           throw new Error(`recovered() before verification passed (${attempt?.httpSuccesses ?? 0}/${required})`);

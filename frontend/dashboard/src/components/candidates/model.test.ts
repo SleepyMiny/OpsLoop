@@ -190,7 +190,7 @@ describe('formatting', () => {
 
   it('builds the score formula from policy weights', () => {
     expect(formulaText(policy.score)).toBe(
-      `점수 = 100 × (0.30×CPU 여유 + 0.35×Memory 여유 + 0.35×요청 여유) ${MINUS} 최근 실패 감점(15점/회)`,
+      `점수 = 100 × (0.30×CPU 여유 + 0.35×Memory 여유 + 0.35×요청 여유) ${MINUS} 최근 실패 감점(15점/회, 최대 45점, 최근 30분)`,
     );
     expect(
       formulaText({ cpuWeight: 0.5, memoryWeight: 0.25, requestsWeight: 0.25, recentFailurePenalty: 10, recentFailurePenaltyCap: 30, failureHistoryWindowSeconds: 600 }),

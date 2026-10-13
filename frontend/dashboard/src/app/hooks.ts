@@ -90,7 +90,9 @@ export function usePresenterKeys(
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
       const target = e.target as HTMLElement | null;
-      if (target?.closest('input, textarea, select, [contenteditable="true"], [role="tablist"]')) return;
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      const arrow = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+      if (arrow && target?.closest('[role="tablist"]')) return;
       const key = e.key.toLowerCase();
       if (key === 'f') toggleFullscreen();
       else if (key === '?' || key === 'i') actions.toggleReality();

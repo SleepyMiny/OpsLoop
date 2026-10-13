@@ -143,13 +143,23 @@ describe('evaluateCandidates tie-break and penalty', () => {
     const at = (secondsAgo: number) => NOW - secondsAgo * 1000;
     const failures = [
       ...[10, 20, 30, 40].map((s) => ({ nodeName: 'azure-arm64-worker', at: at(s) })),
-      { nodeName: 'opsloop-control', at: at(policy.score.failureHistoryWindowSeconds + 1) },
+      { nodeName: 'opsloop-control', at: at(policy.score.failureHistoryWindowSeconds! + 1) },
     ];
     const r = evaluateCandidates({ nodes: list, workload, policy, now: NOW, recentFailures: failures });
     const azure = r.candidates.find((c) => c.nodeName === 'azure-arm64-worker')!;
     const laptop = r.candidates.find((c) => c.nodeName === 'opsloop-control')!;
     expect(azure.score!.penalty).toBe(policy.score.recentFailurePenaltyCap);
     expect(laptop.score!.penalty).toBe(0);
+  });
+
+  it('scores normally when the policy omits the penalty cap and window (no NaN)', () => {
+    const { recentFailurePenaltyCap: _c, failureHistoryWindowSeconds: _w, ...score } = policy.score;
+    const live = { ...policy, score };
+    const failures = [{ nodeName: 'opsloop-control', at: NOW - 86_400_000 }];
+    const r = evaluateCandidates({ nodes: nodes(), workload, policy: live, now: NOW, recentFailures: failures });
+    expect(r.candidates.filter((c) => c.score).every((c) => Number.isFinite(c.score!.total))).toBe(true);
+    expect(r.candidates.find((c) => c.nodeName === 'opsloop-control')!.score!.penalty).toBe(15);
+    expect(r.selected).not.toBeNull();
   });
 
   it('applies cooldown only to the same workload', () => {

@@ -322,7 +322,18 @@ export function buildScore(score: NonNullable<CandidateEvaluation['score']>): Sc
 /** The formula line, with weights read from the policy instead of hard-coded. */
 export function formulaText(score: RecoveryPolicySpec['score']): string {
   const w = (x: number) => x.toFixed(2);
-  return `점수 = 100 × (${w(score.cpuWeight)}×CPU 여유 + ${w(score.memoryWeight)}×Memory 여유 + ${w(score.requestsWeight)}×요청 여유) − 최근 실패 감점(${score.recentFailurePenalty}점/회)`;
+  return `점수 = 100 × (${w(score.cpuWeight)}×CPU 여유 + ${w(score.memoryWeight)}×Memory 여유 + ${w(score.requestsWeight)}×요청 여유) − 최근 실패 감점(${penaltyText(score)})`;
+}
+
+/** "15점/회, 최대 45점, 최근 30분" — cap and window only when the policy sets them. */
+export function penaltyText(score: RecoveryPolicySpec['score']): string {
+  const parts = [`${score.recentFailurePenalty}점/회`];
+  if (typeof score.recentFailurePenaltyCap === 'number') parts.push(`최대 ${score.recentFailurePenaltyCap}점`);
+  if (typeof score.failureHistoryWindowSeconds === 'number') {
+    const s = score.failureHistoryWindowSeconds;
+    parts.push(`최근 ${s % 60 === 0 ? `${s / 60}분` : `${s}초`}`);
+  }
+  return parts.join(', ');
 }
 
 // ---------------------------------------------------------------------------
@@ -437,7 +448,9 @@ export function buildRows(input: RowsInput): RowModel[] {
 
   return candidates.map((c): RowModel => {
     const node = byUid.get(c.nodeUid) ?? byName.get(c.nodeName);
-    const cooldown = snapshot.policy.status.cooldowns.find((e) => e.nodeName === c.nodeName && e.until > snapshot.observedAt);
+    const cooldown = snapshot.policy.status.cooldowns.find(
+      (e) => e.workloadUid === snapshot.workload.uid && e.nodeName === c.nodeName && e.until > snapshot.observedAt,
+    );
     const remaining = cooldown ? Math.ceil((cooldown.until - snapshot.observedAt) / 1000) : null;
     const rank = scored && c.score ? ranked.indexOf(c.nodeUid) + 1 : null;
     return {

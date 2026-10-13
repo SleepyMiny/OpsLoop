@@ -30,6 +30,25 @@ describe('parseSnapshot', () => {
     const pressure = JSON.parse(JSON.stringify(sample()));
     pressure.cluster.nodes[2].pressure = ['NetworkUnavailable'];
     expect(() => parseSnapshot(pressure)).toThrow(/pressure/);
+
+    const taints = JSON.parse(JSON.stringify(sample()));
+    taints.cluster.nodes[0].taints = 'node-role.kubernetes.io/control-plane:NoSchedule';
+    expect(() => parseSnapshot(taints)).toThrow(/taints/);
+
+    const cooldown = JSON.parse(JSON.stringify(sample()));
+    cooldown.policy.status.cooldowns = [{ nodeName: 'sarmubuntuserver', until: 1 }];
+    expect(() => parseSnapshot(cooldown)).toThrow(/cooldowns\[0\]/);
+
+    const weight = JSON.parse(JSON.stringify(sample()));
+    weight.policy.spec.score.cpuWeight = '0.3';
+    expect(() => parseSnapshot(weight)).toThrow(/score\.cpuWeight/);
+  });
+
+  it('accepts a policy without the demo-only penalty cap and window', () => {
+    const body = JSON.parse(JSON.stringify(sample()));
+    delete body.policy.spec.score.recentFailurePenaltyCap;
+    delete body.policy.spec.score.failureHistoryWindowSeconds;
+    expect(() => parseSnapshot(body)).not.toThrow();
   });
 });
 
