@@ -1,0 +1,16 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: demo-api
+  namespace: opsloop-demo
+  labels:
+    # Assumed default selector of the monitoring chart release; unverified (U8).
+    release: opsloop-mon
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: demo-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
