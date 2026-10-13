@@ -548,3 +548,165 @@ func TestE23DuplicatePolicyAbortsActiveIncident(t *testing.T) {
 		t.Fatalf("activeIncident not released: %+v", a)
 	}
 }
+
+// An Incident pre-created under the predictable name with a forged snapshot must not drive the reservation.
+func TestE24ForgedIncidentIsNotAdopted(t *testing.T) {
+	f := newFixture(t, "")
+	p := f.policy()
+	d := f.liveDeployment()
+	res, digest, err := f.r.monitor(f.ctx, p, d, f.now)
+	f.must(err)
+	reservation(p, d, res.Trigger, digest, f.now)
+	forged := incidentFor(p, d)
+	forged.Spec.Policy.Budget.MaxActionsPerIncident = 5
+	forged.Spec.PolicyHash = v1alpha1.PolicyHash(forged.Spec.Policy)
+	f.must(f.c.Create(f.ctx, forged))
+
+	if _, err := f.r.Reconcile(f.ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: f.ns, Name: policyName}}); err == nil {
+		t.Fatal("forged incident adopted without error")
+	}
+	got := f.policy()
+	if a := got.Status.ActiveIncident; a == nil || a.Name != forged.Name || a.IncidentUID != "" {
+		t.Fatalf("activeIncident = %+v, want reserved %s without incidentUID", a, forged.Name)
+	}
+	if c := got.Status.Conditions; len(c) != 1 || c[0].Reason != CondIncidentActive || !strings.Contains(c[0].Message, "does not match") {
+		t.Fatalf("conditions = %+v, want mismatch message", c)
+	}
+	if inc := f.onlyIncident(); inc.Status.Runtime.Phase != "" || inc.Status.Runtime.Decision != nil {
+		t.Fatalf("forged incident progressed: %+v", inc.Status.Runtime)
+	}
+	if f.liveDeployment().ResourceVersion != d.ResourceVersion {
+		t.Fatal("Deployment changed")
+	}
+}
+
+// A Policy recreated before the delete event is reconciled still aborts its predecessor's Incident.
+func TestE25RecreatedPolicyAbortsPredecessorIncident(t *testing.T) {
+	f := newFixture(t, "")
+	f.reconcile()
+	old := f.onlyIncident()
+	f.must(f.c.Delete(f.ctx, f.policy()))
+	f.must(f.c.Create(f.ctx, f.newPolicy(policyName)))
+
+	f.reconcile()
+	p := f.policy()
+	incs := f.incidents()
+	if len(incs) != 2 {
+		t.Fatalf("want old and new incident, got %d", len(incs))
+	}
+	for i := range incs {
+		if incs[i].Name == old.Name {
+			wantPhase(t, &incs[i], PhaseAborted, ReasonPolicyDeleted)
+			continue
+		}
+		if incs[i].Spec.PolicyRef.UID != string(p.UID) || p.Status.ActiveIncident == nil || p.Status.ActiveIncident.Name != incs[i].Name {
+			t.Fatalf("new incident %s not owned by recreated policy", incs[i].Name)
+		}
+	}
+}
+
+// A sub-second incidentDeadline must not make the controller's own Incident fail the reservation match.
+func TestE26FractionalDeadlineIncidentIsAdopted(t *testing.T) {
+	f := newFixture(t, "")
+	p := f.policy()
+	p.Spec.Budget.IncidentDeadline.Duration = 10*time.Minute + 500*time.Millisecond
+	f.must(f.c.Update(f.ctx, p))
+
+	f.reconcile()
+	inc := f.onlyIncident()
+	if a := f.policy().Status.ActiveIncident; a == nil || a.IncidentUID != string(inc.UID) {
+		t.Fatalf("activeIncident = %+v, want incidentUID %s", a, inc.UID)
+	}
+	wantPhase(t, inc, PhaseWaiting, candidates.DecisionNoCandidate)
+	if want := inc.Spec.DetectedAt.Add(10 * time.Minute); !inc.Spec.Deadline.Time.Equal(want) {
+		t.Fatalf("deadline = %v, want %v", inc.Spec.Deadline, want)
+	}
+}
+
+// A spec edit after Create and before the incidentUID write aborts the Incident instead of failing every reconcile.
+func TestE27SpecEditBeforeUIDRecordedAborts(t *testing.T) {
+	f := newFixture(t, "")
+	p := f.reserveOnly()
+	d := f.liveDeployment()
+	f.must(f.c.Create(f.ctx, incidentFor(p, d)))
+	p = f.policy()
+	p.Spec.Enabled = false
+	f.must(f.c.Update(f.ctx, p))
+
+	f.reconcile()
+	wantPhase(t, f.onlyIncident(), PhaseAborted, ReasonPolicyDisabled)
+	if a := f.policy().Status.ActiveIncident; a != nil {
+		t.Fatalf("activeIncident not released: %+v", a)
+	}
+	if f.liveDeployment().ResourceVersion != d.ResourceVersion {
+		t.Fatal("Deployment changed")
+	}
+}
+
+func TestObserveRestarts(t *testing.T) {
+	r := &PolicyReconciler{}
+	key := types.NamespacedName{Namespace: "ns", Name: "p"}
+	start := time.Unix(1_700_000_000, 0)
+	window := 2 * time.Minute
+	pod := func(uid string, count int32) corev1.Pod {
+		return corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: types.UID(uid)},
+			Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+				Name: "app", RestartCount: count,
+				LastTerminationState: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 137, Reason: "OOMKilled"}},
+			}}},
+		}
+	}
+	for _, step := range []struct {
+		name string
+		at   time.Duration
+		pods []corev1.Pod
+		want int
+	}{
+		{"first sight is the baseline", 0, []corev1.Pod{pod("a", 0), pod("b", 5)}, 0},
+		{"0 to 1", 10 * time.Second, []corev1.Pod{pod("a", 1), pod("b", 5)}, 1},
+		{"1 to 3", 20 * time.Second, []corev1.Pod{pod("a", 3), pod("b", 5)}, 3},
+		{"older than window dropped", 11*time.Second + window, []corev1.Pod{pod("a", 3), pod("b", 5)}, 2},
+		{"vanished pod forgotten", 12*time.Second + window, []corev1.Pod{pod("b", 5)}, 0},
+	} {
+		got := r.observeRestarts(key, step.pods, start.Add(step.at), window)
+		if len(got) != step.want {
+			t.Fatalf("%s: %d observations, want %d", step.name, len(got), step.want)
+		}
+		for _, o := range got {
+			if o.PodUID != "a" || o.Container != "app" || o.ExitCode != 137 || o.Reason != "OOMKilled" {
+				t.Fatalf("%s: observation %+v", step.name, o)
+			}
+		}
+	}
+	if _, ok := r.restarts[key]["a/app"]; ok || len(r.restarts[key]) != 1 {
+		t.Fatalf("restart state keys %v, want only b/app", r.restarts[key])
+	}
+}
+
+func TestImageDigest(t *testing.T) {
+	deploy := func(image string) *appsv1.Deployment {
+		d := &appsv1.Deployment{}
+		d.Spec.Template.Spec.Containers = []corev1.Container{{Name: "app", Image: image}}
+		return d
+	}
+	running := func(name, imageID string) []corev1.Pod {
+		return []corev1.Pod{{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: name, ImageID: imageID}}}}}
+	}
+	for _, tc := range []struct {
+		name string
+		d    *appsv1.Deployment
+		pods []corev1.Pod
+		want string
+	}{
+		{"template digest wins", deploy("demo@sha256:aa"), running("app", "docker.io/demo@sha256:bb"), "sha256:aa"},
+		{"tag uses running imageID", deploy("demo:v1"), running("app", "docker.io/demo@sha256:bb"), "sha256:bb"},
+		{"tag without imageID", deploy("demo:v1"), running("app", ""), ""},
+		{"other container imageID ignored", deploy("demo:v1"), running("sidecar", "docker.io/side@sha256:cc"), ""},
+		{"no containers", &appsv1.Deployment{}, nil, ""},
+	} {
+		if got := imageDigest(tc.d, tc.pods); got != tc.want {
+			t.Errorf("%s: imageDigest = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

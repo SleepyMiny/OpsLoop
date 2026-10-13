@@ -224,6 +224,8 @@ spec:
                         type: string
                         x-kubernetes-validations:
                         - rule: duration(self) >= duration('1s')
+                        - message: maxSampleAge must be at most 10m
+                          rule: duration(self) <= duration('10m')
                       minimumAvailableMemory:
                         anyOf:
                         - type: integer
@@ -231,6 +233,10 @@ spec:
                         default: 512Mi
                         pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                         x-kubernetes-int-or-string: true
+                        x-kubernetes-validations:
+                        - message: must not be negative
+                          rule: quantity(string(self)).compareTo(quantity('0')) >=
+                            0
                       requestedCapacityReservePercent:
                         default: 10
                         format: int32
@@ -244,6 +250,10 @@ spec:
                         default: 256Mi
                         pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                         x-kubernetes-int-or-string: true
+                        x-kubernetes-validations:
+                        - message: must not be negative
+                          rule: quantity(string(self)).compareTo(quantity('0')) >=
+                            0
                     type: object
                   mode:
                     default: ObserveOnly
@@ -314,13 +324,19 @@ spec:
                       rule: self.cpuWeight + self.memoryWeight + self.requestsWeight
                         == 100
                   targetRef:
+                    description: Immutable so an active Incident and its Policy always
+                      name the same Deployment.
                     properties:
                       name:
+                        maxLength: 253
                         minLength: 1
                         type: string
                     required:
                     - name
                     type: object
+                    x-kubernetes-validations:
+                    - message: targetRef is immutable
+                      rule: self == oldSelf
                   verification:
                     properties:
                       consecutiveSuccesses:

@@ -209,6 +209,21 @@ func TestE1PolicyValidation(t *testing.T) {
 		{"three requiredPlatforms", "platforms", func(s map[string]any) {
 			s["requiredPlatforms"] = []any{"linux/amd64", "linux/arm64", "linux/amd64"}
 		}, "spec.requiredPlatforms"},
+		{"zero quantities accepted", "zero-quantity", func(s map[string]any) {
+			s["filter"] = map[string]any{"minimumAvailableMemory": int64(0), "startupMemoryBudget": "0"}
+		}, ""},
+		{"negative minimumAvailableMemory", "neg-min-mem", func(s map[string]any) {
+			s["filter"] = map[string]any{"minimumAvailableMemory": "-1Mi"}
+		}, "spec.filter.minimumAvailableMemory: Invalid value"},
+		{"negative integer startupMemoryBudget", "neg-startup", func(s map[string]any) {
+			s["filter"] = map[string]any{"startupMemoryBudget": int64(-1)}
+		}, "spec.filter.startupMemoryBudget: Invalid value"},
+		{"maxSampleAge above 10m", "sample-age-max", func(s map[string]any) {
+			s["filter"] = map[string]any{"maxSampleAge": "11m"}
+		}, "maxSampleAge must be at most 10m"},
+		{"targetRef name of 254 characters", "target-long", func(s map[string]any) {
+			s["targetRef"] = map[string]any{"name": strings.Repeat("d", 254)}
+		}, "spec.targetRef.name"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -225,6 +240,29 @@ func TestE1PolicyValidation(t *testing.T) {
 				t.Fatalf("want Invalid containing %q, got %v", tc.wantErr, err)
 			}
 		})
+	}
+}
+
+func TestE1PolicyTargetRefImmutable(t *testing.T) {
+	c, ns := newTestClient(t)
+	ctx := context.Background()
+
+	obj := unstructuredPolicy(ns, "immutable", minimalPolicySpec())
+	if err := c.Create(ctx, obj); err != nil {
+		t.Fatalf("create policy: %v", err)
+	}
+	if err := unstructured.SetNestedField(obj.Object, false, "spec", "enabled"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Update(ctx, obj); err != nil {
+		t.Fatalf("other spec update must be allowed: %v", err)
+	}
+	if err := unstructured.SetNestedField(obj.Object, "other-api", "spec", "targetRef", "name"); err != nil {
+		t.Fatal(err)
+	}
+	err := c.Update(ctx, obj)
+	if !apierrors.IsInvalid(err) || !strings.Contains(err.Error(), "targetRef is immutable") {
+		t.Fatalf("want Invalid targetRef is immutable, got %v", err)
 	}
 }
 

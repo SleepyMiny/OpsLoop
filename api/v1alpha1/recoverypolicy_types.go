@@ -34,6 +34,8 @@ type RecoveryPolicyList struct {
 }
 
 type RecoveryPolicySpec struct {
+	// Immutable so an active Incident and its Policy always name the same Deployment.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="targetRef is immutable"
 	TargetRef TargetRef `json:"targetRef"`
 	// +optional
 	// +kubebuilder:default=true
@@ -66,6 +68,7 @@ type RecoveryPolicySpec struct {
 
 type TargetRef struct {
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 }
 
@@ -97,9 +100,11 @@ type FilterSpec struct {
 	MaxMemoryUtilizationPercent int32 `json:"maxMemoryUtilizationPercent"`
 	// +optional
 	// +kubebuilder:default="512Mi"
+	// +kubebuilder:validation:XValidation:rule="quantity(string(self)).compareTo(quantity('0')) >= 0",message="must not be negative"
 	MinimumAvailableMemory resource.Quantity `json:"minimumAvailableMemory"`
 	// +optional
 	// +kubebuilder:default="256Mi"
+	// +kubebuilder:validation:XValidation:rule="quantity(string(self)).compareTo(quantity('0')) >= 0",message="must not be negative"
 	StartupMemoryBudget resource.Quantity `json:"startupMemoryBudget"`
 	// +optional
 	// +kubebuilder:default=10
@@ -109,6 +114,7 @@ type FilterSpec struct {
 	// +optional
 	// +kubebuilder:default="30s"
 	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('1s')"
+	// +kubebuilder:validation:XValidation:rule="duration(self) <= duration('10m')",message="maxSampleAge must be at most 10m"
 	MaxSampleAge metav1.Duration `json:"maxSampleAge"`
 }
 

@@ -551,8 +551,8 @@ func TestE15PolicyDisabledAborts(t *testing.T) {
 		inc := e.onlyIncident()
 		wantPhase(t, inc, PhaseAborted, ReasonPolicyDisabled)
 		e.wantOutcomes(inc, recovery.OutcomePatched)
-		if e.liveDeployment().ResourceVersion != rv {
-			t.Fatal("Deployment changed after disable")
+		if lastAttempt(inc).CompletedAt == nil || e.liveDeployment().ResourceVersion != rv {
+			t.Fatal("patched attempt left open or Deployment changed after disable")
 		}
 	})
 	t.Run("reserved", func(t *testing.T) {

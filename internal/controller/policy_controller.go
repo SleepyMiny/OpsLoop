@@ -12,6 +12,7 @@ import (
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,6 +29,7 @@ import (
 	"github.com/SleepyMiny/OpsLoop/api/v1alpha1"
 	"github.com/SleepyMiny/OpsLoop/internal/candidates"
 	"github.com/SleepyMiny/OpsLoop/internal/classification"
+	"github.com/SleepyMiny/OpsLoop/internal/recovery"
 )
 
 //go:generate go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.1 rbac:roleName=opsloop-controller paths=./... output:rbac:artifacts:config=../../config/rbac
@@ -74,6 +76,7 @@ const (
 	ReasonDuplicatePolicy      = "DUPLICATE_POLICY"
 	ReasonPolicyDisabled       = "POLICY_DISABLED"
 	ReasonModeChanged          = "MODE_CHANGED"
+	ReasonPolicyChanged        = "POLICY_CHANGED"
 	ReasonWorkloadDeleted      = "WORKLOAD_DELETED"
 	ReasonWorkloadReplaced     = "WORKLOAD_REPLACED"
 	ReasonSpecChanged          = "SPEC_CHANGED_EXTERNALLY"
@@ -148,9 +151,16 @@ func (r *PolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err := r.APIReader.Get(ctx, req.NamespacedName, p); err != nil {
 		if apierrors.IsNotFound(err) {
 			delete(r.restarts, req.NamespacedName)
-			return ctrl.Result{}, r.abortOrphans(ctx, req.NamespacedName, now)
+			return ctrl.Result{}, r.abortOrphans(ctx, req.NamespacedName, "", now)
 		}
 		return ctrl.Result{}, err
+	}
+	// A Policy recreated before its predecessor's delete event was handled still owns that predecessor's Incidents.
+	// Only a Policy this controller never wrote can have them: every status write sets observedGeneration.
+	if p.Status.ObservedGeneration == 0 {
+		if err := r.abortOrphans(ctx, req.NamespacedName, p.UID, now); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 	if p.Status.ActiveIncident != nil {
 		return r.reconcileActive(ctx, p, now)
@@ -340,7 +350,8 @@ func incidentFor(p *v1alpha1.RecoveryPolicy, live *appsv1.Deployment) *v1alpha1.
 			Trigger:          a.Trigger,
 			Baseline:         a.Baseline,
 			DetectedAt:       a.ReservedAt,
-			Deadline:         metav1.NewTime(a.ReservedAt.Add(p.Spec.Budget.IncidentDeadline.Duration)),
+			// The API server stores whole seconds; a fractional deadline would never compare equal after Create.
+			Deadline: metav1.NewTime(a.ReservedAt.Add(p.Spec.Budget.IncidentDeadline.Duration).Truncate(time.Second)),
 		},
 	}
 	if live != nil {
@@ -352,8 +363,16 @@ func incidentFor(p *v1alpha1.RecoveryPolicy, live *appsv1.Deployment) *v1alpha1.
 // confirmAndProgress checks that the Incident is this reservation's, records its UID and progresses it.
 func (r *PolicyReconciler) confirmAndProgress(ctx context.Context, p *v1alpha1.RecoveryPolicy, inc *v1alpha1.RecoveryIncident, live *appsv1.Deployment, now time.Time) (ctrl.Result, error) {
 	a := p.Status.ActiveIncident
-	if inc.Spec.PolicyRef.UID != string(p.UID) || inc.Spec.Sequence != a.Sequence {
-		err := fmt.Errorf("existing incident %s does not belong to this policy reservation", inc.Name)
+	// An Incident created by someone else must not supply the snapshot Enforce acts on; a differing Workload UID only supersedes.
+	want := incidentFor(p, live).Spec
+	want.Workload.UID = inc.Spec.Workload.UID
+	// A spec edit between Create and the UID write leaves an older snapshot that cannot be verified, so only the reservation is matched and the Incident is aborted below.
+	stale := inc.Spec.PolicyGeneration != p.Generation
+	if stale {
+		want.PolicyGeneration, want.PolicyHash, want.Policy, want.Deadline, want.Workload.Name = inc.Spec.PolicyGeneration, inc.Spec.PolicyHash, inc.Spec.Policy, inc.Spec.Deadline, inc.Spec.Workload.Name
+	}
+	if !equality.Semantic.DeepEqual(inc.Spec, want) {
+		err := fmt.Errorf("existing incident %s does not match this policy reservation", inc.Name)
 		if setCondition(p, CondIncidentActive, err.Error(), now) {
 			_ = r.writePolicy(ctx, p)
 		}
@@ -365,6 +384,14 @@ func (r *PolicyReconciler) confirmAndProgress(ctx context.Context, p *v1alpha1.R
 	}
 	if isTerminal(inc.Status.Runtime.Phase) {
 		return r.release(ctx, p, inc, now)
+	}
+	if stale {
+		// ABORTED opens no circuit, so a forged snapshot cannot steer one; the next detection reserves with the current spec.
+		reason := ReasonPolicyChanged
+		if !p.Spec.Enabled {
+			reason = ReasonPolicyDisabled
+		}
+		return r.finish(ctx, p, inc, PhaseAborted, reason, "", now)
 	}
 	return r.progress(ctx, p, inc, live, now)
 }
@@ -601,9 +628,9 @@ func (r *PolicyReconciler) writeRelease(ctx context.Context, p *v1alpha1.Recover
 	return ctrl.Result{RequeueAfter: monitorPeriod}, nil
 }
 
-// abortOrphans closes every non-terminal Incident of a deleted Policy without touching the Deployment.
+// abortOrphans closes every non-terminal Incident of a deleted Policy, i.e. not owned by keep, without touching the Deployment.
 // shortcut: a Policy deleted while the controller is down leaves no reconcile key after restart, so non-terminal Incidents remain (no Deployment risk); a startup sweep of all Incidents arrives with the Incident reconciler in P5
-func (r *PolicyReconciler) abortOrphans(ctx context.Context, key types.NamespacedName, now time.Time) error {
+func (r *PolicyReconciler) abortOrphans(ctx context.Context, key types.NamespacedName, keep types.UID, now time.Time) error {
 	var list v1alpha1.RecoveryIncidentList
 	if err := r.APIReader.List(ctx, &list, client.InNamespace(key.Namespace), client.MatchingLabels{PolicyLabel: key.Name}); err != nil {
 		return err
@@ -611,7 +638,7 @@ func (r *PolicyReconciler) abortOrphans(ctx context.Context, key types.Namespace
 	var errs []error
 	for i := range list.Items {
 		inc := &list.Items[i]
-		if isTerminal(inc.Status.Runtime.Phase) {
+		if isTerminal(inc.Status.Runtime.Phase) || (keep != "" && inc.Spec.PolicyRef.UID == string(keep)) {
 			continue
 		}
 		if lastReserved(inc) != nil {
@@ -695,6 +722,10 @@ func setPhase(inc *v1alpha1.RecoveryIncident, phase, reason, msg string, now tim
 	if isTerminal(phase) {
 		t := metav1.NewTime(now)
 		rt.CompletedAt = &t
+		// A rollout left in VERIFYING is not reverted, but its attempt closes with the Incident.
+		if n := len(rt.Attempts); n > 0 && rt.Attempts[n-1].Outcome == recovery.OutcomePatched && rt.Attempts[n-1].CompletedAt == nil {
+			rt.Attempts[n-1].CompletedAt = &t
+		}
 	}
 }
 
