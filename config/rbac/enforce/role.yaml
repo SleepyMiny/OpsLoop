@@ -1,0 +1,15 @@
+# Applied only after Enforce approval; ObserveOnly clusters never get this Role (spec 5.3, 6.6).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: opsloop-controller-enforce
+  namespace: opsloop-demo
+rules:
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    resourceNames:
+      - demo-api
+    verbs:
+      - update

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/SleepyMiny/OpsLoop/api/v1alpha1"
 	"github.com/SleepyMiny/OpsLoop/internal/controller"
+	"github.com/SleepyMiny/OpsLoop/internal/verification"
 )
 
 const (
@@ -77,6 +79,9 @@ func run(promURL string, leaderElect bool) error {
 		APIReader: mgr.GetAPIReader(),
 		Now:       time.Now,
 		Prom:      promv1.NewAPI(pc),
+		Probe: func(ctx context.Context, podIP string, port int32, podUID string) error {
+			return verification.Probe(ctx, nil, podIP, port, podUID)
+		},
 	}
 	if err := r.SetupWithManager(ctx, mgr); err != nil {
 		return err

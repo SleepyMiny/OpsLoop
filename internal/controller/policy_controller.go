@@ -93,7 +93,7 @@ type PolicyReconciler struct {
 	APIReader client.Reader
 	Now       func() time.Time
 	Prom      promv1.API
-	// Probe is used by the Enforce verification step (P4).
+	// Probe checks the attempt Pod directly during VERIFYING.
 	Probe func(ctx context.Context, podIP string, port int32, podUID string) error
 
 	// Accessed only from the single reconcile worker.
@@ -404,7 +404,11 @@ func (r *PolicyReconciler) progress(ctx context.Context, p *v1alpha1.RecoveryPol
 		return ctrl.Result{}, err
 	}
 	if phase != "" {
+		settleReserved(inc, live, now)
 		return r.finish(ctx, p, inc, phase, reason, "", now)
+	}
+	if lastReserved(inc) != nil {
+		return r.resume(ctx, p, inc, live, now)
 	}
 	switch inc.Status.Runtime.Phase {
 	case "":
@@ -421,8 +425,9 @@ func (r *PolicyReconciler) progress(ctx context.Context, p *v1alpha1.RecoveryPol
 		return r.evaluate(ctx, p, inc, live, now)
 	case PhaseWaiting:
 		return r.evaluate(ctx, p, inc, live, now)
+	case PhaseVerifying:
+		return r.verify(ctx, p, inc, live, now)
 	}
-	// EXECUTING and VERIFYING are driven by the Enforce runtime added in P4.
 	return ctrl.Result{RequeueAfter: monitorPeriod}, nil
 }
 
@@ -444,7 +449,8 @@ func (r *PolicyReconciler) globalCheck(ctx context.Context, p *v1alpha1.Recovery
 		return PhaseSuperseded, ReasonWorkloadReplaced, nil
 	case v1alpha1.SpecHash(live.Spec) != inc.Spec.Baseline.SpecHash:
 		return PhaseSuperseded, ReasonSpecChanged, nil
-	case v1alpha1.TemplateHash(live.Spec.Template) != expectedTemplateHash(inc):
+	// A Reserved attempt may already be applied, which is not an external change; Resume decides instead.
+	case lastReserved(inc) == nil && v1alpha1.TemplateHash(live.Spec.Template) != expectedTemplateHash(inc):
 		return PhaseSuperseded, ReasonTemplateChanged, nil
 	case !now.Before(inc.Spec.Deadline.Time):
 		return PhaseFailed, ReasonDeadlineExceeded, nil
@@ -460,19 +466,42 @@ func expectedTemplateHash(inc *v1alpha1.RecoveryIncident) string {
 	return inc.Spec.Baseline.TemplateHash
 }
 
-// evaluate re-collects Nodes, Pods and metrics and records one decision (DETECTED and WAITING).
+// evaluate records one fresh decision (DETECTED and WAITING) and starts an attempt on an Enforce selection.
 func (r *PolicyReconciler) evaluate(ctx context.Context, p *v1alpha1.RecoveryPolicy, inc *v1alpha1.RecoveryIncident, live *appsv1.Deployment, now time.Time) (ctrl.Result, error) {
-	nodes, err := r.nodes(ctx)
+	dec, cleared, err := r.decide(ctx, p, inc, live, now, nextActionID(inc))
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if !classification.TriggerPersists(inc.Spec.Trigger, nodes) {
+	if cleared {
 		return r.finish(ctx, p, inc, PhaseAborted, ReasonTriggerCleared, "", now)
+	}
+	inc.Status.Runtime.Decision = &dec
+	if dec.SelectedNodeName != "" {
+		if inc.Spec.Policy.Mode == v1alpha1.PolicyModeObserveOnly {
+			return r.finish(ctx, p, inc, PhaseObserved, dec.DecisionReason, "", now)
+		}
+		return r.startAttempt(ctx, p, inc, live, dec, now)
+	}
+	setPhase(inc, PhaseWaiting, dec.DecisionReason, "", now)
+	if err := r.Status().Update(ctx, inc); err != nil {
+		return requeueOnConflict(err)
+	}
+	return ctrl.Result{RequeueAfter: waitingPeriod}, nil
+}
+
+// decide re-collects Nodes, Pods and metrics and evaluates every candidate; cleared means the trigger is gone.
+func (r *PolicyReconciler) decide(ctx context.Context, p *v1alpha1.RecoveryPolicy, inc *v1alpha1.RecoveryIncident, live *appsv1.Deployment, now time.Time, actionID string) (v1alpha1.RecoveryDecision, bool, error) {
+	nodes, err := r.nodes(ctx)
+	if err != nil {
+		return v1alpha1.RecoveryDecision{}, false, err
+	}
+	if !classification.TriggerPersists(inc.Spec.Trigger, nodes) {
+		return v1alpha1.RecoveryDecision{}, true, nil
 	}
 	spec := inc.Spec.Policy
 	sel, err := metav1.LabelSelectorAsSelector(&spec.CandidateSelector)
 	if err != nil {
-		return ctrl.Result{}, err
+		return v1alpha1.RecoveryDecision{}, false, err
 	}
 	var cands []corev1.Node
 	podsByNode := map[string][]corev1.Pod{}
@@ -482,13 +511,13 @@ func (r *PolicyReconciler) evaluate(ctx context.Context, p *v1alpha1.RecoveryPol
 		}
 		var pods corev1.PodList
 		if err := r.List(ctx, &pods, client.MatchingFields{podNodeNameField: n.Name}); err != nil {
-			return ctrl.Result{}, err
+			return v1alpha1.RecoveryDecision{}, false, err
 		}
 		cands = append(cands, *n)
 		podsByNode[n.Name] = pods.Items
 	}
 	metrics, merr := candidates.QueryMetrics(ctx, r.Prom, now, 2*spec.Filter.MaxSampleAge.Duration)
-	dec := candidates.Evaluate(candidates.Input{
+	return candidates.Evaluate(candidates.Input{
 		Now:                  now,
 		Spec:                 spec,
 		RecentFailures:       p.Status.RecentFailures,
@@ -496,6 +525,7 @@ func (r *PolicyReconciler) evaluate(ctx context.Context, p *v1alpha1.RecoveryPol
 		PolicyHash:           inc.Spec.PolicyHash,
 		PolicyGeneration:     inc.Spec.PolicyGeneration,
 		IncidentName:         inc.Name,
+		ActionID:             actionID,
 		Deployment:           live,
 		Nodes:                cands,
 		PodsByNode:           podsByNode,
@@ -503,17 +533,7 @@ func (r *PolicyReconciler) evaluate(ctx context.Context, p *v1alpha1.RecoveryPol
 		MetricsErr:           merr,
 		ImageDigest:          inc.Spec.Baseline.ImageDigest,
 		BaselineTemplateHash: inc.Spec.Baseline.TemplateHash,
-	})
-	inc.Status.Runtime.Decision = &dec
-	if dec.SelectedNodeName != "" && spec.Mode == v1alpha1.PolicyModeObserveOnly {
-		return r.finish(ctx, p, inc, PhaseObserved, dec.DecisionReason, "", now)
-	}
-	// P4 replaces the Enforce selection branch with attempt reservation and execution (7.3); until then it only waits.
-	setPhase(inc, PhaseWaiting, dec.DecisionReason, "", now)
-	if err := r.Status().Update(ctx, inc); err != nil {
-		return requeueOnConflict(err)
-	}
-	return ctrl.Result{RequeueAfter: waitingPeriod}, nil
+	}), false, nil
 }
 
 // finish writes a terminal phase and releases the Policy in the same reconcile.
@@ -594,6 +614,14 @@ func (r *PolicyReconciler) abortOrphans(ctx context.Context, key types.Namespace
 		if isTerminal(inc.Status.Runtime.Phase) {
 			continue
 		}
+		if lastReserved(inc) != nil {
+			live, err := r.getDeployment(ctx, types.NamespacedName{Namespace: inc.Namespace, Name: inc.Spec.Workload.Name})
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			settleReserved(inc, live, now)
+		}
 		setPhase(inc, PhaseAborted, ReasonPolicyDeleted, "", now)
 		errs = append(errs, r.Status().Update(ctx, inc))
 	}
@@ -626,14 +654,7 @@ func (r *PolicyReconciler) duplicated(ctx context.Context, p *v1alpha1.RecoveryP
 
 // liveDeployment reads the target through the APIReader; nil means it does not exist.
 func (r *PolicyReconciler) liveDeployment(ctx context.Context, p *v1alpha1.RecoveryPolicy) (*appsv1.Deployment, error) {
-	d := &appsv1.Deployment{}
-	if err := r.APIReader.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: p.Spec.TargetRef.Name}, d); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return d, nil
+	return r.getDeployment(ctx, types.NamespacedName{Namespace: p.Namespace, Name: p.Spec.TargetRef.Name})
 }
 
 func (r *PolicyReconciler) nodes(ctx context.Context) (map[string]*corev1.Node, error) {

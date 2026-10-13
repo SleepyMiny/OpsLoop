@@ -83,18 +83,17 @@ func TestGeneratedClusterRoleReadsDeploymentsOnly(t *testing.T) {
 }
 
 func TestEnforceRoleLimitedToDemoAPIUpdate(t *testing.T) {
-	path := filepath.Join("..", "..", "config", "rbac", "enforce", "role.yaml")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		t.Skip("config/rbac/enforce is added in P4")
-	}
 	var role rbacv1.Role
-	decodeFile(t, path, &role)
-	if len(role.Rules) == 0 {
-		t.Fatal("enforce Role has no rules")
+	decodeFile(t, filepath.Join("..", "..", "config", "rbac", "enforce", "role.yaml"), &role)
+	if role.Kind != "Role" || role.Namespace != "opsloop-demo" {
+		t.Fatalf("enforce permissions must be a Role in opsloop-demo, got %s in %q", role.Kind, role.Namespace)
 	}
-	for _, r := range role.Rules {
-		if !slices.Equal(r.ResourceNames, []string{"demo-api"}) || !slices.Equal(r.Verbs, []string{"update"}) {
-			t.Fatalf("enforce rule must be resourceNames [demo-api] verbs [update], got %+v", r)
-		}
+	if len(role.Rules) != 1 {
+		t.Fatalf("enforce Role must have exactly one rule, got %d", len(role.Rules))
+	}
+	r := role.Rules[0]
+	if !slices.Equal(r.APIGroups, []string{"apps"}) || !slices.Equal(r.Resources, []string{"deployments"}) ||
+		!slices.Equal(r.ResourceNames, []string{"demo-api"}) || !slices.Equal(r.Verbs, []string{"update"}) {
+		t.Fatalf("enforce rule must be apps/deployments resourceNames [demo-api] verbs [update], got %+v", r)
 	}
 }
