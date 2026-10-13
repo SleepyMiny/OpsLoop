@@ -9,6 +9,8 @@ import type { DashboardSnapshot, DataSourceKind } from '../domain/types';
 export type SourceStatus =
   | { state: 'connecting' }
   | { state: 'ok'; lastUpdate: number }
+  /** Responses arrive, but the snapshot they carry is older than the freshness limit. */
+  | { state: 'stale'; lastUpdate: number; message: string }
   | { state: 'error'; message: string; lastUpdate?: number }
   | { state: 'unconfigured'; message: string };
 

@@ -61,6 +61,19 @@ describe('Demo scenarios reach the outcomes the architecture describes', () => {
     expect(inc.status.runtime.timings.decidedAt).toBeUndefined();
   });
 
+  it('every scenario runs without cue errors and reports §18 timings from fault injection', () => {
+    for (const scenario of DEMO_SCENARIOS) {
+      const sim = new DemoSimulation(scenario.script);
+      sim.advanceTo(sim.durationMs);
+      expect(sim.cueErrors, scenario.id).toBe(0);
+      const t = sim.snapshot().activeIncident!.status.runtime.timings;
+      expect(t.faultInjectedAt, scenario.id).toBeTypeOf('number');
+      expect(t.faultInjectedAt!).toBeLessThan(t.triggeredAt);
+    }
+    const a1 = run('node-failure-laptop').activeIncident!.status.runtime.timings;
+    expect(a1.detectedAt! - a1.faultInjectedAt!).toBe(60_000);
+  });
+
   it('is deterministic, including after rewinding', () => {
     const scenario = DEMO_SCENARIOS[0]!;
     const a = new DemoSimulation(scenario.script);

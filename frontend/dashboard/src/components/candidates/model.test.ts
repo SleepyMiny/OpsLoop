@@ -193,7 +193,7 @@ describe('formatting', () => {
       `점수 = 100 × (0.30×CPU 여유 + 0.35×Memory 여유 + 0.35×요청 여유) ${MINUS} 최근 실패 감점(15점/회)`,
     );
     expect(
-      formulaText({ cpuWeight: 0.5, memoryWeight: 0.25, requestsWeight: 0.25, recentFailurePenalty: 10 }),
+      formulaText({ cpuWeight: 0.5, memoryWeight: 0.25, requestsWeight: 0.25, recentFailurePenalty: 10, recentFailurePenaltyCap: 30, failureHistoryWindowSeconds: 600 }),
     ).toContain('0.50×CPU 여유 + 0.25×Memory 여유 + 0.25×요청 여유');
   });
 

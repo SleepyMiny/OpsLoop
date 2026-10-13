@@ -218,7 +218,14 @@ export class DemoDataSource implements DashboardDataSource, DemoController {
     }
     const before = this.sim.elapsed;
     this.simMs += delta * this.speed * this.sim.pace;
-    this.sim.advanceTo(this.simMs);
+    try {
+      this.sim.advanceTo(this.simMs);
+    } catch (err) {
+      // The engine already isolates cue errors; anything else skips to the next scenario.
+      console.error('[OpsLoop demo] simulation step failed; moving to the next scenario', err);
+      this.advanceScenario();
+      return;
+    }
     if (this.sim.elapsed !== before) this.emit();
   }
 

@@ -60,6 +60,7 @@ function nodeFailurePrelude(loadCue: Cue): Cue[] {
       run: (ctx) => {
         ctx.pace(1);
         ctx.powerOff(PRIMARY);
+        ctx.injectFault();
         ctx.narrate({
           title: '물리 서버 전원이 꺼졌습니다',
           body: '외부에서 보내는 HTTP 요청이 실패하기 시작합니다. 아직 아무도 자동으로 움직이지 않았습니다.',
@@ -349,6 +350,7 @@ const applicationFailureToPr: DemoScenario = {
         chapter: '반복 장애',
         run: (ctx) => {
           ctx.pace(1);
+          ctx.injectFault();
           ctx.narrate({
             title: '고정 입력을 재생합니다',
             body: 'Demo Driver가 필터를 거치면 빈 집합이 되는 배치 집계 입력을 보냅니다. 경계 처리 결함이 숨어 있습니다.',
@@ -577,7 +579,7 @@ const applicationFailureToPr: DemoScenario = {
                 number: 0,
                 title: 'fix(demo-api): handle empty aggregation window as typed error',
                 url: null,
-                headSha: '3e91c07',
+                headSha: 'demo-head',
               },
             },
             'PR 생성 (Demo: 실제 GitHub PR은 만들지 않음)',

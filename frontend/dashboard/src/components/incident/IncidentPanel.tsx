@@ -21,6 +21,8 @@ import {
   describeTrigger,
   deriveTimings,
   eventTone,
+  timingBasis,
+  timingCaption,
   newestFirst,
   sameEvents,
   TONE_WORD,
@@ -34,7 +36,7 @@ export function IncidentPanel({ snapshot, emphasized }: RegionProps) {
     <Instrument title="RecoveryIncident" emphasized={emphasized ?? false}>
       <div className={styles.frame}>
         <div className={styles.scroller} tabIndex={0} role="region" aria-label="RecoveryIncident 기록">
-          {incident ? <Record incident={incident} policy={policy} /> : <Idle policy={policy} />}
+          {incident ? <Record incident={incident} policy={policy} source={snapshot.source} /> : <Idle policy={policy} />}
           <Recent incidents={recentIncidents} />
         </div>
       </div>
@@ -44,7 +46,15 @@ export function IncidentPanel({ snapshot, emphasized }: RegionProps) {
 
 // ---------------------------------------------------------------------------
 
-function Record({ incident, policy }: { incident: RecoveryIncident; policy: RecoveryPolicy }) {
+function Record({
+  incident,
+  policy,
+  source,
+}: {
+  incident: RecoveryIncident;
+  policy: RecoveryPolicy;
+  source: 'demo' | 'live';
+}) {
   const { runtime, conditions, events } = incident.status;
   const { spec } = incident;
   const trigger = describeTrigger(spec.trigger);
@@ -98,7 +108,7 @@ function Record({ incident, policy }: { incident: RecoveryIncident; policy: Reco
               </li>
             ))}
           </ul>
-          <p className={styles.caption}>시뮬레이션 시간 · 실측 아님</p>
+          <p className={styles.caption}>{timingCaption(source, timingBasis(runtime.timings))}</p>
         </section>
       </div>
 

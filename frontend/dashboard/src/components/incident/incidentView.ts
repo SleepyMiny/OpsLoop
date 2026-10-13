@@ -30,15 +30,33 @@ export interface TimingCell {
 const span = (from: number | undefined, to: number | undefined): number | null =>
   from === undefined || to === undefined || to < from ? null : to - from;
 
-/** T_detect, T_decide, T_place measured stage to stage; T_recover from the trigger. */
+/**
+ * Where T_detect / T_recover start. §18 defines both from fault injection (Demo
+ * Driver clock); without that record they fall back to the API signal and the UI
+ * says so instead of presenting a shorter number under the §18 name.
+ */
+export type TimingBasis = 'injection' | 'api-signal';
+
+export function timingBasis(t: RuntimeTimings): TimingBasis {
+  return typeof t.faultInjectedAt === 'number' ? 'injection' : 'api-signal';
+}
+
+export function timingCaption(source: 'demo' | 'live', basis: TimingBasis): string {
+  const base = basis === 'injection' ? '장애 주입 기준(§18)' : 'API 장애 신호 기준 · 장애 주입 시각 없음';
+  return source === 'demo' ? `시뮬레이션 시간 · 실측 아님 · ${base}` : base;
+}
+
+/** T_decide and T_place run stage to stage; T_detect and T_recover start at fault injection (§18). */
 export function deriveTimings(t: RuntimeTimings): TimingCell[] {
+  const injection = timingBasis(t) === 'injection';
+  const start = injection ? t.faultInjectedAt : t.triggeredAt;
   return [
     {
       key: 'detect',
       code: 'T_detect',
       label: '감지까지',
-      hint: '장애 신호가 보인 뒤 Incident로 확정하기까지',
-      ms: span(t.triggeredAt, t.detectedAt),
+      hint: injection ? '장애 주입부터 Incident 확정까지' : 'API 장애 신호부터 Incident 확정까지(장애 주입 시각 없음)',
+      ms: span(start, t.detectedAt),
     },
     {
       key: 'decide',
@@ -58,8 +76,8 @@ export function deriveTimings(t: RuntimeTimings): TimingCell[] {
       key: 'recover',
       code: 'T_recover',
       label: '복구까지',
-      hint: '장애 신호부터 HTTP 검증을 통과하기까지',
-      ms: span(t.triggeredAt, t.recoveredAt),
+      hint: injection ? '장애 주입부터 HTTP 검증을 통과하기까지' : 'API 장애 신호부터 HTTP 검증 통과까지(장애 주입 시각 없음)',
+      ms: span(start, t.recoveredAt),
     },
   ];
 }
@@ -180,7 +198,7 @@ export function newestFirst(events: IncidentEvent[]): IncidentEvent[] {
 
 /**
  * Event history is append-only and bounded, so (length, first, last) identifies it.
- * Lets the log skip re-rendering while snapshots stream in at ~16 Hz.
+ * Lets the log skip re-rendering while snapshots stream in (up to 10 Hz).
  */
 export function sameEvents(a: IncidentEvent[], b: IncidentEvent[]): boolean {
   if (a === b) return true;

@@ -97,14 +97,14 @@ export function App({ source, kiosk }: { source: DashboardDataSource; kiosk: boo
       )}
 
       {source.demo && playback ? <PlaybackBar demo={source.demo} playback={playback} hidden={kiosk && idle} /> : null}
-      <RealityDialog open={realityOpen} onClose={closeReality} />
+      <RealityDialog open={realityOpen} onClose={closeReality} source={source.kind} />
     </div>
   );
 }
 
 function LiveUnavailable({ status }: { status: SourceStatus }) {
   const message =
-    status.state === 'unconfigured' || status.state === 'error'
+    status.state === 'unconfigured' || status.state === 'error' || status.state === 'stale'
       ? status.message
       : '첫 응답을 기다리는 중입니다.';
   return (

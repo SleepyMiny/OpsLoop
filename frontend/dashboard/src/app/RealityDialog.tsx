@@ -3,7 +3,15 @@ import { REALITY, REALITY_AS_OF, type RealityItem } from './realityStatus';
 import styles from './app.module.css';
 
 /** Honest disclosure of what exists today versus what this screen simulates. */
-export function RealityDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function RealityDialog({
+  open,
+  onClose,
+  source,
+}: {
+  open: boolean;
+  onClose: () => void;
+  source: 'demo' | 'live';
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current;
@@ -21,7 +29,9 @@ export function RealityDialog({ open, onClose }: { open: boolean; onClose: () =>
         </button>
       </div>
       <p className={styles.dialogLead}>
-        이 화면의 Runtime·Engineering 동작은 설계 문서(architecture v0.1)의 규칙을 그대로 따르는 시뮬레이션입니다.
+        {source === 'demo'
+          ? '지금 화면은 Demo Mode입니다. Runtime·Engineering 동작은 설계 문서(architecture v0.1)의 감지·분류·후보 평가 규칙과 점수 공식을 시뮬레이션 지표에 적용한 결과입니다.'
+          : '지금 화면은 Live 데이터를 표시합니다. 아래는 저장소 문서 기준의 구현 상태입니다.'}{' '}
         저장소 기준 {REALITY_AS_OF} 상태는 다음과 같습니다.
       </p>
       <div className={styles.realityGrid}>

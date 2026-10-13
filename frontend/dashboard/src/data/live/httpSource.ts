@@ -15,7 +15,10 @@ export interface HttpSourceOptions {
   baseUrl: string | undefined;
   pollMs?: number;
   timeoutMs?: number;
+  /** A snapshot older than this (by its observedAt) is reported as stale. Default 3 polls. */
+  staleAfterMs?: number;
   fetchImpl?: typeof fetch;
+  now?: () => number;
 }
 
 export const SNAPSHOT_PATH = '/api/v1/snapshot';
@@ -34,12 +37,18 @@ export class HttpDataSource implements DashboardDataSource {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private controller: AbortController | null = null;
   private running = false;
+  /** Bumped on every start/stop so a poll from an earlier run cannot reschedule itself. */
+  private generation = 0;
+  private readonly staleAfterMs: number;
+  private readonly now: () => number;
 
   constructor(options: HttpSourceOptions) {
     this.baseUrl = options.baseUrl?.replace(/\/+$/, '') || undefined;
     this.pollMs = options.pollMs ?? 5000;
     this.timeoutMs = options.timeoutMs ?? 4000;
     this.fetchImpl = options.fetchImpl ?? ((...args) => fetch(...args));
+    this.staleAfterMs = options.staleAfterMs ?? this.pollMs * 3;
+    this.now = options.now ?? (() => Date.now());
     this.label = this.baseUrl ? `Live · ${this.baseUrl}` : 'Live · 연결 안 됨';
     this.status = this.baseUrl
       ? { state: 'connecting' }
@@ -49,11 +58,13 @@ export class HttpDataSource implements DashboardDataSource {
   start(): void {
     if (this.running || !this.baseUrl) return;
     this.running = true;
-    void this.poll();
+    this.generation += 1;
+    void this.poll(this.generation);
   }
 
   stop(): void {
     this.running = false;
+    this.generation += 1;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.controller?.abort();
@@ -72,22 +83,38 @@ export class HttpDataSource implements DashboardDataSource {
     return this.status;
   }
 
-  private async poll(): Promise<void> {
-    if (!this.running) return;
-    this.controller = new AbortController();
-    const timeout = setTimeout(() => this.controller?.abort(), this.timeoutMs);
+  private async poll(generation: number): Promise<void> {
+    if (!this.running || generation !== this.generation) return;
+    const controller = new AbortController();
+    this.controller = controller;
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, this.timeoutMs);
     try {
       const res = await this.fetchImpl(`${this.baseUrl}${SNAPSHOT_PATH}`, {
-        signal: this.controller.signal,
+        signal: controller.signal,
         headers: { Accept: 'application/json' },
         credentials: 'omit',
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body: unknown = await res.json();
+      if (generation !== this.generation) return;
       this.snapshot = parseSnapshot(body);
-      this.status = { state: 'ok', lastUpdate: this.snapshot.observedAt };
+      const age = this.now() - this.snapshot.observedAt;
+      this.status =
+        age > this.staleAfterMs
+          ? {
+              state: 'stale',
+              lastUpdate: this.snapshot.observedAt,
+              message: `BFF가 ${Math.round(age / 1000)}초 전 snapshot을 돌려주고 있습니다.`,
+            }
+          : { state: 'ok', lastUpdate: this.snapshot.observedAt };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      // An abort caused by stop() (or a restart) is not a connection error.
+      if (generation !== this.generation) return;
+      const message = timedOut ? `응답 없음 (${this.timeoutMs} ms 초과)` : err instanceof Error ? err.message : String(err);
       // Keep the last good snapshot visible but mark it as not current.
       this.status = {
         state: 'error',
@@ -97,8 +124,9 @@ export class HttpDataSource implements DashboardDataSource {
     } finally {
       clearTimeout(timeout);
     }
+    if (generation !== this.generation) return;
     this.emit();
-    if (this.running) this.timer = setTimeout(() => void this.poll(), this.pollMs);
+    if (this.running) this.timer = setTimeout(() => void this.poll(generation), this.pollMs);
   }
 
   private emit(): void {
@@ -107,15 +135,20 @@ export class HttpDataSource implements DashboardDataSource {
 }
 
 /**
- * Minimal structural validation. It rejects payloads that would break rendering;
- * it is not a full schema validator, and the BFF remains responsible for content.
+ * Structural validation of the fields the dashboard computes with: timestamps
+ * and quantities must already be numbers (epoch ms, bytes, millicores), enums
+ * must be known values. A payload that fails is rejected with a path-specific
+ * message instead of being rendered with NaN or an unknown label. It is not a
+ * full schema validator; the BFF remains responsible for content.
  */
 export function parseSnapshot(body: unknown): DashboardSnapshot {
   if (!isRecord(body)) throw new Error('snapshot is not an object');
   const { observedAt, cluster, workload, policy, http } = body;
-  if (typeof observedAt !== 'number') throw new Error('snapshot.observedAt must be epoch ms');
+  if (!isFiniteNumber(observedAt)) throw new Error('snapshot.observedAt must be epoch ms');
   if (!isRecord(cluster) || !Array.isArray(cluster.nodes)) throw new Error('snapshot.cluster.nodes missing');
+  cluster.nodes.forEach((node, i) => validateNode(node, `cluster.nodes[${i}]`));
   if (!isRecord(workload) || typeof workload.name !== 'string') throw new Error('snapshot.workload missing');
+  validateQuantity(workload.requests, 'workload.requests');
   if (!isRecord(policy) || !isRecord(policy.spec)) throw new Error('snapshot.policy.spec missing');
   if (!isRecord(http) || !Array.isArray(http.probes)) throw new Error('snapshot.http.probes missing');
   const snapshot = body as unknown as DashboardSnapshot;
@@ -131,4 +164,40 @@ export function parseSnapshot(body: unknown): DashboardSnapshot {
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
+}
+
+function isFiniteNumber(x: unknown): x is number {
+  return typeof x === 'number' && Number.isFinite(x);
+}
+
+const ARCHES = new Set(['amd64', 'arm64']);
+const READINESS = new Set(['Ready', 'NotReady', 'Unknown']);
+const PRESSURES = new Set(['MemoryPressure', 'DiskPressure', 'PIDPressure']);
+
+function validateQuantity(q: unknown, path: string): void {
+  if (!isRecord(q) || !isFiniteNumber(q.cpuMillicores) || !isFiniteNumber(q.memoryBytes)) {
+    throw new Error(`${path} must be numeric {cpuMillicores, memoryBytes} (convert resource.Quantity in the BFF)`);
+  }
+}
+
+function validateSample(s: unknown, path: string): void {
+  if (!isRecord(s) || !(s.value === null || isFiniteNumber(s.value)) || !isFiniteNumber(s.observedAt)) {
+    throw new Error(`${path} must be {value: number|null, observedAt: epoch ms}`);
+  }
+}
+
+function validateNode(node: unknown, path: string): void {
+  if (!isRecord(node) || typeof node.name !== 'string') throw new Error(`${path}.name missing`);
+  if (!ARCHES.has(node.arch as string)) throw new Error(`${path}.arch must be amd64 or arm64`);
+  if (!READINESS.has(node.readiness as string)) throw new Error(`${path}.readiness is not a known value`);
+  if (!Array.isArray(node.pressure) || node.pressure.some((p) => !PRESSURES.has(p as string))) {
+    throw new Error(`${path}.pressure contains an unknown condition`);
+  }
+  validateQuantity(node.allocatable, `${path}.allocatable`);
+  validateQuantity(node.requested, `${path}.requested`);
+  if (!isRecord(node.usage)) throw new Error(`${path}.usage missing`);
+  validateSample(node.usage.cpu, `${path}.usage.cpu`);
+  validateSample(node.usage.memory, `${path}.usage.memory`);
+  validateSample(node.usage.memAvailableBytes, `${path}.usage.memAvailableBytes`);
+  if (!Array.isArray(node.pods)) throw new Error(`${path}.pods missing`);
 }

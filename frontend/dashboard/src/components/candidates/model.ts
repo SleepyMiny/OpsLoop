@@ -1,4 +1,4 @@
-import { evaluateCandidates, type EvaluationInput } from '../../domain/evaluate';
+import { compareNodeNames, evaluateCandidates, failuresFromAttempts, type EvaluationInput } from '../../domain/evaluate';
 import { REJECT_REASON_LABEL, RUNTIME_PHASE_LABEL, actionTypeLabel } from '../../domain/labels';
 import type {
   ActionResult,
@@ -234,11 +234,15 @@ export function buildCriteria(c: CandidateEvaluation, ctx: CriteriaContext): Cri
   }
 
   const cpu = utilization('cpu', m.cpuUtilization, ctx.filter.maxCPUUtilization, reasons.has('CPU_PRESSURE'));
+  // MEMORY_PRESSURE also comes from the node's MemoryPressure condition; the bar
+  // only turns red when the utilization itself is over the policy limit.
   const memory = utilization(
     'memory',
     m.memoryUtilization,
     ctx.filter.maxMemoryUtilization,
-    reasons.has('MEMORY_PRESSURE'),
+    reasons.has('MEMORY_PRESSURE') &&
+      isPresent(m.memoryUtilization) &&
+      m.memoryUtilization > ctx.filter.maxMemoryUtilization,
   );
 
   const availState = metricState(m.memAvailableBytes, reasons.has('INSUFFICIENT_AVAILABLE_MEMORY'));
@@ -428,7 +432,7 @@ export function buildRows(input: RowsInput): RowModel[] {
 
   const ranked = candidates
     .filter((c) => c.score !== undefined)
-    .sort((a, b) => b.score!.total - a.score!.total || a.nodeName.localeCompare(b.nodeName))
+    .sort((a, b) => b.score!.total - a.score!.total || compareNodeNames(a.nodeName, b.nodeName))
     .map((c) => c.nodeUid);
 
   return candidates.map((c): RowModel => {
@@ -498,12 +502,6 @@ export interface BoardModel {
   aside: { label: string; code: string | null; lamp: LampState };
 }
 
-function recentFailuresOf(rt: IncidentRuntimeStatus | undefined): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const a of rt?.attempts ?? []) if (a.result === 'failed') out[a.targetNode] = (out[a.targetNode] ?? 0) + 1;
-  return out;
-}
-
 /** Live evaluation of the current cluster, the same way the Runtime would run it now. */
 export function evaluateNow(snapshot: DashboardSnapshot) {
   const incident = snapshot.activeIncident;
@@ -514,7 +512,7 @@ export function evaluateNow(snapshot: DashboardSnapshot) {
     policy: snapshot.policy.spec,
     now: snapshot.observedAt,
     cooldowns: snapshot.policy.status.cooldowns,
-    recentFailures: recentFailuresOf(incident?.status.runtime),
+    recentFailures: failuresFromAttempts(incident?.status.runtime.attempts),
     ...(trigger?.type === 'NodeNotReady' ? { failedNodeName: trigger.nodeName } : {}),
   };
   return evaluateCandidates(input);

@@ -27,7 +27,7 @@ export class RegionBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    this.erroredAt = Date.now();
+    this.erroredAt = performance.now();
     this.setState({ failedAt: this.props.resetKey });
     console.error(`[OpsLoop dashboard] region "${this.props.name}" failed`, error, info.componentStack);
   }
@@ -37,7 +37,7 @@ export class RegionBoundary extends Component<Props, State> {
       this.state.error &&
       prev.resetKey !== this.props.resetKey &&
       this.props.resetKey !== this.state.failedAt &&
-      Date.now() - this.erroredAt > RETRY_AFTER_MS
+      performance.now() - this.erroredAt > RETRY_AFTER_MS
     ) {
       this.setState({ error: null, failedAt: null });
     }

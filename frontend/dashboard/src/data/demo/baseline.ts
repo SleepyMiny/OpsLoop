@@ -161,7 +161,15 @@ export function baselinePolicy(): RecoveryPolicy {
         requestedCapacityReserve: 0.1,
         maxSampleAgeSeconds: 30,
       },
-      score: { cpuWeight: 0.3, memoryWeight: 0.35, requestsWeight: 0.35, recentFailurePenalty: 15 },
+      // Cap and window are demo choices: §8 requires them to be explicit but sets no values.
+      score: {
+        cpuWeight: 0.3,
+        memoryWeight: 0.35,
+        requestsWeight: 0.35,
+        recentFailurePenalty: 15,
+        recentFailurePenaltyCap: 45,
+        failureHistoryWindowSeconds: 1800,
+      },
       budget: {
         maxActionsPerIncident: 2,
         cooldownSeconds: 120,

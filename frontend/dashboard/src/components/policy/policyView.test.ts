@@ -8,10 +8,10 @@ describe('activeCooldowns', () => {
   it('keeps only cooldowns that end after the snapshot time, soonest first', () => {
     const list = activeCooldowns(
       [
-        { nodeName: 'late', until: now + 90_000 },
-        { nodeName: 'over', until: now - 1 },
-        { nodeName: 'exact', until: now },
-        { nodeName: 'soon', until: now + 1_200 },
+        { workloadUid: 'w', nodeName: 'late', until: now + 90_000 },
+        { workloadUid: 'w', nodeName: 'over', until: now - 1 },
+        { workloadUid: 'w', nodeName: 'exact', until: now },
+        { workloadUid: 'w', nodeName: 'soon', until: now + 1_200 },
       ],
       now,
     );
@@ -19,9 +19,9 @@ describe('activeCooldowns', () => {
   });
 
   it('rounds the remaining time up so a live cooldown never reads 0초', () => {
-    expect(activeCooldowns([{ nodeName: 'n', until: now + 1 }], now)[0]!.remainingSeconds).toBe(1);
-    expect(activeCooldowns([{ nodeName: 'n', until: now + 115_000 }], now)[0]!.remainingSeconds).toBe(115);
-    expect(activeCooldowns([{ nodeName: 'n', until: now + 115_001 }], now)[0]!.remainingSeconds).toBe(116);
+    expect(activeCooldowns([{ workloadUid: 'w', nodeName: 'n', until: now + 1 }], now)[0]!.remainingSeconds).toBe(1);
+    expect(activeCooldowns([{ workloadUid: 'w', nodeName: 'n', until: now + 115_000 }], now)[0]!.remainingSeconds).toBe(115);
+    expect(activeCooldowns([{ workloadUid: 'w', nodeName: 'n', until: now + 115_001 }], now)[0]!.remainingSeconds).toBe(116);
   });
 
   it('is empty when nothing is cooling down', () => {
@@ -39,9 +39,9 @@ describe('weightShares', () => {
   });
 
   it('normalises weights that do not add up to one, and survives all zeros', () => {
-    const shares = weightShares({ cpuWeight: 1, memoryWeight: 1, requestsWeight: 2, recentFailurePenalty: 15 });
+    const shares = weightShares({ cpuWeight: 1, memoryWeight: 1, requestsWeight: 2, recentFailurePenalty: 15, recentFailurePenaltyCap: 45, failureHistoryWindowSeconds: 1800 });
     expect(shares.map((s) => s.share)).toEqual([0.25, 0.25, 0.5]);
-    expect(weightShares({ cpuWeight: 0, memoryWeight: 0, requestsWeight: 0, recentFailurePenalty: 0 })[0]!.share).toBeCloseTo(1 / 3);
+    expect(weightShares({ cpuWeight: 0, memoryWeight: 0, requestsWeight: 0, recentFailurePenalty: 0, recentFailurePenaltyCap: 0, failureHistoryWindowSeconds: 0 })[0]!.share).toBeCloseTo(1 / 3);
     expect(weightTotal(baselinePolicy().spec.score)).toBeCloseTo(1);
   });
 });
@@ -98,7 +98,7 @@ describe('sameRuleSheet', () => {
   it('ignores live status but notices a new hash, generation or mode', () => {
     const a = baselinePolicy();
     const b = structuredClone(a);
-    b.status.cooldowns.push({ nodeName: 'n', until: 1 });
+    b.status.cooldowns.push({ workloadUid: 'w', nodeName: 'n', until: 1 });
     b.status.incidentSequence += 1;
     expect(sameRuleSheet(a, b)).toBe(true);
 

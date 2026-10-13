@@ -160,6 +160,10 @@
   background: var(--c-ok);
   color: var(--c-face);
 }
+.modeBadge[data-mode='live'][data-state='stale'] strong,
+.modeBadge[data-mode='live'][data-state='connecting'] strong {
+  background: var(--c-caution);
+}
 .modeBadge[data-mode='live'][data-state='error'] strong,
 .modeBadge[data-mode='live'][data-state='unconfigured'] strong {
   background: var(--c-fault);

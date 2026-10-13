@@ -5,13 +5,33 @@ import {
   conditionTone,
   deriveTimings,
   describeRecent,
+  timingCaption,
   describeTrigger,
   newestFirst,
   sameEvents,
 } from './incidentView';
 
 describe('deriveTimings', () => {
-  it('measures each stage from the previous one and recovery from the trigger', () => {
+  it('starts T_detect and T_recover at fault injection when the Demo Driver recorded it (§18)', () => {
+    const cells = deriveTimings({
+      faultInjectedAt: 0,
+      triggeredAt: 40_000,
+      detectedAt: 60_000,
+      decidedAt: 78_000,
+      placedAt: 89_000,
+      recoveredAt: 120_000,
+    });
+    expect(cells.map((c) => [c.code, c.ms])).toEqual([
+      ['T_detect', 60_000],
+      ['T_decide', 18_000],
+      ['T_place', 11_000],
+      ['T_recover', 120_000],
+    ]);
+    expect(timingCaption('demo', 'injection')).toContain('장애 주입 기준');
+    expect(timingCaption('live', 'api-signal')).not.toContain('시뮬레이션');
+  });
+
+  it('falls back to the API signal and says so when injection time is unknown', () => {
     const cells = deriveTimings({
       triggeredAt: 1_000,
       detectedAt: 21_000,

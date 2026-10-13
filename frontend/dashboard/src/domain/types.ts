@@ -32,6 +32,22 @@ export interface MetricSample {
   observedAt: number;
 }
 
+export type TaintEffect = 'NoSchedule' | 'PreferNoSchedule' | 'NoExecute';
+
+export interface Taint {
+  key: string;
+  value?: string;
+  effect: TaintEffect;
+}
+
+export interface Toleration {
+  key?: string;
+  operator?: 'Equal' | 'Exists';
+  value?: string;
+  /** Omitted means the toleration matches every effect. */
+  effect?: TaintEffect;
+}
+
 export interface ResourceQuantity {
   cpuMillicores: number;
   memoryBytes: number;
@@ -71,6 +87,8 @@ export interface ClusterNode {
   role: NodeRole;
   readiness: NodeReadiness;
   unschedulable: boolean;
+  /** Node taints (Kubernetes API). Omitted means none. */
+  taints?: Taint[];
   pressure: PressureCondition[];
   /** opsloop.io/recovery-candidate=true */
   recoveryCandidate: boolean;
@@ -121,6 +139,12 @@ export interface WorkloadStatus {
   imageIndexDigest: string;
   platforms: ImagePlatformManifest[];
   requests: ResourceQuantity;
+  tolerations?: Toleration[];
+  /**
+   * Scheduling constraints OpsLoop does not model (e.g. podAntiAffinity,
+   * topologySpreadConstraints). Any entry rejects every candidate (§8).
+   */
+  unsupportedConstraints?: string[];
 }
 
 export interface HttpProbe {
@@ -169,6 +193,12 @@ export interface RecoveryPolicySpec {
     memoryWeight: number;
     requestsWeight: number;
     recentFailurePenalty: number;
+    /**
+     * Upper bound and history window for the penalty. §8 requires both to be
+     * explicit but leaves the values open; the demo policy picks its own.
+     */
+    recentFailurePenaltyCap: number;
+    failureHistoryWindowSeconds: number;
   };
   budget: {
     maxActionsPerIncident: number;
@@ -186,7 +216,9 @@ export interface RecoveryPolicySpec {
   sameSignatureCircuit: boolean;
 }
 
+/** Cooldown applies to a failed workload–node pair (§8). */
 export interface CooldownEntry {
+  workloadUid: string;
   nodeName: string;
   until: number;
 }
@@ -347,6 +379,13 @@ export interface ActionAttempt {
 export type QuarantineState = 'QuarantineRequested' | 'QuarantineConfirmed' | 'QuarantineUnconfirmed';
 
 export interface RuntimeTimings {
+  /**
+   * Fault injection time from the Demo Driver on the Laptop Host clock (§18
+   * measurement start). Not part of the CRD; a live BFF fills it only when it can
+   * join Demo Driver records, otherwise T_detect/T_recover fall back to the API
+   * signal and are labelled accordingly.
+   */
+  faultInjectedAt?: number;
   /** Trigger observed by the API (NotReady / restart threshold). */
   triggeredAt: number;
   detectedAt?: number;

@@ -1,4 +1,4 @@
-import { evaluateCandidates, type EvaluationResult } from '../../domain/evaluate';
+import { evaluateCandidates, failuresFromAttempts, type EvaluationResult } from '../../domain/evaluate';
 import type {
   ActionAttempt,
   ClusterNode,
@@ -80,6 +80,8 @@ export interface ScenarioContext {
   /** Name of the open RecoveryIncident, e.g. demo-api-recovery-0007. */
   readonly incidentName: string | null;
   narrate(narration: Narration): void;
+  /** Demo Driver fault injection (power-off, fixture replay): §18 measurement start. */
+  injectFault(): void;
   pace(multiplier: number): void;
   setLoad(nodeName: string, load: { cpu?: number; memory?: number }): void;
   powerOff(nodeName: string): void;
@@ -120,7 +122,10 @@ export class DemoSimulation {
   private incident: RecoveryIncident | null = null;
   private narration: Narration | undefined;
   private crashing = false;
+  private faultInjectedAt: number | undefined;
   private cached: DashboardSnapshot | null = null;
+  /** Cue failures in this run; tests assert zero, the booth keeps playing. */
+  cueErrors = 0;
 
   private readonly incidentSequence: number;
 
@@ -148,6 +153,8 @@ export class DemoSimulation {
     this.cueIndex = 0;
     this.paceValue = 1;
     this.crashing = false;
+    this.cueErrors = 0;
+    this.faultInjectedAt = undefined;
     this.incident = null;
     this.narration = undefined;
     this.probes = [];
@@ -254,8 +261,15 @@ export class DemoSimulation {
   private fireCues(): void {
     const cues = this.script.cues;
     while (this.cueIndex < cues.length && cues[this.cueIndex]!.at * 1000 <= this.elapsedMs) {
-      cues[this.cueIndex]!.run(this.context());
+      const cue = cues[this.cueIndex]!;
+      // Advance first so a failing cue is skipped rather than retried every frame.
       this.cueIndex++;
+      try {
+        cue.run(this.context());
+      } catch (err) {
+        this.cueErrors += 1;
+        console.error(`[OpsLoop demo] cue at ${cue.at}s failed`, err);
+      }
     }
   }
 
@@ -351,6 +365,10 @@ export class DemoSimulation {
       if (attempt && attempt.podUid === serving.uid && attempt.result === 'placed') {
         attempt.httpSuccesses = Math.min(attempt.httpSuccesses + 1, 99);
       }
+    } else {
+      // "Consecutive" successes: any failed probe during verification resets the count.
+      const attempt = this.currentAttempt();
+      if (attempt && attempt.result === 'placed') attempt.httpSuccesses = 0;
     }
     this.probes = pushBounded(this.probes, probe, PROBE_POINTS);
   }
@@ -391,6 +409,9 @@ export class DemoSimulation {
       narrate(narration) {
         self.narration = narration;
       },
+      injectFault() {
+        self.faultInjectedAt ??= self.nowMs;
+      },
       pace(multiplier) {
         self.paceValue = multiplier;
       },
@@ -427,7 +448,11 @@ export class DemoSimulation {
               phase: 'DETECTED',
               attempts: [],
               budget: { used: 0, max: self.policy.spec.budget.maxActionsPerIncident },
-              timings: { triggeredAt: trigger.observedAt, detectedAt: self.nowMs },
+              timings: {
+                ...(self.faultInjectedAt !== undefined ? { faultInjectedAt: self.faultInjectedAt } : {}),
+                triggeredAt: trigger.observedAt,
+                detectedAt: self.nowMs,
+              },
               oldPodsOutstanding: false,
             },
             conditions: [],
@@ -442,7 +467,10 @@ export class DemoSimulation {
         self.cached = null;
       },
       phase(phase, message, kind = 'evaluate') {
-        self.runtime().phase = phase;
+        const rt = self.runtime();
+        rt.phase = phase;
+        // T_decide ends when the first target is actually selected (§18).
+        if (phase === 'TARGET_SELECTED' && rt.decision?.selectedHostname) rt.timings.decidedAt ??= self.nowMs;
         self.pushEvent(kind, phase, message);
       },
       classify(classification, message, signature) {
@@ -462,10 +490,7 @@ export class DemoSimulation {
         const rt = self.runtime();
         const trigger = self.incident!.spec.trigger;
         const current = self.demoPods.find((p) => p.phase !== 'Pending')?.nodeName;
-        const recentFailures: Record<string, number> = {};
-        for (const a of rt.attempts) {
-          if (a.result === 'failed') recentFailures[a.targetNode] = (recentFailures[a.targetNode] ?? 0) + 1;
-        }
+        const recentFailures = failuresFromAttempts(rt.attempts);
         const result = evaluateCandidates({
           nodes: self.nodes,
           workload: self.workload,
@@ -496,9 +521,6 @@ export class DemoSimulation {
             ? `${result.selected.nodeName} 최고 점수 ${result.selected.score?.total.toFixed(1)}`
             : '적격 후보 없음',
         };
-        // T_decide ends at the first decision that actually selects a target; a
-        // WAITING re-evaluation or a later attempt does not move it.
-        if (result.selected) rt.timings.decidedAt ??= self.nowMs;
         const eligible = result.candidates.filter((c) => c.score).length;
         self.pushEvent(
           'decide',
@@ -576,6 +598,7 @@ export class DemoSimulation {
         attempt.finishedAt = self.nowMs;
         attempt.failureReason = reason;
         self.policy.status.cooldowns.push({
+          workloadUid: self.workload.uid,
           nodeName: attempt.targetNode,
           until: self.nowMs + self.policy.spec.budget.cooldownSeconds * 1000,
         });
@@ -584,6 +607,13 @@ export class DemoSimulation {
       recovered(message) {
         const rt = self.runtime();
         const attempt = rt.attempts.at(-1);
+        // A script may only declare recovery the policy would accept (§7, §8).
+        const required = self.policy.spec.verification.consecutiveSuccesses;
+        const stableSince = rt.timings.placedAt;
+        const stabilityMs = self.policy.spec.verification.stabilityWindowSeconds * 1000;
+        if (!attempt || attempt.httpSuccesses < required || stableSince === undefined || self.nowMs - stableSince < stabilityMs) {
+          throw new Error(`recovered() before verification passed (${attempt?.httpSuccesses ?? 0}/${required})`);
+        }
         if (attempt) {
           attempt.result = 'verified';
           attempt.finishedAt = self.nowMs;
@@ -624,7 +654,7 @@ export class DemoSimulation {
           jobId: prev?.jobId ?? `job-${inc.name.split('-').at(-1)}`,
           iteration: prev?.iteration ?? 0,
           maxIterations: prev?.maxIterations ?? 3,
-          baseCommit: prev?.baseCommit ?? '6aa9daa',
+          baseCommit: prev?.baseCommit ?? 'demo-base',
           stages: prev?.stages ?? [],
           ...prev,
           ...patch,

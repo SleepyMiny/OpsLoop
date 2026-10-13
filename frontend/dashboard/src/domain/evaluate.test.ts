@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { baselinePolicy, baselineWorkload, NODE_SEEDS, seedNode } from '../data/demo/baseline';
-import { evaluateCandidates, scoreCandidate } from './evaluate';
+import { compareNodeNames, evaluateCandidates, scoreCandidate } from './evaluate';
 import type { ClusterNode } from './types';
 
 const NOW = 1_000_000;
@@ -97,14 +97,14 @@ describe('evaluateCandidates hard filter', () => {
 
   it('applies cooldown and returns no selection when nothing is eligible', () => {
     const list = nodes();
-    const cooldowns = list.map((n) => ({ nodeName: n.name, until: NOW + 1 }));
+    const cooldowns = list.map((n) => ({ workloadUid: workload.uid, nodeName: n.name, until: NOW + 1 }));
     const r = evaluateCandidates({ nodes: list, workload, policy, now: NOW, cooldowns });
     expect(r.candidates.every((c) => c.rejectReasons.includes('COOLDOWN'))).toBe(true);
     expect(r.selected).toBeNull();
     expect(r.actionType).toBeNull();
   });
 
-  it('labels selecting the current node as restart and breaks ties by node name', () => {
+  it('labels selecting the current node as restart', () => {
     const list = nodes();
     for (const n of list) {
       n.usage.cpu.value = 0.2;
@@ -115,5 +115,108 @@ describe('evaluateCandidates hard filter', () => {
     const r = evaluateCandidates({ nodes: list, workload, policy, now: NOW, currentNodeName: 'azure-arm64-worker' });
     expect(r.selected?.nodeName).toBe('azure-arm64-worker');
     expect(r.actionType).toBe('restart');
+  });
+});
+
+function equalize(list: ClusterNode[]): ClusterNode[] {
+  for (const n of list) {
+    n.usage.cpu.value = 0.2;
+    n.usage.memory.value = 0.3;
+    n.usage.memAvailableBytes.value = 4 * 1024 ** 3;
+    n.allocatable = { cpuMillicores: 4000, memoryBytes: 8 * 1024 ** 3 };
+    n.requested = { cpuMillicores: 0, memoryBytes: 0 };
+  }
+  return list;
+}
+
+describe('evaluateCandidates tie-break and penalty', () => {
+  it('breaks exact ties by byte order of node names, independent of the current node', () => {
+    const r = evaluateCandidates({ nodes: equalize(nodes()), workload, policy, now: NOW });
+    expect(r.selected?.nodeName).toBe('azure-arm64-worker');
+    expect(r.actionType).toBe('relocation');
+    expect(compareNodeNames('Zeta', 'alpha')).toBeLessThan(0); // uppercase sorts first in byte order
+    expect(compareNodeNames('node_a', 'node-a')).toBeGreaterThan(0);
+  });
+
+  it('caps the penalty and ignores failures outside the history window', () => {
+    const list = equalize(nodes());
+    const at = (secondsAgo: number) => NOW - secondsAgo * 1000;
+    const failures = [
+      ...[10, 20, 30, 40].map((s) => ({ nodeName: 'azure-arm64-worker', at: at(s) })),
+      { nodeName: 'opsloop-control', at: at(policy.score.failureHistoryWindowSeconds + 1) },
+    ];
+    const r = evaluateCandidates({ nodes: list, workload, policy, now: NOW, recentFailures: failures });
+    const azure = r.candidates.find((c) => c.nodeName === 'azure-arm64-worker')!;
+    const laptop = r.candidates.find((c) => c.nodeName === 'opsloop-control')!;
+    expect(azure.score!.penalty).toBe(policy.score.recentFailurePenaltyCap);
+    expect(laptop.score!.penalty).toBe(0);
+  });
+
+  it('applies cooldown only to the same workload', () => {
+    const cooldowns = [{ workloadUid: 'other-workload', nodeName: 'opsloop-control', until: NOW + 60_000 }];
+    const r = evaluateCandidates({ nodes: nodes(), workload, policy, now: NOW, cooldowns });
+    expect(r.candidates.find((c) => c.nodeName === 'opsloop-control')!.rejectReasons).not.toContain('COOLDOWN');
+  });
+});
+
+describe('evaluateCandidates rejects what it cannot evaluate (§8, §11)', () => {
+  it('treats a non-numeric sample timestamp as missing, not fresh', () => {
+    const list = nodes();
+    (byName(list, 'azure-arm64-worker').usage.cpu as { observedAt: unknown }).observedAt = '2026-10-13T05:00:00Z';
+    const r = evaluateCandidates({ nodes: list, workload, policy, now: NOW });
+    expect(r.candidates.find((c) => c.nodeName === 'azure-arm64-worker')!.rejectReasons).toContain('METRICS_MISSING');
+  });
+
+  it('treats a sample from the future beyond clock skew as stale', () => {
+    const list = nodes();
+    byName(list, 'azure-arm64-worker').usage.memory.observedAt = NOW + 3_600_000;
+    const r = evaluateCandidates({ nodes: list, workload, policy, now: NOW });
+    expect(r.candidates.find((c) => c.nodeName === 'azure-arm64-worker')!.rejectReasons).toContain('METRICS_STALE');
+  });
+
+  it('treats NaN utilization as missing', () => {
+    const list = nodes();
+    byName(list, 'opsloop-control').usage.cpu.value = Number.NaN;
+    const r = evaluateCandidates({ nodes: list, workload, policy, now: NOW });
+    const laptop = r.candidates.find((c) => c.nodeName === 'opsloop-control')!;
+    expect(laptop.rejectReasons).toContain('METRICS_MISSING');
+    expect(laptop.score).toBeUndefined();
+  });
+
+  it('rejects unparsed quantity strings and zero allocatable instead of scoring NaN', () => {
+    const list = nodes();
+    (byName(list, 'azure-arm64-worker').allocatable as { cpuMillicores: unknown }).cpuMillicores = '1930m';
+    byName(list, 'opsloop-control').allocatable = { cpuMillicores: 0, memoryBytes: 0 };
+    const r = evaluateCandidates({ nodes: list, workload, policy, now: NOW });
+    expect(r.candidates.find((c) => c.nodeName === 'azure-arm64-worker')!.rejectReasons).toContain(
+      'INSUFFICIENT_REQUESTED_CPU',
+    );
+    expect(r.candidates.find((c) => c.nodeName === 'opsloop-control')!.rejectReasons).toEqual(
+      expect.arrayContaining(['INSUFFICIENT_REQUESTED_CPU', 'INSUFFICIENT_REQUESTED_MEMORY']),
+    );
+    expect(r.candidates.every((c) => c.score === undefined || Number.isFinite(c.score.total))).toBe(true);
+    expect(r.selected?.nodeName).toBe('sarmubuntuserver');
+  });
+
+  it('rejects NoSchedule/NoExecute taints the workload does not tolerate', () => {
+    const list = nodes();
+    byName(list, 'opsloop-control').taints = [{ key: 'node-role.kubernetes.io/control-plane', effect: 'NoSchedule' }];
+    byName(list, 'azure-arm64-worker').taints = [{ key: 'cost', value: 'high', effect: 'PreferNoSchedule' }];
+    const r = evaluateCandidates({ nodes: list, workload, policy, now: NOW });
+    expect(r.candidates.find((c) => c.nodeName === 'opsloop-control')!.rejectReasons).toContain('UNTOLERATED_TAINT');
+    expect(r.candidates.find((c) => c.nodeName === 'azure-arm64-worker')!.rejectReasons).not.toContain(
+      'UNTOLERATED_TAINT',
+    );
+
+    const tolerant = { ...workload, tolerations: [{ key: 'node-role.kubernetes.io/control-plane', operator: 'Exists' as const }] };
+    const r2 = evaluateCandidates({ nodes: list, workload: tolerant, policy, now: NOW });
+    expect(r2.candidates.find((c) => c.nodeName === 'opsloop-control')!.rejectReasons).not.toContain('UNTOLERATED_TAINT');
+  });
+
+  it('rejects every candidate when the workload has a constraint OpsLoop does not model', () => {
+    const constrained = { ...workload, unsupportedConstraints: ['podAntiAffinity'] };
+    const r = evaluateCandidates({ nodes: nodes(), workload: constrained, policy, now: NOW });
+    expect(r.candidates.every((c) => c.rejectReasons.includes('UNSUPPORTED_CONSTRAINT'))).toBe(true);
+    expect(r.selected).toBeNull();
   });
 });

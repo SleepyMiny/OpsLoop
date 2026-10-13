@@ -88,9 +88,9 @@ export function usePresenterKeys(
 ): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
       const target = e.target as HTMLElement | null;
-      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (target?.closest('input, textarea, select, [contenteditable="true"], [role="tablist"]')) return;
       const key = e.key.toLowerCase();
       if (key === 'f') toggleFullscreen();
       else if (key === '?' || key === 'i') actions.toggleReality();

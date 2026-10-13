@@ -5,6 +5,13 @@ import { toggleFullscreen } from './hooks';
 import styles from './app.module.css';
 
 const TAG_LABEL = { 'demo-a': 'Demo A', 'demo-b': 'Demo B', negative: '경계 사례' } as const;
+const LIVE_STATUS_LABEL: Record<SourceStatus['state'], string> = {
+  connecting: '연결 중',
+  ok: '연결됨',
+  stale: '데이터 지연',
+  error: '연결 끊김',
+  unconfigured: '연결 안 됨',
+};
 
 export function Header({
   source,
@@ -44,7 +51,7 @@ export function Header({
       ) : (
         <p className={styles.modeBadge} data-mode="live" data-state={status.state}>
           <strong>Live</strong>
-          <span>{status.state === 'ok' ? '연결됨' : status.state === 'error' ? '연결 끊김' : '연결 안 됨'}</span>
+          <span>{LIVE_STATUS_LABEL[status.state]}</span>
         </p>
       )}
 

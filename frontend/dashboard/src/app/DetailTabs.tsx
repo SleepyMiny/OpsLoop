@@ -50,6 +50,7 @@ export function DetailTabs({
             onClick={() => setPinned(t.id)}
             onKeyDown={(e) => {
               if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+              e.preventDefault();
               const i = TABS.findIndex((x) => x.id === active);
               const next = TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length]!;
               setPinned(next.id);
