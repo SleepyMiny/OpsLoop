@@ -1,0 +1,126 @@
+/*
+ * OpsLoop exhibition dashboard — design tokens.
+ *
+ * Concept: a control-room mimic panel. The page is an enamel instrument panel;
+ * colour is reserved for state lamps, OpsLoop's own actions, and the two CPU
+ * architectures. Decoration that does not encode state is avoided.
+ *
+ *   ok       verified / healthy            (signal green)
+ *   caution  waiting, pending, stale data  (amber)
+ *   fault    failure, rejected, down       (signal red)
+ *   act      what OpsLoop decided or did   (cobalt route lamp)
+ *   amd64 / arm64  architecture identity only, never state
+ */
+
+:root {
+  color-scheme: light;
+
+  --c-panel: #e1e4dc;
+  --c-face: #f3f4ef;
+  --c-face-sunk: #e9ebe4;
+  --c-rule: #c3c9c0;
+  --c-rule-strong: #9aa39b;
+  --c-ink: #1c2a31;
+  --c-ink-2: #4b5b63;
+  --c-ink-3: #7d8b91;
+
+  --c-ok: #2e8a57;
+  --c-ok-soft: #d6eadc;
+  --c-caution: #b97d0b;
+  --c-caution-soft: #f4e6c4;
+  --c-fault: #c23b2e;
+  --c-fault-soft: #f3d6d1;
+  --c-act: #2457c5;
+  --c-act-soft: #d9e3f6;
+
+  --c-amd64: #4a5d70;
+  --c-arm64: #8b4c9e;
+
+  --c-demo-stripe-a: #1c2a31;
+  --c-demo-stripe-b: #e2b13c;
+
+  --font-sign: 'Barlow', 'IBM Plex Sans KR', system-ui, sans-serif;
+  --font-text: 'IBM Plex Sans KR', 'Barlow', system-ui, sans-serif;
+  --font-code: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+
+  /* Modular type scale (ratio 1.25) anchored on a fluid body size so a 1080p TV
+     read from ~2 m and a laptop both stay legible. */
+  --fs-body: clamp(0.9375rem, 0.55rem + 0.55vw, 1.125rem);
+  --fs-xs: calc(var(--fs-body) * 0.72);
+  --fs-sm: calc(var(--fs-body) * 0.85);
+  --fs-md: calc(var(--fs-body) * 1.25);
+  --fs-lg: calc(var(--fs-body) * 1.56);
+  --fs-xl: calc(var(--fs-body) * 1.95);
+  --fs-xxl: calc(var(--fs-body) * 2.44);
+
+  --lh-text: 1.6;
+  --lh-tight: 1.2;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --gutter: clamp(1rem, 0.4rem + 1vw, 1.5rem);
+
+  /* Hierarchy in radius: the panel is square-cut, instruments are softened,
+     lamps are round. */
+  --radius-instrument: 6px;
+  --radius-chip: 3px;
+
+  --shadow-inset: inset 0 1px 0 rgb(255 255 255 / 0.7), inset 0 -1px 0 rgb(0 0 0 / 0.06);
+  --lamp-glow: 0 0 0 3px color-mix(in srgb, currentColor 22%, transparent);
+
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-quick: 160ms;
+  --dur-move: 900ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --c-panel: #182024;
+    --c-face: #20292e;
+    --c-face-sunk: #1a2226;
+    --c-rule: #33424a;
+    --c-rule-strong: #4c5d66;
+    --c-ink: #e4e9e4;
+    --c-ink-2: #a9b6b8;
+    --c-ink-3: #77878c;
+    --c-ok: #4cc283;
+    --c-ok-soft: #1d3a2b;
+    --c-caution: #e8b03c;
+    --c-caution-soft: #3d3218;
+    --c-fault: #f0685a;
+    --c-fault-soft: #45221e;
+    --c-act: #6f9cf5;
+    --c-act-soft: #1f2e4d;
+    --c-amd64: #93a9bf;
+    --c-arm64: #c48ad6;
+    --shadow-inset: inset 0 1px 0 rgb(255 255 255 / 0.04), inset 0 -1px 0 rgb(0 0 0 / 0.3);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --c-panel: #182024;
+  --c-face: #20292e;
+  --c-face-sunk: #1a2226;
+  --c-rule: #33424a;
+  --c-rule-strong: #4c5d66;
+  --c-ink: #e4e9e4;
+  --c-ink-2: #a9b6b8;
+  --c-ink-3: #77878c;
+  --c-ok: #4cc283;
+  --c-ok-soft: #1d3a2b;
+  --c-caution: #e8b03c;
+  --c-caution-soft: #3d3218;
+  --c-fault: #f0685a;
+  --c-fault-soft: #45221e;
+  --c-act: #6f9cf5;
+  --c-act-soft: #1f2e4d;
+  --c-amd64: #93a9bf;
+  --c-arm64: #c48ad6;
+  --shadow-inset: inset 0 1px 0 rgb(255 255 255 / 0.04), inset 0 -1px 0 rgb(0 0 0 / 0.3);
+}

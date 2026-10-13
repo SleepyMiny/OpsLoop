@@ -1,0 +1,125 @@
+.lamp {
+  display: inline-block;
+  flex: none;
+  width: 0.75em;
+  height: 0.75em;
+  border-radius: 50%;
+  background: var(--c-rule-strong);
+  color: var(--c-rule-strong);
+  box-shadow: inset 0 -1px 2px rgb(0 0 0 / 0.25);
+  vertical-align: -0.05em;
+}
+
+.lamp[data-state='ok'] {
+  background: var(--c-ok);
+  color: var(--c-ok);
+  box-shadow: var(--lamp-glow), inset 0 -1px 2px rgb(0 0 0 / 0.2);
+}
+.lamp[data-state='caution'] {
+  background: var(--c-caution);
+  color: var(--c-caution);
+  box-shadow: var(--lamp-glow), inset 0 -1px 2px rgb(0 0 0 / 0.2);
+}
+.lamp[data-state='fault'] {
+  background: var(--c-fault);
+  color: var(--c-fault);
+  box-shadow: var(--lamp-glow), inset 0 -1px 2px rgb(0 0 0 / 0.2);
+}
+.lamp[data-state='act'] {
+  background: var(--c-act);
+  color: var(--c-act);
+  box-shadow: var(--lamp-glow), inset 0 -1px 2px rgb(0 0 0 / 0.2);
+}
+
+.lamp[data-pulse] {
+  animation: lamp-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes lamp-pulse {
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, currentColor 0%, transparent);
+    opacity: 0.55;
+  }
+}
+
+.arch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.05em 0.45em;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-chip);
+  font-family: var(--font-sign);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.arch[data-arch='amd64'] {
+  color: var(--c-amd64);
+}
+.arch[data-arch='arm64'] {
+  color: var(--c-arm64);
+}
+.arch[data-size='sm'] {
+  font-size: var(--fs-xs);
+}
+.arch[data-size='lg'] {
+  font-size: var(--fs-body);
+}
+
+.archGlyph {
+  width: 0.85em;
+  height: 0.85em;
+  fill: currentColor;
+}
+
+.instrument {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--c-face);
+  border: 1px solid var(--c-rule);
+  border-radius: var(--radius-instrument);
+  box-shadow: var(--shadow-inset);
+  transition: border-color var(--dur-quick) var(--ease-out), box-shadow var(--dur-quick) var(--ease-out);
+}
+
+.instrument[data-emphasized] {
+  border-color: var(--c-act);
+  box-shadow: var(--shadow-inset), 0 0 0 2px var(--c-act-soft);
+}
+
+.instrumentHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  border-bottom: 1px solid var(--c-rule);
+}
+
+.instrumentTitle {
+  font-size: var(--fs-md);
+}
+
+.instrumentAside {
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+  text-align: right;
+}
+
+.instrumentBody {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+
+.enum {
+  font-family: var(--font-code);
+  font-size: var(--fs-xs);
+  color: var(--c-ink-2);
+  letter-spacing: 0;
+}
