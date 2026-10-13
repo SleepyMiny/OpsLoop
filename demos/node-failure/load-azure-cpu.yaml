@@ -1,0 +1,25 @@
+# Burns ~90% of the 2-vCPU Azure worker so its candidate is rejected with CPU_PRESSURE (> 85%).
+# 10% stays free so node-exporter scrapes do not starve into METRICS_STALE/MISSING. Small requests leave the requests axis unchanged.
+# busybox:1.37.0 OCI index digest (registry-1.docker.io, checked 2026-10-13).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: opsloop-load-cpu
+  namespace: opsloop-demo
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: opsloop-azure-worker
+  automountServiceAccountToken: false
+  containers:
+    - name: burn-1
+      image: docker.io/library/busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+      command: ["sh", "-c", "while :; do :; done"]
+      resources:
+        requests: {cpu: 10m, memory: 8Mi}
+        limits: {cpu: 900m, memory: 32Mi}
+    - name: burn-2
+      image: docker.io/library/busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+      command: ["sh", "-c", "while :; do :; done"]
+      resources:
+        requests: {cpu: 10m, memory: 8Mi}
+        limits: {cpu: 900m, memory: 32Mi}
