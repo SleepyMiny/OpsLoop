@@ -297,3 +297,16 @@ func TestProbe(t *testing.T) {
 		t.Fatal("redirect must not be followed")
 	}
 }
+
+func TestStepReadinessFlapAfterReadyIsNotPlacementTimeout(t *testing.T) {
+	f := newFixture()
+	f.Budget.VerificationTimeout.Duration = 120 * time.Second
+	f.step(t0.Add(10*time.Second), nil) // records PodReadyAt
+	f.Pod.Status.Conditions = nil       // readiness flaps during stability
+	if out := f.step(t0.Add(91*time.Second), nil); out != Pending {
+		t.Fatalf("flap past placement timeout: outcome %v reason %q, want Pending", out, f.Attempt.FailureReason)
+	}
+	if out := f.step(t0.Add(131*time.Second), nil); out != Failed || f.Attempt.FailureReason != "VERIFICATION_TIMEOUT" {
+		t.Fatalf("outcome %v reason %q, want Failed VERIFICATION_TIMEOUT", out, f.Attempt.FailureReason)
+	}
+}

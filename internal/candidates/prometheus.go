@@ -22,6 +22,9 @@ const (
 	minCPUSamples = 3
 	instanceLabel = "instance"
 	idleSelector  = `{job="node-exporter",mode="idle"}`
+	// Keeps 1000*bytes in score and 100*bytes in the memory filter inside int64.
+	maxMemoryBytes = 1 << 50
+	maxClockSkew   = 5 * time.Second
 )
 
 type Sample struct {
@@ -119,12 +122,27 @@ func assessMetrics(m Metrics, node *corev1.Node, now time.Time, maxAge time.Dura
 		missing = true
 		return 0, false
 	}
+	outOfRange := func(name string) {
+		missing = true
+		details = append(details, name+" out of range")
+	}
 	fresh := func(name string, ts float64) *metav1.Time {
 		// timestamp() returns seconds with millisecond precision.
-		t := metav1.NewTime(time.UnixMilli(int64(math.Round(ts * 1000))).UTC())
-		if age := now.Sub(t.Time); age > maxAge {
+		ms := math.Round(ts * 1000)
+		// The CRD stores date-time (RFC3339), which cannot represent years past 9999.
+		if !(ms > 0 && ms < 253402300800000) {
+			outOfRange(name + " sample time")
+			return nil
+		}
+		t := metav1.NewTime(time.UnixMilli(int64(ms)).UTC())
+		switch age := now.Sub(t.Time); {
+		case age > maxAge:
 			stale = true
 			details = append(details, fmt.Sprintf("%s sample age %s", name, age))
+		case age < -maxClockSkew:
+			// A future sample would otherwise pass the age check forever.
+			stale = true
+			details = append(details, fmt.Sprintf("%s sample %s in the future", name, -age))
 		}
 		return &t
 	}
@@ -133,7 +151,9 @@ func assessMetrics(m Metrics, node *corev1.Node, now time.Time, maxAge time.Dura
 		p := int32(math.Round(math.Min(math.Max(v, 0), 1) * 1000))
 		meas.CPUUtilizationPermille = &p
 	}
-	if v, ok := one("cpu sample count", m.CPUCount); ok {
+	if v, ok := one("cpu sample count", m.CPUCount); ok && (v < 0 || v > math.MaxInt32) {
+		outOfRange("cpu sample count")
+	} else if ok {
 		c := int32(v)
 		meas.CPUSampleCount = &c
 		if v < minCPUSamples {
@@ -144,18 +164,21 @@ func assessMetrics(m Metrics, node *corev1.Node, now time.Time, maxAge time.Dura
 	if v, ok := one("cpu sample time", m.CPUTime); ok {
 		meas.CPUSampleTime = fresh("cpu", v)
 	}
-	if v, ok := one("memory available", m.MemAvail); ok {
+	if v, ok := one("memory available", m.MemAvail); ok && (v < 0 || v > maxMemoryBytes) {
+		outOfRange("memory available")
+	} else if ok {
 		b := int64(v)
 		meas.MemAvailableBytes = &b
 	}
-	if v, ok := one("memory total", m.MemTotal); ok {
-		if v <= 0 {
-			missing = true
-			details = append(details, "memory total not positive")
-		} else {
-			b := int64(v)
-			meas.MemTotalBytes = &b
-		}
+	if v, ok := one("memory total", m.MemTotal); ok && (v <= 0 || v > maxMemoryBytes) {
+		outOfRange("memory total")
+	} else if ok {
+		b := int64(v)
+		meas.MemTotalBytes = &b
+	}
+	if meas.MemAvailableBytes != nil && meas.MemTotalBytes != nil && *meas.MemAvailableBytes > *meas.MemTotalBytes {
+		missing = true
+		details = append(details, "memory available exceeds total")
 	}
 	if v, ok := one("memory sample time", m.MemAvailTime); ok {
 		meas.MemSampleTime = fresh("memory", v)

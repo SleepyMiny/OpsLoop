@@ -184,6 +184,20 @@ func TestAssessMetrics(t *testing.T) {
 		}, nil, true, false},
 		{"cpu count 2", func(d promData) { d["CPUCount"] = []string{series(inst, "2")} }, nil, true, false},
 		{"memtotal zero", func(d promData) { d["MemTotal"] = []string{series(inst, "0")} }, nil, true, false},
+		{"memavail above memtotal", func(d promData) { d["MemAvail"] = []string{series(inst, "10737418241")} }, nil, true, false},
+		{"memavail negative", func(d promData) { d["MemAvail"] = []string{series(inst, "-1")} }, nil, true, false},
+		{"memtotal beyond range", func(d promData) { d["MemTotal"] = []string{series(inst, "1e30")} }, nil, true, false},
+		{"cpu count beyond int32", func(d promData) { d["CPUCount"] = []string{series(inst, "1e12")} }, nil, true, false},
+		{"sample time beyond int64", func(d promData) { d["CPUTime"] = []string{series(inst, "1e300")} }, nil, true, false},
+		{"sample time beyond year 9999", func(d promData) { d["CPUTime"] = []string{series(inst, "1e12")} }, nil, true, false},
+		{"sample time beyond year 9999 after rounding", func(d promData) { d["CPUTime"] = []string{series(inst, "253402300799.9999")} }, nil, true, false},
+		{"sample time negative", func(d promData) { d["MemAvailTime"] = []string{series(inst, "-1")} }, nil, true, false},
+		{"cpu sample 6s in future", func(d promData) {
+			d["CPUTime"] = []string{series(inst, unix(now.Add(6*time.Second)))}
+		}, nil, false, true},
+		{"memory sample 5s in future", func(d promData) {
+			d["MemAvailTime"] = []string{series(inst, unix(now.Add(5*time.Second)))}
+		}, nil, false, false},
 		{"other instance only", func(promData) {}, ipNode("10.0.0.2"), true, false},
 		{"two internal IPs", func(promData) {}, ipNode("10.0.0.1", "10.0.0.2"), true, false},
 	}
@@ -204,6 +218,12 @@ func TestAssessMetrics(t *testing.T) {
 			}
 			if c.name == "NaN value" && meas.CPUUtilizationPermille != nil {
 				t.Fatal("NaN must not be recorded")
+			}
+			if (c.name == "memavail negative" && meas.MemAvailableBytes != nil) ||
+				(c.name == "memtotal beyond range" && meas.MemTotalBytes != nil) ||
+				(c.name == "cpu count beyond int32" && meas.CPUSampleCount != nil) ||
+				(strings.HasPrefix(c.name, "sample time beyond") && meas.CPUSampleTime != nil) {
+				t.Fatal("out-of-range values must not be recorded")
 			}
 		})
 	}

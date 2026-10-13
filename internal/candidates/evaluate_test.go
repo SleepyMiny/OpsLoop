@@ -373,6 +373,9 @@ func TestMetricsErrorRejectsAll(t *testing.T) {
 	in.Metrics = Metrics{}
 	in.MetricsErr = errors.New("connection refused")
 	d := Evaluate(in)
+	if len(d.Candidates) != 2 || d.Candidates[0].NodeName != "n1" || d.Candidates[1].NodeName != "n2" {
+		t.Fatalf("candidates %+v, want n1 and n2 recorded", d.Candidates)
+	}
 	for _, c := range d.Candidates {
 		if !reflect.DeepEqual(c.RejectReasons, []string{RejectMetricsMissing}) || c.Measurements.CPUUtilizationPermille != nil {
 			t.Fatalf("%s: %v", c.NodeName, c.RejectReasons)

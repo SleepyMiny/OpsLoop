@@ -201,7 +201,8 @@ func Step(in Input) (v1alpha1.Attempt, Outcome) {
 		reason = "POD_ON_UNEXPECTED_NODE"
 	case crashed:
 		reason = "CRASHED_DURING_STABILITY"
-	case ready == nil && in.Now.Sub(patchedAt) > in.Budget.PlacementTimeout.Duration:
+	// Readiness flaps after the first Ready belong to the verification budget, not placement.
+	case a.PodReadyAt == nil && in.Now.Sub(patchedAt) > in.Budget.PlacementTimeout.Duration:
 		reason = "PLACEMENT_TIMEOUT"
 	case !succeeded && a.PodReadyAt != nil && in.Now.Sub(a.PodReadyAt.Time) > in.Budget.VerificationTimeout.Duration:
 		reason = "VERIFICATION_TIMEOUT"
