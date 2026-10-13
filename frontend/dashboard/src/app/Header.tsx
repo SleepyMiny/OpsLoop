@@ -63,6 +63,7 @@ export function Header({
                 {TAG_LABEL[s.tag]}
               </span>
               <span className={styles.scenarioTitle}>{s.title}</span>
+              <span className={styles.scenarioShort}>{s.shortTitle}</span>
             </button>
           ))}
         </nav>

@@ -1,4 +1,5 @@
 import type { EvaluationResult } from '../../domain/evaluate';
+import type { Narration } from '../../domain/types';
 import { actionTypeLabel, rejectReasonLabel } from '../../domain/labels';
 import type { ScenarioInfo } from '../source';
 import { NODE_SEEDS } from './baseline';
@@ -224,7 +225,8 @@ function placementAndVerify(start: number, podStartSec: number, extra: (r: Evalu
 
 const nodeFailureToLaptop: DemoScenario = {
   id: 'node-failure-laptop',
-  title: '노드 장애 → 노트북 VM으로 복구',
+  title: '노드 장애 → 노트북 VM',
+  shortTitle: '노트북 VM으로 복구',
   summary: 'Azure ARM64가 바쁠 때, 실제 사용량을 보고 노트북 VM을 고릅니다.',
   tag: 'demo-a',
   designRef: 'architecture §17 Demo A',
@@ -250,7 +252,8 @@ const nodeFailureToLaptop: DemoScenario = {
 
 const nodeFailureToArm: DemoScenario = {
   id: 'node-failure-arm64',
-  title: '노드 장애 → Azure ARM64로 복구',
+  title: '노드 장애 → Azure ARM64',
+  shortTitle: 'ARM64로 복구',
   summary: '노트북 VM이 바쁠 때, 같은 이미지를 ARM64 노드에서 native로 실행합니다.',
   tag: 'demo-a',
   designRef: 'architecture §17 Demo A',
@@ -278,6 +281,33 @@ const nodeFailureToArm: DemoScenario = {
   },
 };
 
+/**
+ * FILTERING → SCORING → TARGET_SELECTED as separate beats so the candidate board
+ * can reveal reasons, then scores, then the choice (Demo B re-evaluations).
+ */
+function decisionCues(at: number, narration: (r: EvaluationResult) => Narration): Cue[] {
+  let result: EvaluationResult | null = null;
+  return [
+    {
+      at,
+      run: (ctx) => {
+        ctx.phase('FILTERING', 'Hard filter 적용');
+        result = ctx.evaluate();
+        ctx.narrate({ title: 'Hard filter로 후보를 거릅니다', body: `${describeRejections(result)}.`, focus: 'candidates' });
+      },
+    },
+    { at: at + 1.5, run: (ctx) => ctx.phase('SCORING', '통과 후보 점수 계산') },
+    {
+      at: at + 2.5,
+      run: (ctx) => {
+        if (!result) return;
+        ctx.phase('TARGET_SELECTED', describeSelection(result));
+        ctx.narrate(narration(result));
+      },
+    },
+  ];
+}
+
 function crashCue(at: number, title: string, body: string): Cue {
   return {
     at,
@@ -291,6 +321,7 @@ function crashCue(at: number, title: string, body: string): Cue {
 const applicationFailureToPr: DemoScenario = {
   id: 'application-failure-pr',
   title: '반복 앱 장애 → 검증된 PR',
+  shortTitle: '검증된 PR까지',
   summary: '운영 조치로 풀리지 않는 코드 결함을 증거와 함께 개발 단계로 넘깁니다.',
   tag: 'demo-b',
   designRef: 'architecture §17 Demo B, §13',
@@ -303,6 +334,9 @@ const applicationFailureToPr: DemoScenario = {
         chapter: '평상시',
         run: (ctx) => {
           ctx.pace(2);
+          // Azure carries a moderate background load, so the first action is a restart
+          // on the healthy primary and only the second one relocates.
+          ctx.setLoad(AZURE, { cpu: 0.4, memory: 0.46 });
           ctx.narrate({
             title: 'Demo API는 물리 서버에서 실행 중',
             body: '이번에는 하드웨어가 아니라 코드 결함입니다. 노드는 모두 건강합니다.',
@@ -330,7 +364,8 @@ const applicationFailureToPr: DemoScenario = {
         at: 46,
         run: (ctx) => {
           ctx.pace(1.5);
-          ctx.openIncident({ type: 'RepeatedRestart', podName: 'demo-api-7c9d4-x2kq8', restarts: 3, observedAt: ctx.nowMs });
+          // The third exit was observed at t=44; the Incident is reserved two seconds later.
+          ctx.openIncident({ type: 'RepeatedRestart', podName: 'demo-api-7c9d4-x2kq8', restarts: 3, observedAt: ctx.nowMs - 2000 });
           ctx.condition('Detected', 'True', 'RepeatedRestart', '120초 동안 3회 종료');
           ctx.narrate({
             title: 'RecoveryIncident 생성',
@@ -361,20 +396,12 @@ const applicationFailureToPr: DemoScenario = {
           ctx.phase('COLLECTING_CANDIDATES', 'snapshot 수집');
         },
       },
-      {
-        at: 54,
-        run: (ctx) => {
-          ctx.phase('FILTERING', 'Hard filter 적용');
-          const r = ctx.evaluate();
-          ctx.phase('TARGET_SELECTED', describeSelection(r));
-          ctx.narrate({
-            title: '먼저 운영 조치로 해결을 시도합니다',
-            body: `${describeSelection(r)} 대부분의 장애는 여기서 끝납니다.`,
-            focus: 'candidates',
-          });
-        },
-      },
-      { at: 57, run: (ctx) => ctx.execute(6) },
+      ...decisionCues(54, (r) => ({
+        title: '먼저 운영 조치로 해결을 시도합니다',
+        body: `${describeSelection(r)} 대부분의 장애는 여기서 끝납니다.`,
+        focus: 'candidates',
+      })),
+      { at: 58, run: (ctx) => ctx.execute(6) },
       {
         at: 64,
         run: (ctx) => {
@@ -399,20 +426,12 @@ const applicationFailureToPr: DemoScenario = {
         chapter: 'Runtime 조치 2',
         run: (ctx) => ctx.phase('COLLECTING_CANDIDATES', 'snapshot 재수집'),
       },
-      {
-        at: 74,
-        run: (ctx) => {
-          ctx.phase('FILTERING', 'Hard filter 적용');
-          const r = ctx.evaluate();
-          ctx.phase('TARGET_SELECTED', describeSelection(r));
-          ctx.narrate({
-            title: '다른 노드로 옮겨 봅니다',
-            body: `${describeRejections(r)}. ${describeSelection(r)}`,
-            focus: 'candidates',
-          });
-        },
-      },
-      { at: 77, run: (ctx) => ctx.execute(12) },
+      ...decisionCues(74, (r) => ({
+        title: '다른 노드로 옮겨 봅니다',
+        body: `${describeRejections(r)}. ${describeSelection(r)}`,
+        focus: 'candidates',
+      })),
+      { at: 78, run: (ctx) => ctx.execute(12) },
       {
         at: 90,
         run: (ctx) => ctx.phase('VERIFYING', '같은 fixture 재생', 'verify'),
@@ -576,7 +595,8 @@ const applicationFailureToPr: DemoScenario = {
 
 const noCandidateWait: DemoScenario = {
   id: 'no-candidate',
-  title: '후보 없음 → 기다리고, 넘기지 않음',
+  title: '후보 없음 → 기다림',
+  shortTitle: '후보 없음',
   summary: '갈 곳이 없으면 억지로 옮기지 않고, 코드 문제로 넘기지도 않습니다.',
   tag: 'negative',
   designRef: 'architecture §7 WAITING, §11 freshness',

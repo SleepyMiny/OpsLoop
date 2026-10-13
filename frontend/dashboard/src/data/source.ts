@@ -32,6 +32,8 @@ export type ScenarioTag = 'demo-a' | 'demo-b' | 'negative';
 export interface ScenarioInfo {
   id: string;
   title: string;
+  /** Fits a compact header button, e.g. "노트북 VM으로 복구". */
+  shortTitle: string;
   /** One line a visitor can read in three seconds. */
   summary: string;
   tag: ScenarioTag;

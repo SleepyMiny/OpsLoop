@@ -1,0 +1,391 @@
+/*
+ * Signal ladder. Wide containers lay the stations out as one horizontal rung per
+ * phase; narrow ones turn it into a vertical list with the raw enum beside each
+ * label. All sizing derives from --fs-body so the TV and the laptop keep the same
+ * proportions. Shape carries state as well as colour: a check inside a finished
+ * lamp, a cross inside a failed one, a pulse on the current one.
+ */
+
+.root {
+  --lamp-d: calc(var(--fs-body) * 1.3);
+  --station-pad: 0.35rem;
+  max-height: 100%;
+  overflow: auto;
+  scrollbar-width: thin;
+  container-type: inline-size;
+  container-name: ladder;
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* ---------- Status readout ---------- */
+
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.1rem var(--space-2);
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.statusTitle {
+  font-family: var(--font-sign);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.statusDetail {
+  flex: 1 1 12rem;
+  min-width: 0;
+  color: var(--c-ink-2);
+  font-size: var(--fs-sm);
+}
+
+/* ---------- Budget (in the instrument header) ---------- */
+
+.budget {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.budgetNumber {
+  font-family: var(--font-sign);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-ink);
+}
+
+.pips {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.pip {
+  width: 0.55em;
+  height: 0.9em;
+  border: 1.5px solid var(--c-rule-strong);
+  border-radius: 1px;
+}
+.pip[data-spent] {
+  background: var(--c-act);
+  border-color: var(--c-act);
+}
+
+/* ---------- Main track ---------- */
+
+.track {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.station {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 0.2rem;
+  padding: var(--station-pad) 0.1rem 0.3rem;
+  border-radius: var(--radius-instrument);
+  text-align: center;
+}
+
+.station[data-state='current'] {
+  background: var(--c-act-soft);
+}
+
+/* Rail segments either side of the lamp; a segment is lit when the station on
+   that side has been reached. */
+.station::before,
+.station::after {
+  content: '';
+  position: absolute;
+  top: calc(var(--station-pad) + var(--lamp-d) / 2 - 1px);
+  height: 2px;
+  background: var(--c-rule-strong);
+}
+.station::before {
+  left: 0;
+  right: 50%;
+}
+.station::after {
+  left: 50%;
+  right: 0;
+}
+.station[data-first]::before,
+.station[data-last]::after {
+  display: none;
+}
+.station:not([data-state='pending'])::before,
+.station[data-state='done'][data-next-reached]::after {
+  background: var(--c-ok);
+}
+
+.mark {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  height: var(--lamp-d);
+  font-size: calc(var(--lamp-d) / 0.75);
+  line-height: 1;
+}
+
+.mark[data-glyph='done']::after,
+.mark[data-glyph='failed']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: var(--lamp-d);
+  height: var(--lamp-d);
+  background: var(--c-face);
+  pointer-events: none;
+  -webkit-mask: var(--glyph) center / 100% no-repeat;
+  mask: var(--glyph) center / 100% no-repeat;
+}
+.mark[data-glyph='done'] {
+  --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4.4 8.4l2.5 2.5 4.7-5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.mark[data-glyph='failed'] {
+  --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M5.2 5.2l5.6 5.6M10.8 5.2l-5.6 5.6' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+.label {
+  max-width: 100%;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  line-height: 1.2;
+}
+.station[data-state='pending'] .label {
+  color: var(--c-ink-2);
+  font-weight: 400;
+}
+.station[data-state='current'] .label {
+  font-weight: 600;
+}
+.station[data-state='failed'] .label {
+  color: var(--c-fault);
+  font-weight: 600;
+}
+
+.stepCode {
+  display: none;
+}
+
+/* ---------- Branch lane ---------- */
+
+.lane {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.1rem var(--space-1);
+  margin: 0;
+  padding: var(--space-2) 0 0;
+  list-style: none;
+  border-top: 1px dashed var(--c-rule-strong);
+}
+
+.laneItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.15rem 0.35rem;
+  border-radius: var(--radius-chip);
+  font-size: calc(var(--fs-body) * 0.8);
+  white-space: nowrap;
+}
+.laneItem[data-group-start] {
+  border-left: 1px solid var(--c-rule);
+  border-radius: 0 var(--radius-chip) var(--radius-chip) 0;
+  padding-left: 0.6rem;
+}
+.laneItem[data-state='current'] {
+  background: var(--c-act-soft);
+}
+.laneItem[data-tone='caution'][data-state='current'] {
+  background: var(--c-caution-soft);
+}
+.laneItem[data-tone='fault'][data-state='current'] {
+  background: var(--c-fault-soft);
+}
+
+.laneText {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+}
+
+.laneLabel {
+  line-height: 1.2;
+  font-weight: 500;
+}
+.laneItem[data-state='off'] .laneLabel {
+  color: var(--c-ink-2);
+  font-weight: 400;
+}
+.laneItem[data-state='current'] .laneLabel {
+  font-weight: 600;
+}
+
+.laneCode {
+  display: none;
+}
+
+.loop {
+  display: inline-flex;
+  align-self: center;
+  color: var(--c-ink-2);
+}
+.loopIcon {
+  width: 0.95em;
+  height: 0.95em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---------- Idle ---------- */
+
+.triggers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) 0 0;
+  list-style: none;
+  border-top: 1px dashed var(--c-rule-strong);
+}
+
+.triggers li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-2);
+  padding: 0.15rem var(--space-3);
+  background: var(--c-face-sunk);
+  border: 1px solid var(--c-rule);
+  border-left: 4px solid var(--c-act);
+  border-radius: var(--radius-chip);
+  line-height: 1.3;
+}
+.triggers strong {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.triggers span {
+  color: var(--c-ink-2);
+  font-size: var(--fs-xs);
+}
+
+/* Mid-width containers drop the "Engineering " prefix so the lane stays on one line. */
+@container ladder (max-width: 600px) {
+  .laneExtra {
+    display: none;
+  }
+  .triggers span {
+    display: none;
+  }
+}
+
+/* ---------- Narrow container: vertical list ---------- */
+
+@container ladder (max-width: 439px) {
+  .track {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .station {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    justify-items: start;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 0.3rem var(--space-2);
+    text-align: left;
+  }
+  .station::before,
+  .station::after {
+    width: 2px;
+    height: auto;
+    left: calc(var(--space-2) + var(--lamp-d) / 2 - 1px);
+    right: auto;
+  }
+  .station::before {
+    top: 0;
+    bottom: 50%;
+  }
+  .station::after {
+    top: 50%;
+    bottom: 0;
+  }
+  .stepCode {
+    display: block;
+  }
+
+  .lane {
+    display: grid;
+    gap: 0;
+  }
+  .triggers {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .triggers span {
+    display: inline;
+  }
+  .laneItem {
+    padding: 0.3rem var(--space-2);
+    font-size: var(--fs-sm);
+  }
+  .laneExtra {
+    display: inline;
+  }
+  .laneItem[data-group-start] {
+    border-left: none;
+    border-top: 1px solid var(--c-rule);
+    border-radius: 0;
+    padding-left: var(--space-2);
+  }
+  .laneCode {
+    display: block;
+  }
+}
+
+/* ---------- Short viewports (1366x768 laptops) ---------- */
+
+@media (min-width: 1200px) and (max-height: 860px) {
+  .root {
+    --lamp-d: calc(var(--fs-body) * 1.05);
+    --station-pad: 0.2rem;
+    gap: var(--space-1);
+  }
+  .station {
+    gap: 0.1rem;
+    padding-bottom: 0.15rem;
+  }
+  .label {
+    font-size: var(--fs-xs);
+  }
+  .statusTitle {
+    font-size: var(--fs-body);
+  }
+  .statusDetail {
+    flex-basis: 5rem;
+    font-size: var(--fs-xs);
+  }
+  .laneItem {
+    padding-block: 0.1rem;
+    font-size: var(--fs-xs);
+  }
+  .lane,
+  .triggers {
+    padding-top: var(--space-1);
+  }
+}

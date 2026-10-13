@@ -488,6 +488,7 @@ export class DemoSimulation {
           snapshotObservedAt: self.nowMs,
           snapshotExpiresAt: self.nowMs + self.policy.spec.filter.maxSampleAgeSeconds * 1000,
           candidates: result.candidates,
+          sourceNodeName: current ?? null,
           selectedNodeUid: result.selected?.nodeUid ?? null,
           selectedHostname: result.selected?.hostname ?? null,
           actionType: result.actionType,
@@ -495,7 +496,9 @@ export class DemoSimulation {
             ? `${result.selected.nodeName} 최고 점수 ${result.selected.score?.total.toFixed(1)}`
             : '적격 후보 없음',
         };
-        rt.timings.decidedAt = self.nowMs;
+        // T_decide ends at the first decision that actually selects a target; a
+        // WAITING re-evaluation or a later attempt does not move it.
+        if (result.selected) rt.timings.decidedAt ??= self.nowMs;
         const eligible = result.candidates.filter((c) => c.score).length;
         self.pushEvent(
           'decide',

@@ -40,6 +40,7 @@ describe('Demo scenarios reach the outcomes the architecture describes', () => {
     expect(inc.status.runtime.classification).toBe('APPLICATION_FAILURE');
     expect(inc.status.runtime.budget).toEqual({ used: 2, max: 2 });
     expect(inc.status.runtime.attempts.every((a) => a.result === 'failed')).toBe(true);
+    expect(inc.status.runtime.attempts.map((a) => a.type)).toEqual(['restart', 'relocation']);
     expect(inc.status.runtime.phase).toBe('ENGINEERING_HANDOFF');
     expect(inc.status.runtime.quarantine).toBe('QuarantineConfirmed');
     expect(s.workload.replicas).toBe(0);
@@ -57,6 +58,7 @@ describe('Demo scenarios reach the outcomes the architecture describes', () => {
     const reasons = inc.status.runtime.decision!.candidates.flatMap((c) => c.rejectReasons);
     expect(reasons).toEqual(expect.arrayContaining(['CPU_PRESSURE', 'METRICS_STALE', 'NODE_NOT_READY']));
     expect(inc.status.runtime.decision!.selectedHostname).toBeNull();
+    expect(inc.status.runtime.timings.decidedAt).toBeUndefined();
   });
 
   it('is deterministic, including after rewinding', () => {

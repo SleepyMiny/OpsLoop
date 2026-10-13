@@ -286,6 +286,12 @@ export interface RecoveryDecision {
   snapshotObservedAt: number;
   snapshotExpiresAt: number;
   candidates: CandidateEvaluation[];
+  /**
+   * Node the workload was running on when the decision was made (baseline state,
+   * architecture §7 "실행 일관성" 1). Not in the §5 field list yet; proposed for the
+   * Go contract so a route origin survives the old Pod being deleted.
+   */
+  sourceNodeName: string | null;
   selectedNodeUid: string | null;
   selectedHostname: string | null;
   actionType: ActionType | null;

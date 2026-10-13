@@ -106,7 +106,14 @@ export class DemoDataSource implements DashboardDataSource, DemoController {
   // --- DemoController ------------------------------------------------------
 
   listScenarios(): ScenarioInfo[] {
-    return this.scenarios.map(({ id, title, summary, tag, designRef }) => ({ id, title, summary, tag, designRef }));
+    return this.scenarios.map(({ id, title, shortTitle, summary, tag, designRef }) => ({
+      id,
+      title,
+      shortTitle,
+      summary,
+      tag,
+      designRef,
+    }));
   }
 
   getPlayback(): PlaybackState {

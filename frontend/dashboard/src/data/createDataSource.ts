@@ -18,8 +18,13 @@ export function createDataSource({ search, env }: DataSourceRequest): DashboardD
   const requested = params.get('source') ?? env.VITE_OPSLOOP_SOURCE ?? 'demo';
   if (requested === 'live') return new HttpDataSource({ baseUrl: env.VITE_OPSLOOP_API_BASE });
   const scenario = params.get('scenario') ?? undefined;
-  return new DemoDataSource({
+  const source = new DemoDataSource({
     ...(scenario ? { initialScenarioId: scenario } : {}),
     autoLoop: params.get('loop') !== '0',
+    autoPlay: params.get('play') !== '0',
   });
+  // ?at=<seconds> opens a scenario at a given moment (presenter bookmarks, visual QA).
+  const at = Number(params.get('at'));
+  if (Number.isFinite(at) && at > 0) source.seek(at * 1000);
+  return source;
 }
