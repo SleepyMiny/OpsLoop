@@ -1,0 +1,1000 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: recoveryincidents.opsloop.io
+spec:
+  group: opsloop.io
+  names:
+    kind: RecoveryIncident
+    listKind: RecoveryIncidentList
+    plural: recoveryincidents
+    singular: recoveryincident
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.runtime.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.runtime.reason
+      name: Reason
+      type: string
+    - jsonPath: .spec.trigger.class
+      name: Class
+      type: string
+    - jsonPath: .status.runtime.decision.selectedNodeName
+      name: Target
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          RecoveryIncident is named "<policy>-<first 8 chars of policy UID>-<%05d>" and labeled
+          opsloop.io/policy=<policy name>. It has no ownerReference so evidence survives Policy deletion.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              baseline:
+                properties:
+                  hostname:
+                    type: string
+                  image:
+                    type: string
+                  imageDigest:
+                    type: string
+                  replicas:
+                    description: Recorded only; change detection uses SpecHash.
+                    format: int32
+                    type: integer
+                  specHash:
+                    description: 'SpecHash(deployment.spec): desired state outside
+                      the template.'
+                    type: string
+                  templateHash:
+                    description: TemplateHash(deployment.spec.template).
+                    type: string
+                required:
+                - image
+                - imageDigest
+                - replicas
+                - specHash
+                - templateHash
+                type: object
+              deadline:
+                description: detectedAt + incidentDeadline; never extended.
+                format: date-time
+                type: string
+              detectedAt:
+                format: date-time
+                type: string
+              policy:
+                description: Policy spec snapshot taken at detection.
+                properties:
+                  budget:
+                    default:
+                      cooldown: 120s
+                      incidentDeadline: 10m
+                      maxActionsPerIncident: 2
+                      placementTimeout: 90s
+                      verificationTimeout: 60s
+                    properties:
+                      cooldown:
+                        default: 120s
+                        type: string
+                        x-kubernetes-validations:
+                        - rule: duration(self) >= duration('1s')
+                      incidentDeadline:
+                        default: 10m
+                        type: string
+                        x-kubernetes-validations:
+                        - rule: duration(self) >= duration('1s')
+                      maxActionsPerIncident:
+                        default: 2
+                        format: int32
+                        maximum: 5
+                        minimum: 1
+                        type: integer
+                      placementTimeout:
+                        default: 90s
+                        type: string
+                        x-kubernetes-validations:
+                        - rule: duration(self) >= duration('1s')
+                      verificationTimeout:
+                        default: 60s
+                        type: string
+                        x-kubernetes-validations:
+                        - rule: duration(self) >= duration('1s')
+                    type: object
+                  candidateSelector:
+                    description: |-
+                      A label selector is a label query over a set of resources. The result of matchLabels and
+                      matchExpressions are ANDed. An empty label selector matches all objects. A null
+                      label selector matches no objects.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  detection:
+                    default:
+                      nodeUnreadyFor: 20s
+                      restartThreshold: 3
+                      restartWindow: 120s
+                    properties:
+                      nodeUnreadyFor:
+                        default: 20s
+                        type: string
+                        x-kubernetes-validations:
+                        - rule: duration(self) >= duration('1s')
+                      restartThreshold:
+                        default: 3
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      restartWindow:
+                        default: 120s
+                        type: string
+                        x-kubernetes-validations:
+                        - rule: duration(self) >= duration('1s')
+                    type: object
+                  enabled:
+                    default: true
+                    type: boolean
+                  filter:
+                    default:
+                      maxCPUUtilizationPercent: 85
+                      maxMemoryUtilizationPercent: 85
+                      maxSampleAge: 30s
+                      minimumAvailableMemory: 512Mi
+                      requestedCapacityReservePercent: 10
+                      startupMemoryBudget: 256Mi
+                    properties:
+                      maxCPUUtilizationPercent:
+                        default: 85
+                        format: int32
+                        maximum: 100
+                        minimum: 1
+                        type: integer
+                      maxMemoryUtilizationPercent:
+                        default: 85
+                        format: int32
+                        maximum: 100
+                        minimum: 1
+                        type: integer
+                      maxSampleAge:
+                        default: 30s
+                        type: string
+                        x-kubernetes-validations:
+                        - rule: duration(self) >= duration('1s')
+                      minimumAvailableMemory:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        default: 512Mi
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      requestedCapacityReservePercent:
+                        default: 10
+                        format: int32
+                        maximum: 50
+                        minimum: 0
+                        type: integer
+                      startupMemoryBudget:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        default: 256Mi
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                    type: object
+                  mode:
+                    default: ObserveOnly
+                    enum:
+                    - ObserveOnly
+                    - Enforce
+                    type: string
+                  requiredPlatforms:
+                    default:
+                    - linux/amd64
+                    - linux/arm64
+                    items:
+                      enum:
+                      - linux/amd64
+                      - linux/arm64
+                      type: string
+                    maxItems: 2
+                    minItems: 1
+                    type: array
+                  score:
+                    default:
+                      cpuWeight: 30
+                      maxRecentFailurePenalty: 45
+                      memoryWeight: 35
+                      recentFailurePenalty: 15
+                      recentFailureWindow: 30m
+                      requestsWeight: 35
+                    properties:
+                      cpuWeight:
+                        default: 30
+                        format: int32
+                        maximum: 100
+                        minimum: 0
+                        type: integer
+                      maxRecentFailurePenalty:
+                        default: 45
+                        format: int32
+                        maximum: 100
+                        minimum: 0
+                        type: integer
+                      memoryWeight:
+                        default: 35
+                        format: int32
+                        maximum: 100
+                        minimum: 0
+                        type: integer
+                      recentFailurePenalty:
+                        default: 15
+                        description: Points deducted per recent failure.
+                        format: int32
+                        maximum: 100
+                        minimum: 0
+                        type: integer
+                      recentFailureWindow:
+                        default: 30m
+                        type: string
+                        x-kubernetes-validations:
+                        - rule: duration(self) >= duration('1s')
+                      requestsWeight:
+                        default: 35
+                        format: int32
+                        maximum: 100
+                        minimum: 0
+                        type: integer
+                    type: object
+                    x-kubernetes-validations:
+                    - message: weights must sum to 100
+                      rule: self.cpuWeight + self.memoryWeight + self.requestsWeight
+                        == 100
+                  targetRef:
+                    properties:
+                      name:
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  verification:
+                    properties:
+                      consecutiveSuccesses:
+                        default: 5
+                        format: int32
+                        maximum: 20
+                        minimum: 1
+                        type: integer
+                      port:
+                        default: 8080
+                        description: Pod port probed directly on the Pod IP.
+                        format: int32
+                        maximum: 65535
+                        minimum: 1
+                        type: integer
+                      serviceName:
+                        description: Service whose EndpointSlice must report the attempt
+                          Pod ready.
+                        minLength: 1
+                        type: string
+                      stabilityWindow:
+                        default: 30s
+                        type: string
+                        x-kubernetes-validations:
+                        - rule: duration(self) >= duration('1s')
+                    required:
+                    - serviceName
+                    type: object
+                required:
+                - candidateSelector
+                - targetRef
+                - verification
+                type: object
+              policyGeneration:
+                format: int64
+                type: integer
+              policyHash:
+                description: PolicyHash(policy.spec).
+                type: string
+              policyRef:
+                properties:
+                  name:
+                    type: string
+                  uid:
+                    type: string
+                required:
+                - name
+                - uid
+                type: object
+              sequence:
+                format: int64
+                type: integer
+              trigger:
+                properties:
+                  class:
+                    enum:
+                    - INFRASTRUCTURE_FAILURE
+                    - RESOURCE_FAILURE
+                    - CONFIGURATION_FAILURE
+                    - APPLICATION_FAILURE
+                    - UNKNOWN
+                    type: string
+                  evidence:
+                    description: Every matched rule as "RULE pod=... node=..."; never
+                      log bodies.
+                    items:
+                      maxLength: 256
+                      type: string
+                    maxItems: 10
+                    type: array
+                  nodeName:
+                    type: string
+                  nodeUID:
+                    type: string
+                  observedAt:
+                    format: date-time
+                    type: string
+                  podName:
+                    type: string
+                  podUID:
+                    type: string
+                  reason:
+                    type: string
+                  ruleVersion:
+                    type: string
+                  signature:
+                    type: string
+                required:
+                - class
+                - observedAt
+                - reason
+                - ruleVersion
+                - signature
+                type: object
+              workload:
+                properties:
+                  name:
+                    type: string
+                  uid:
+                    type: string
+                required:
+                - name
+                - uid
+                type: object
+            required:
+            - baseline
+            - deadline
+            - detectedAt
+            - policy
+            - policyGeneration
+            - policyHash
+            - policyRef
+            - sequence
+            - trigger
+            - workload
+            type: object
+            x-kubernetes-validations:
+            - message: spec is immutable
+              rule: self == oldSelf
+          status:
+            properties:
+              runtime:
+                properties:
+                  attempts:
+                    items:
+                      properties:
+                        actionID:
+                          description: '"<incident>-a<n>"; also the opsloop.io/attempt-id
+                            template annotation value.'
+                          type: string
+                        completedAt:
+                          format: date-time
+                          type: string
+                        consecutiveSuccesses:
+                          format: int32
+                          type: integer
+                        decision:
+                          properties:
+                            actionID:
+                              description: '"<incident>-a<n>"; empty for ObserveOnly
+                                and WAITING.'
+                              type: string
+                            actionType:
+                              enum:
+                              - Relocation
+                              - None
+                              type: string
+                            baselineTemplateHash:
+                              type: string
+                            candidates:
+                              description: Optional so a decision with zero candidates
+                                (nil slice, null) is not rejected as missing.
+                              items:
+                                properties:
+                                  details:
+                                    items:
+                                      maxLength: 256
+                                      type: string
+                                    maxItems: 8
+                                    type: array
+                                  eligible:
+                                    type: boolean
+                                  hostname:
+                                    type: string
+                                  measurements:
+                                    description: Measurements uses nil pointers for
+                                      "not measured"; never fill them with zero.
+                                    properties:
+                                      allocatableCPUMilli:
+                                        format: int64
+                                        type: integer
+                                      allocatableMemoryBytes:
+                                        format: int64
+                                        type: integer
+                                      cpuSampleCount:
+                                        format: int32
+                                        type: integer
+                                      cpuSampleTime:
+                                        description: Oldest raw sample timestamp.
+                                        format: date-time
+                                        type: string
+                                      cpuUtilizationPermille:
+                                        format: int32
+                                        type: integer
+                                      memAvailableBytes:
+                                        format: int64
+                                        type: integer
+                                      memSampleTime:
+                                        format: date-time
+                                        type: string
+                                      memTotalBytes:
+                                        format: int64
+                                        type: integer
+                                      newPodCPUMilli:
+                                        format: int64
+                                        type: integer
+                                      newPodMemoryBytes:
+                                        format: int64
+                                        type: integer
+                                      requestedCPUMilli:
+                                        description: Sum over existing non-terminated
+                                          Pods.
+                                        format: int64
+                                        type: integer
+                                      requestedMemoryBytes:
+                                        format: int64
+                                        type: integer
+                                      reserveCPUMilli:
+                                        format: int64
+                                        type: integer
+                                      reserveMemoryBytes:
+                                        format: int64
+                                        type: integer
+                                    required:
+                                    - allocatableCPUMilli
+                                    - allocatableMemoryBytes
+                                    - newPodCPUMilli
+                                    - newPodMemoryBytes
+                                    - requestedCPUMilli
+                                    - requestedMemoryBytes
+                                    - reserveCPUMilli
+                                    - reserveMemoryBytes
+                                    type: object
+                                  nodeName:
+                                    type: string
+                                  nodeUID:
+                                    type: string
+                                  platform:
+                                    description: '"<kubernetes.io/os>/<kubernetes.io/arch>".'
+                                    type: string
+                                  rejectReasons:
+                                    items:
+                                      enum:
+                                      - NODE_NOT_READY
+                                      - UNSCHEDULABLE
+                                      - UNTOLERATED_TAINT
+                                      - MEMORY_PRESSURE
+                                      - DISK_PRESSURE
+                                      - PID_PRESSURE
+                                      - CPU_PRESSURE
+                                      - ARCH_MISMATCH
+                                      - INSUFFICIENT_REQUESTED_CPU
+                                      - INSUFFICIENT_REQUESTED_MEMORY
+                                      - INSUFFICIENT_AVAILABLE_MEMORY
+                                      - METRICS_MISSING
+                                      - METRICS_STALE
+                                      - COOLDOWN
+                                      - UNSUPPORTED_CONSTRAINT
+                                      type: string
+                                    maxItems: 15
+                                    type: array
+                                  score:
+                                    description: Set only when eligible.
+                                    properties:
+                                      cpuHeadroomPermille:
+                                        format: int32
+                                        type: integer
+                                      memoryHeadroomPermille:
+                                        format: int32
+                                        type: integer
+                                      penaltyMilli:
+                                        format: int64
+                                        type: integer
+                                      recentFailures:
+                                        format: int32
+                                        type: integer
+                                      requestedHeadroomPermille:
+                                        format: int32
+                                        type: integer
+                                      scoreMilli:
+                                        description: 100 points = 100000.
+                                        format: int64
+                                        type: integer
+                                    required:
+                                    - cpuHeadroomPermille
+                                    - memoryHeadroomPermille
+                                    - penaltyMilli
+                                    - recentFailures
+                                    - requestedHeadroomPermille
+                                    - scoreMilli
+                                    type: object
+                                required:
+                                - eligible
+                                - hostname
+                                - measurements
+                                - nodeName
+                                - nodeUID
+                                - platform
+                                type: object
+                              maxItems: 16
+                              type: array
+                            decidedAt:
+                              format: date-time
+                              type: string
+                            decisionReason:
+                              enum:
+                              - SELECTED_HIGHEST_SCORE
+                              - NO_CANDIDATE
+                              - METRICS_UNAVAILABLE
+                              type: string
+                            imageIndexDigest:
+                              type: string
+                            incidentID:
+                              type: string
+                            policyGeneration:
+                              format: int64
+                              type: integer
+                            policyHash:
+                              type: string
+                            queryVersion:
+                              type: string
+                            selectedHostname:
+                              description: Actual kubernetes.io/hostname label value
+                                of the selected Node.
+                              type: string
+                            selectedNodeName:
+                              type: string
+                            selectedNodeUID:
+                              type: string
+                            snapshotExpiresAt:
+                              format: date-time
+                              type: string
+                            snapshotObservedAt:
+                              format: date-time
+                              type: string
+                            workloadUID:
+                              type: string
+                          required:
+                          - actionType
+                          - baselineTemplateHash
+                          - decidedAt
+                          - decisionReason
+                          - imageIndexDigest
+                          - incidentID
+                          - policyGeneration
+                          - policyHash
+                          - queryVersion
+                          - snapshotExpiresAt
+                          - snapshotObservedAt
+                          - workloadUID
+                          type: object
+                        endpointReady:
+                          type: boolean
+                        failureReason:
+                          type: string
+                        firstHealthyAt:
+                          description: Start of the current consecutive-success run.
+                          format: date-time
+                          type: string
+                        hostname:
+                          type: string
+                        lastProbeError:
+                          maxLength: 256
+                          type: string
+                        nodeName:
+                          type: string
+                        nodeUID:
+                          type: string
+                        outcome:
+                          description: Cancelled closes a reservation that never changed
+                            the Deployment.
+                          enum:
+                          - Reserved
+                          - Patched
+                          - Succeeded
+                          - Failed
+                          - Superseded
+                          - Cancelled
+                          type: string
+                        patchedAt:
+                          format: date-time
+                          type: string
+                        podName:
+                          type: string
+                        podNodeName:
+                          type: string
+                        podReadyAt:
+                          description: Ready condition lastTransitionTime of the attempt
+                            Pod.
+                          format: date-time
+                          type: string
+                        podRestartCountAtReady:
+                          format: int32
+                          type: integer
+                        podUID:
+                          type: string
+                        preResourceVersion:
+                          description: Live resourceVersion sent with the Update.
+                          type: string
+                        preTemplateHash:
+                          description: Expected template hash right before the change.
+                          type: string
+                        replicaSetName:
+                          type: string
+                        replicaSetUID:
+                          type: string
+                        reservedAt:
+                          format: date-time
+                          type: string
+                        targetTemplateHash:
+                          description: TemplateHash(Mutate(copy of pre template)),
+                            computed at reservation.
+                          type: string
+                      required:
+                      - actionID
+                      - decision
+                      - hostname
+                      - nodeName
+                      - nodeUID
+                      - outcome
+                      - preTemplateHash
+                      - reservedAt
+                      - targetTemplateHash
+                      type: object
+                    maxItems: 5
+                    type: array
+                  completedAt:
+                    format: date-time
+                    type: string
+                  decision:
+                    properties:
+                      actionID:
+                        description: '"<incident>-a<n>"; empty for ObserveOnly and
+                          WAITING.'
+                        type: string
+                      actionType:
+                        enum:
+                        - Relocation
+                        - None
+                        type: string
+                      baselineTemplateHash:
+                        type: string
+                      candidates:
+                        description: Optional so a decision with zero candidates (nil
+                          slice, null) is not rejected as missing.
+                        items:
+                          properties:
+                            details:
+                              items:
+                                maxLength: 256
+                                type: string
+                              maxItems: 8
+                              type: array
+                            eligible:
+                              type: boolean
+                            hostname:
+                              type: string
+                            measurements:
+                              description: Measurements uses nil pointers for "not
+                                measured"; never fill them with zero.
+                              properties:
+                                allocatableCPUMilli:
+                                  format: int64
+                                  type: integer
+                                allocatableMemoryBytes:
+                                  format: int64
+                                  type: integer
+                                cpuSampleCount:
+                                  format: int32
+                                  type: integer
+                                cpuSampleTime:
+                                  description: Oldest raw sample timestamp.
+                                  format: date-time
+                                  type: string
+                                cpuUtilizationPermille:
+                                  format: int32
+                                  type: integer
+                                memAvailableBytes:
+                                  format: int64
+                                  type: integer
+                                memSampleTime:
+                                  format: date-time
+                                  type: string
+                                memTotalBytes:
+                                  format: int64
+                                  type: integer
+                                newPodCPUMilli:
+                                  format: int64
+                                  type: integer
+                                newPodMemoryBytes:
+                                  format: int64
+                                  type: integer
+                                requestedCPUMilli:
+                                  description: Sum over existing non-terminated Pods.
+                                  format: int64
+                                  type: integer
+                                requestedMemoryBytes:
+                                  format: int64
+                                  type: integer
+                                reserveCPUMilli:
+                                  format: int64
+                                  type: integer
+                                reserveMemoryBytes:
+                                  format: int64
+                                  type: integer
+                              required:
+                              - allocatableCPUMilli
+                              - allocatableMemoryBytes
+                              - newPodCPUMilli
+                              - newPodMemoryBytes
+                              - requestedCPUMilli
+                              - requestedMemoryBytes
+                              - reserveCPUMilli
+                              - reserveMemoryBytes
+                              type: object
+                            nodeName:
+                              type: string
+                            nodeUID:
+                              type: string
+                            platform:
+                              description: '"<kubernetes.io/os>/<kubernetes.io/arch>".'
+                              type: string
+                            rejectReasons:
+                              items:
+                                enum:
+                                - NODE_NOT_READY
+                                - UNSCHEDULABLE
+                                - UNTOLERATED_TAINT
+                                - MEMORY_PRESSURE
+                                - DISK_PRESSURE
+                                - PID_PRESSURE
+                                - CPU_PRESSURE
+                                - ARCH_MISMATCH
+                                - INSUFFICIENT_REQUESTED_CPU
+                                - INSUFFICIENT_REQUESTED_MEMORY
+                                - INSUFFICIENT_AVAILABLE_MEMORY
+                                - METRICS_MISSING
+                                - METRICS_STALE
+                                - COOLDOWN
+                                - UNSUPPORTED_CONSTRAINT
+                                type: string
+                              maxItems: 15
+                              type: array
+                            score:
+                              description: Set only when eligible.
+                              properties:
+                                cpuHeadroomPermille:
+                                  format: int32
+                                  type: integer
+                                memoryHeadroomPermille:
+                                  format: int32
+                                  type: integer
+                                penaltyMilli:
+                                  format: int64
+                                  type: integer
+                                recentFailures:
+                                  format: int32
+                                  type: integer
+                                requestedHeadroomPermille:
+                                  format: int32
+                                  type: integer
+                                scoreMilli:
+                                  description: 100 points = 100000.
+                                  format: int64
+                                  type: integer
+                              required:
+                              - cpuHeadroomPermille
+                              - memoryHeadroomPermille
+                              - penaltyMilli
+                              - recentFailures
+                              - requestedHeadroomPermille
+                              - scoreMilli
+                              type: object
+                          required:
+                          - eligible
+                          - hostname
+                          - measurements
+                          - nodeName
+                          - nodeUID
+                          - platform
+                          type: object
+                        maxItems: 16
+                        type: array
+                      decidedAt:
+                        format: date-time
+                        type: string
+                      decisionReason:
+                        enum:
+                        - SELECTED_HIGHEST_SCORE
+                        - NO_CANDIDATE
+                        - METRICS_UNAVAILABLE
+                        type: string
+                      imageIndexDigest:
+                        type: string
+                      incidentID:
+                        type: string
+                      policyGeneration:
+                        format: int64
+                        type: integer
+                      policyHash:
+                        type: string
+                      queryVersion:
+                        type: string
+                      selectedHostname:
+                        description: Actual kubernetes.io/hostname label value of
+                          the selected Node.
+                        type: string
+                      selectedNodeName:
+                        type: string
+                      selectedNodeUID:
+                        type: string
+                      snapshotExpiresAt:
+                        format: date-time
+                        type: string
+                      snapshotObservedAt:
+                        format: date-time
+                        type: string
+                      workloadUID:
+                        type: string
+                    required:
+                    - actionType
+                    - baselineTemplateHash
+                    - decidedAt
+                    - decisionReason
+                    - imageIndexDigest
+                    - incidentID
+                    - policyGeneration
+                    - policyHash
+                    - queryVersion
+                    - snapshotExpiresAt
+                    - snapshotObservedAt
+                    - workloadUID
+                    type: object
+                  expectedTemplateHash:
+                    description: Last applied template hash; empty means nothing applied,
+                      so read spec.baseline.templateHash.
+                    type: string
+                  lastTransitionTime:
+                    format: date-time
+                    type: string
+                  message:
+                    maxLength: 512
+                    type: string
+                  oldPodsOutstanding:
+                    items:
+                      properties:
+                        name:
+                          type: string
+                        nodeName:
+                          type: string
+                        terminating:
+                          type: boolean
+                        uid:
+                          type: string
+                      required:
+                      - name
+                      - nodeName
+                      - terminating
+                      - uid
+                      type: object
+                    maxItems: 5
+                    type: array
+                  phase:
+                    description: Empty means DETECTED.
+                    enum:
+                    - WAITING
+                    - EXECUTING
+                    - VERIFYING
+                    - RECOVERED
+                    - FAILED
+                    - ABORTED
+                    - SUPERSEDED
+                    - UNSUPPORTED_WORKLOAD
+                    - MANUAL_REQUIRED
+                    - OBSERVED
+                    type: string
+                  reason:
+                    type: string
+                type: object
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
