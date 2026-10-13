@@ -10,7 +10,7 @@
 
 이 문서는 Phase 0에서 확정한 책임 경계와 수용 기준을 보존합니다. “한다”는 표현은 구현해야 할 계약입니다. 수치 기본값은 초기 실험 가정이며 측정 결과가 아닙니다. 책임·권한·상태 전이·지원 범위를 바꾸는 경우 이 문서와 관련 ADR을 함께 개정합니다. 버전·region·quota처럼 외부 환경에 의존하는 값은 사전 확인 없이 확정된 것으로 취급하지 않습니다.
 
-현재 구현 상태: 로컬 AMD64 2-Node 및 관측 스택 부분 구축, Azure ARM64·Demo API·Controller·Runner는 미구현이다. [P1-B](../experiments/p1-b-local-platform.md)와 [관측 검증](../experiments/p2-observability-verification.md)에 사용자 증거/이번 명령 결과를 구분한다. 설계의 초기 수치 가정(예: scrape 10초)을 현재 실측으로 취급하지 않는다.
+현재 구현 상태: 로컬 AMD64 2-Node 및 관측 스택 부분 구축, Azure ARM64·Runner는 미구현이다. Demo API·CRD·Controller·Demo A 하네스는 PR #2에서 코드·테스트(envtest 포함)까지 구현했으나 클러스터 배포와 라이브 수용은 실행하지 않았다([Implementation Plan](../implementation-plan.md)). [P1-B](../experiments/p1-b-local-platform.md)와 [관측 검증](../experiments/p2-observability-verification.md)에 사용자 증거/이번 명령 결과를 구분한다. 설계의 초기 수치 가정(예: scrape 10초)을 현재 실측으로 취급하지 않는다. 구현이 이 문서와 달라진 지점은 해당 절에 "(구현: PR #2)"로 표시한다.
 
 관련 문서: [README](../../README.md), [Implementation Plan](../implementation-plan.md), [ADR-001](../adr/ADR-001-k3s-single-control-plane.md), [ADR-002](../adr/ADR-002-runtime-recovery-placement.md), [ADR-003](../adr/ADR-003-observability-driven-recovery.md), [ADR-004](../adr/ADR-004-engineering-recovery-boundary.md), [ADR-005](../adr/ADR-005-hybrid-multi-architecture-testbed.md).
 
@@ -141,6 +141,8 @@ RecoveryDecision 필드는 `incident_id`, `action_id`, `policy_generation`, `pol
 
 Exactly-once 실행을 주장하지 않는다. 고유 ID·영속 intent·조건부 변경으로 재전달을 멱등 처리한다. 외부 효과가 불명확한 경우 먼저 실제 상태를 확인한다.
 
+Executor → API의 조건부 변경은 JSON Patch `test` 대신 live resourceVersion을 실은 Deployment `Update`로 구현했다. 충돌하면 다시 읽어 판단하며, 필요한 RBAC verb는 `patch`가 아니라 `update`다(§14). (구현: PR #2)
+
 ## 6. 장애 분류
 
 분류 규칙과 signature 정규화에는 version을 부여한다. 우선순위는 운영 원인 배제 후 Application 판단이다.
@@ -183,9 +185,12 @@ stateDiagram-v2
     EVIDENCE_FINALIZING --> ENGINEERING_HANDOFF: Bundle 준비 및 격리 요청
 ```
 
+구현의 영속 phase는 `WAITING`·`EXECUTING`·`VERIFYING`과 terminal `RECOVERED`·`FAILED`·`ABORTED`·`SUPERSEDED`·`UNSUPPORTED_WORKLOAD`·`MANUAL_REQUIRED`·`OBSERVED`다. `DETECTED`는 status에 쓰지 않고 빈 phase로 표현하며, `CLASSIFIED`·`COLLECTING_CANDIDATES`·`FILTERING`·`SCORING`·`TARGET_SELECTED`·`COOLDOWN`은 한 reconcile 안에서 끝나므로 영속하지 않는다. 선택 직후 같은 reconcile에서 attempt를 예약·실행하므로 `TARGET_SELECTED → COLLECTING_CANDIDATES` 재평가 루프는 없고, 그 평가가 실행 직전 재검사를 겸한다. ObserveOnly는 decision을 기록한 뒤 전용 terminal `OBSERVED`로 끝나 활성 Incident를 해제한다. 자동 action은 INFRASTRUCTURE_FAILURE에만 적용하며 `RUNTIME_RECOVERY_EXHAUSTED` 이후 Application 경로는 P5 범위로 남아 있다. (구현: PR #2)
+
 ### 전역 전이와 예산
 
 - 사용자 중지·정책 비활성화: 신규 action 중단, `ABORTED`.
+- 실행 전 trigger 소멸: `ABORTED`/`TRIGGER_CLEARED`, circuit을 열지 않는다. 평가 시점과 Reserved attempt 재개 시점 모두 검사한다. 소멸은 장애 Node가 Ready=True로 복귀한 경우이며, trigger 지속을 Pod 재분류가 아닌 Node 상태로 판정해 taint eviction 뒤 대체 Pod 때문에 오판하지 않는다. Monitor는 현재 revision ReplicaSet의 비종료 Pod만 평가한다. (구현: PR #2)
 - workload UID 교체나 외부 desired-state 변경: `SUPERSEDED`.
 - 지원하지 않는 constraint: `UNSUPPORTED_WORKLOAD`.
 - 근거 부족: `MANUAL_REQUIRED`, Engineering 차단.
@@ -193,6 +198,7 @@ stateDiagram-v2
 - 후보 없음: `WAITING` reason=`NO_CANDIDATE`; deadline 후 운영 실패. Engineering으로 자동 전환하지 않음.
 - kubelet restart count와 OpsLoop action attempt는 별개다.
 - 고유 action intent 예약당 예산을 한 번 반영한다. 같은 action의 재전송은 추가 차감하지 않는다.
+  - 재개 재평가에서 선택 Node가 부적격이 되거나 terminal 시점에 적용되지 않은 예약은 Deployment를 바꾸지 않고 attempt outcome `Cancelled`로 닫는다. 예약이므로 예산은 소비하지만 Node cooldown은 걸지 않는다. (구현: PR #2)
 - 조회·대기·HTTP 재확인은 attempt가 아니다. timeout이나 재시작으로 전체 deadline을 연장하지 않는다.
 
 ### 실행 일관성과 중복 방지
@@ -204,15 +210,21 @@ stateDiagram-v2
 5. 재시작 후 Deployment attempt annotation과 실제 ReplicaSet/Pod를 읽어 같은 action을 이어간다.
 6. 결과를 저장한다. 적용 여부가 불명확하면 확인 전 새 action을 만들지 않는다.
 
+구현은 3번에 resourceVersion을 실은 `Update`를 쓴다(§5). 외부 desired-state 변경은 template을 제외한 Deployment spec 전체의 `SpecHash`와 Pod template의 `TemplateHash`로 감지해 `SUPERSEDED`(`SPEC_CHANGED_EXTERNALLY`·`TEMPLATE_CHANGED_EXTERNALLY`·`WORKLOAD_REPLACED`)로 닫는다. 5번 재개는 annotation 대신 예약 시 계산한 `targetTemplateHash`를 live template hash와 비교해 판정하므로, crash 구간에 외부 image 변경이 겹치면 우리 변경으로 흡수하지 않고 SUPERSEDED가 된다. terminal 진입 시 남은 Reserved attempt는 template 기준 순수 함수 `ReservedOutcome` 하나로 `Patched`·`Cancelled`·`Superseded`를 확정한다. (구현: PR #2)
+
 ### 성공과 격리
 
 `RECOVERED`에는 현재 action의 ReplicaSet·Pod UID·attempt ID·선택 Node 일치, 해당 Pod의 `/health`·`/ready`, Service EndpointSlice 반영, 안정화 구간 동안 crash 없음이 필요하다. Demo B는 동일 fixture 재생도 통과해야 한다. Service 응답만으로 구 Pod가 새 Pod의 실패를 가리게 해서는 안 된다.
 
 이전 Pod 종료나 Deployment 전체 rollout 완료는 성공의 전제조건이 아니다. 이전 Pod 종료 미확인은 `oldPodsOutstanding`으로 별도 표시한다.
 
+attempt Pod가 처음 Ready가 되기 전 변경 시각부터 `placementTimeout`을 넘기면 `PLACEMENT_TIMEOUT`이다. 한 번 Ready가 된 뒤 readiness가 흔들려 안정화를 채우지 못하면 placement 실패로 보지 않고 첫 Ready 시각부터 `verificationTimeout`으로 판정해 `VERIFICATION_TIMEOUT`으로 기록한다. (구현: PR #2)
+
 반복 Application Failure 소진 시 evidence를 먼저 보존한 뒤 opt-in Deployment의 원래 replicas를 기록하고 `replicas=0`을 요청한다. 동일한 UID·template·version 사전조건을 적용한다. `QuarantineRequested`, `QuarantineConfirmed`, `QuarantineUnconfirmed`를 구분한다. scale=0은 desired state이며 partition된 프로세스의 실제 중단을 보장하지 않는다. Demo Driver는 재현 요청을 멈추며 PR 생성만으로 replicas를 자동 복구하지 않는다.
 
 동일 workload·image·signature circuit은 terminal incident 생성 반복과 재시작 폭주를 막는다. 새 image 또는 명시적 운영자 reset 없이 자동 해제하지 않는다.
+
+구현의 circuit key는 class·reason·workload UID·image digest에 Node 원인은 Node UID, container 원인은 container 이름, UNKNOWN은 Node 이름을 결합한 signature다. `FAILED`·`UNSUPPORTED_WORKLOAD`·`MANUAL_REQUIRED`·`OBSERVED`와 생성된 Incident가 사라진 `INCIDENT_LOST`(§9)에서 열리고 `RECOVERED`·`ABORTED`·`SUPERSEDED`에서는 열리지 않는다. 자동 제거는 없고 운영자가 Policy `status.circuits`를 merge patch로 reset한다. 열린 circuit이 10개이면 새 Incident를 만들지 않는다(condition `CircuitCapacity`). 새 image는 key가 달라 별도 reset 없이 진행한다. Trade-off: INFRASTRUCTURE trigger가 `FAILED`(deadline·예산 소진)로 끝나도 circuit이 열리므로, 같은 Node·image의 다음 장애는 운영자 reset 전까지 Incident를 만들지 않는다. (구현: PR #2)
 
 ## 8. RecoveryPolicy Model
 
@@ -244,6 +256,8 @@ stateDiagram-v2
 
 감지 20초는 전원 장애 이후 총 감지 시간을 뜻하지 않는다. Kubernetes가 NotReady/Unknown을 보고한 이후의 추가 지속 조건이다. 점수 가중치는 검증 가능한 정책 데이터이며 코드에 숨겨진 상수가 아니다. 미세한 metric 변동만으로 정상 workload를 이동하지 않는다.
 
+구현은 `sameSignatureCircuit` 필드를 두지 않고 circuit을 항상 켠다. 끌 수 있는 선택지를 두지 않는 대신 §7의 운영 trade-off를 감수한다. (구현: PR #2)
+
 ### Hard Filter
 
 각 후보에서 다음을 확인한다.
@@ -255,6 +269,8 @@ stateDiagram-v2
 - cooldown, metric freshness, 지원하는 scheduling constraint.
 
 reject reason은 `NODE_NOT_READY`, `UNSCHEDULABLE`, `ARCH_MISMATCH`, `UNTOLERATED_TAINT`, `MEMORY_PRESSURE`, `CPU_PRESSURE`, `DISK_PRESSURE`, `PID_PRESSURE`, `INSUFFICIENT_REQUESTED_CPU`, `INSUFFICIENT_REQUESTED_MEMORY`, `INSUFFICIENT_AVAILABLE_MEMORY`, `METRICS_STALE`, `METRICS_MISSING`, `COOLDOWN`, `UNSUPPORTED_CONSTRAINT`를 최소 집합으로 둔다. 한 후보가 여러 조건을 위반하면 모두 기록한다.
+
+image index의 플랫폼 manifest 호환성은 hard filter에서 직접 검사하지 않는다. Controller는 registry를 조회하지 않고, 후보 Node의 `kubernetes.io/os`·`kubernetes.io/arch` label 조합이 Policy `requiredPlatforms`에 없으면 `ARCH_MISMATCH`로 거부한다. index에 두 플랫폼이 모두 있는지는 CI 게시 단계에서 검사한다. 단일 플랫폼 이미지를 수동 배포한 경우는 실행 시 image pull 실패 메시지로 `IMAGE_PLATFORM_MISSING`을 분류해 해당 attempt를 실패 처리하고 그 Node에 cooldown을 건다. Controller에 pull secret 읽기 권한과 registry client를 주지 않기 위한 선택이며, 그 대가로 사전 검사가 약해진다. kubelet 메시지 문자열은 라이브에서 확인하지 않았다. (구현: PR #2)
 
 가용 Memory는 최소 여유와 새 workload의 시작 예산을 함께 만족해야 한다. requests 계산은 기존 비종료 Pod와 추가 surge Pod를 반영하며, 기존 Pod가 사라졌다고 확인하기 전에 해당 요청량을 임의로 빼지 않는다. 지원하지 않는 복잡한 Pod 제약은 대략 계산해 통과시키지 않고 명시적으로 거부한다. 최종 scheduling 가능 여부는 기본 Scheduler가 판단한다.
 
@@ -279,6 +295,8 @@ API group은 프로젝트 내부 기준 `opsloop.io/v1alpha1`로 한다. 초기 
 | RecoveryPolicy | target, filter, score, 예산, 검증, 격리 권한 | observedGeneration, activeIncidentRef, incidentSequence, cooldown 요약 |
 | RecoveryIncident | workload UID, 최초 trigger, policy snapshot 참조 | runtime, engineering, conditions, bounded action history, Bundle 참조 |
 
+구현 차이: RecoveryIncident `status.conditions`는 아직 두지 않고 phase·reason·message로 대신하며, 소비자가 생기는 P5/P6에서 additive로 추가한다. Policy의 Node 실패 원장 `status.recentFailures`(penalty·cooldown 입력)는 Incident release CAS에서만 actionID 기준으로 기록하고, 진행 중 Incident의 cooldown·penalty는 그 Incident의 attempts에서 직접 계산한다. Policy `spec.targetRef`와 Incident spec은 CRD CEL(`self == oldSelf`)로 변경을 거부한다. (구현: PR #2)
+
 - Policy는 대상과 같은 namespace에 둔다. Demo namespace는 `opsloop-demo`를 기본 명칭으로 사용한다.
 - workload당 활성 Policy 한 개만 허용한다.
 - Controller leader election과 전체 Runtime action 직렬화를 사용한다.
@@ -288,6 +306,8 @@ API group은 프로젝트 내부 기준 `opsloop.io/v1alpha1`로 한다. 초기 
 ### Incident 예약의 crash recovery
 
 Policy status를 CAS로 갱신해 sequence와 결정적인 Incident 이름을 먼저 예약한다. 같은 이름의 Incident를 멱등 생성한다. 예약 직후 재시작되면 해당 생성 절차를 완료한다. terminal 처리 뒤 active reference 해제도 같은 sequence·UID인지 CAS로 확인한다. orphan·중복 incident가 새 action을 만들게 해서는 안 된다.
+
+구현에서 같은 이름의 Incident가 이미 있으면 UID를 기록하기 전에 예약이 기대하는 spec 전체와 비교하고, 다르면 채택·진행하지 않는다. 위조되거나 남아 있던 Incident가 Enforce의 판단 입력을 제공하지 못하게 하기 위함이다. Incident 생성 후 UID 기록 전에 Policy spec이 바뀌면 그 snapshot을 검증할 수 없으므로 Deployment를 변경하지 않고 `ABORTED`/`POLICY_CHANGED`(비활성화면 `POLICY_DISABLED`)로 닫는다. UID 기록 후 Incident가 사라지면 다시 만들지 않고(action 예산 초기화 방지) active reference를 해제하며 `INCIDENT_LOST` circuit을 연다. (구현: PR #2)
 
 Controller는 `status.runtime`, Runner는 `status.engineering`을 논리적으로 소유하고 충돌 시 다시 읽어 부분 갱신한다. RBAC가 status 내부 필드를 개별 격리한다고 주장하지 않는다. Runner 자격 증명은 신뢰된 coordinator만 사용한다.
 
@@ -338,11 +358,15 @@ Kubernetes nodeSelector와 Deployment 동작에 근거한 선택이며 Scheduler
 
 Prometheus의 lookback/staleness를 고려해야 한다. [Prometheus Querying Basics](https://prometheus.io/docs/prometheus/latest/querying/basics/).
 
+구현은 CPU rate window를 고정 60초 대신 `W = 2 × maxSampleAge`로 두고 W 안에 원본 표본 3개 이상을 요구한다(초기 가정 10s/30s/60s의 비율 유지). 현재 관측 스택의 실측 scrape는 30초여서 기본 `maxSampleAge` 30초로는 W=60초에 표본이 2개뿐이라 항상 `METRICS_MISSING`이 된다. 따라서 demo Policy는 `maxSampleAge: 90s`(W=180초)를 쓰고 CRD 기본값은 30초로 둔다. 표본 값이 유한하지 않거나 범위를 벗어나면(음수 또는 상한 초과 Memory, MemAvailable > MemTotal, 표현할 수 없는 표본 시각 등) `METRICS_MISSING`, 원본 표본 시각이 5초를 넘는 미래이면 `METRICS_STALE`로 거부한다. 미래 시각 표본이 sample age 검사를 계속 통과하는 것을 막기 위함이다. (구현: PR #2)
+
 ### 최소 stack과 보관
 
 Prometheus, Grafana, node exporter, kube-state-metrics, Application/OpsLoop metrics만 기본 구성에 둔다. Loki·Tempo·OpenTelemetry Collector·별도 Alertmanager는 필수가 아니다. Prometheus 저장량과 retention을 제한하고 ARM worker에는 배치하지 않는다.
 
 OpsLoop metric은 복구 결과·소요 시간·상태별 수·reject reason 수를 제공한다. incident ID, commit SHA, stack trace를 대량 metric label로 넣지 않는다. 상세 기록은 CRD와 artifact에서 조회한다. Grafana가 초기 Dashboard이며 별도 UI는 P8로 미룬다.
+
+OpsLoop 전용 metric은 구현하지 않았다. 복구 결과·reject reason의 원자료는 RecoveryIncident decision·attempts와 Demo Driver summary에 남지만, 이 절의 최소 stack 요구는 아직 충족하지 않는다. 구현 시점은 정하지 않았다. (구현: PR #2)
 
 ## 12. Incident Bundle Contract
 
@@ -461,6 +485,8 @@ PR API 실패 시 기존 branch·incident marker로 이미 생성된 PR을 먼�
 | Publisher | 지정 repo branch push·PR | 코드·hook 실행, main 직접 변경, Merge |
 | main publish CI | 지정 ACR 게시 | cluster-admin, 광범위 Azure 권한 |
 
+구현의 Controller ClusterRole은 Node·Pod·Deployment·ReplicaSet·EndpointSlice 읽기, RecoveryIncident 생성, 두 CRD status 갱신만 가진다. Deployment 쓰기는 Enforce 승인 뒤에만 적용하는 namespace Role(`config/rbac/enforce`: `opsloop-demo`의 `demo-api` 한 개에 verb `update`)로 분리하고 `patch`는 주지 않는다. ObserveOnly 배포에는 이 Role을 적용하지 않는다. (구현: PR #2)
+
 allowed paths는 prompt만으로 강제하지 않는다. 실제 격리와 최종 diff 검증을 함께 적용하며 symlink·경로 탈출·파일 유형·삭제·크기 제한을 검사한다. 초기 자동 수정은 Demo API 로직·테스트로 제한하고 `.github/`, `infra/`, `deploy/`, 검증 harness와 의존성 파일은 금지한다.
 
 Build/Test도 비신뢰 코드 실행이다. Codex와 검증 sandbox에서 운영 자격 증명과 Host socket을 제거한다. Codex provider 인증은 제한된 인증 경로로 전달하며 테스트 프로세스에 상속하지 않는다. 구체적인 격리·인증 전달 방식은 P6의 구현·검증 대상이며, 격리가 입증되지 않으면 autonomous Engineering의 DoD를 충족하지 못한다.
@@ -519,6 +545,8 @@ Node image pull은 ACR repository 범위 read-only token과 Kubernetes imagePull
 
 CI·Engineering의 QEMU smoke는 emulated 결과로 표시한다. 실제 ARM native 실행은 Demo A의 필수 수용시험이다. native에서만 재현되는 원인은 해당 검증 환경 없이 PR gate를 통과시키지 않고 BLOCKED_NATIVE_VALIDATION으로 둔다. repair 후보 검증을 위해 운영 Recovery Node에서 비신뢰 코드를 실행하지 않는다. image 게시와 cluster 배포는 분리하며 초기 배포는 명시적인 Helm 작업이다.
 
+구현은 Helm chart 대신 kustomize base(`config/`, `deploy/demo-api`, `deploy/demo-policy`)와 gitignored 소유자 overlay(`deploy/owner/kustomization.yaml`, 예제 파일만 추적)를 쓴다. 고정 배포 1종에 templating이 필요하지 않고 kubectl 내장 kustomize로 Helm 의존을 없애기 위함이다. 배포가 소유자의 명시적 운영 작업이라는 원칙은 유지하며, overlay는 CI 게시 결과의 index digest로 이미지를 고정하고 server-side apply field manager로 Controller의 변경과 소유권을 분리한다. 관측 스택은 기존 Helm release를 유지한다. (구현: PR #2)
+
 ## 17. Demo Application과 시나리오
 
 API는 Go로 단순하게 구성하고 `GET /`, `GET /health`, `GET /ready`, `GET /metrics`를 제공한다. 응답에서 Node·Pod·Version·Architecture를 확인할 수 있어야 한다. metadata는 배치 관찰용이며 source provenance의 권위는 CI 기록이다.
@@ -528,6 +556,8 @@ API는 Go로 단순하게 구성하고 `GET /`, `GET /health`, `GET /ready`, `GE
 Physical Primary 장애 시 Azure에 부하가 있으면 Azure를 이유와 함께 reject하고 Laptop VM을 선택한다. 반대 실험에서는 Laptop VM에 제한된 부하를 주고 Azure를 선택한다. 두 실험 모두 현재 resource state가 선택을 바꿨음을 decision snapshot으로 입증한다.
 
 부하 주입은 control plane을 죽이지 않도록 제한한다. system·관측 자원을 예약하고 Host의 Engineering build를 동시에 실행하지 않는다. 다음 실험은 Primary placement, 부하, circuit·cooldown 상태를 명시적으로 reset한 뒤 시작한다.
+
+구현의 Laptop 방향 부하는 실제 CPU 부하가 아니라 `opsloop-control`의 requested CPU를 채우는 예약 Pod(requests 포화)이며 기대 reject는 `INSUFFICIENT_REQUESTED_CPU`다. 위의 "제한된 부하"를 requests 포화를 포함한 resource state로 해석한 것으로, control plane에 높은 CPU 부하를 주는 위험을 피한다. Azure 방향은 실제 CPU 부하(`CPU_PRESSURE`)로 Prometheus 축을, Laptop 방향은 requests로 Kubernetes API 축을 입증하도록 나눈다. 두 방향 모두 라이브 실행 전이다([Demo A runbook](../../demos/node-failure/README.md)). (구현: PR #2)
 
 ### Demo B — Application Failure
 
@@ -658,6 +688,8 @@ OpsLoop/
 │   └── experiments/
 └── .github/workflows/
 ```
+
+구현은 `deploy/helm/` 대신 `deploy/demo-api`·`deploy/demo-policy`·`deploy/owner`(gitignored overlay와 추적되는 `.example`)와 `config/{crd,rbac,manager,default}` kustomize 구조를 쓴다(§16). 관측 values는 기존 `infra/observability/`에 있다. envtest 통합 테스트는 `tests/integration` 대신 해당 Go 패키지(`api/v1alpha1`, `internal/controller`)에 둔다. `cmd/engineering-runner`, `internal/incident`, `internal/engineering`, `contracts/`, `tests/e2e`, `demos/application-failure`는 아직 없다. (구현: PR #2)
 
 state, credentials, Runner temporary worktree와 evidence artifact는 source tree와 분리하고 Git에 저장하지 않는다. `.gitignore`는 방어 수단이며 민감한 파일의 생성 위치·권한·보존 정책을 대신하지 않는다.
 

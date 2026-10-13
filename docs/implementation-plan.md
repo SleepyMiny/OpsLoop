@@ -2,7 +2,7 @@
 
 기준: [Architecture v0.1](architecture/architecture-v0.1.md), 2026-10-07.
 
-**현재 (2026-10-13) P1-B 로컬 2-Node AMD64 k3s와 P2 관측 스택이 부분 구축되었고, 실제 Remote Backend 초기화·연결 검증이 완료되었다. Azure ARM64·ACR/OIDC 및 네트워크 전체 수용시험이 남아 P1 DoD는 미완료다. Demo API·Multi-Arch CI가 없어 P2 DoD도 미완료다.** 저장소 조사에서 P3~P8 기능 코드·CRD·Runner·workflow는 발견되지 않았다. 당시 [P1-A Inventory](experiments/p1-a-environment-inventory.md)는 보존하고 [P1-B 로컬 검증](experiments/p1-b-local-platform.md), [Observability 검증](experiments/p2-observability-verification.md), [Azure 후보 조사](experiments/p1-c-azure-arm64-candidates.md), [Backend 연결 검증](experiments/p1-d-azure-backend-initialization.md)에 사용자 증거와 명령 결과를 구분한다.
+**현재 (2026-10-13) P1-B 로컬 2-Node AMD64 k3s와 P2 관측 스택이 부분 구축되었고, 실제 Remote Backend 초기화·연결 검증이 완료되었다. Azure ARM64·ACR/OIDC 및 네트워크 전체 수용시험이 남아 P1 DoD는 미완료다. P2~P4는 [PR #2](https://github.com/SleepyMiny/OpsLoop/pull/2)에서 코드·테스트를 구현했으나 ACR 게시·클러스터 배포·라이브 수용을 실행하지 않아 P2·P3·P4 DoD도 미완료다.** 각 Phase의 "현재 구현과 증거 범위"에 실행한 명령·환경·결과·제한을 둔다. Engineering Runner와 P5~P8 기능 코드는 없다. 당시 [P1-A Inventory](experiments/p1-a-environment-inventory.md)는 보존하고 [P1-B 로컬 검증](experiments/p1-b-local-platform.md), [Observability 검증](experiments/p2-observability-verification.md), [Azure 후보 조사](experiments/p1-c-azure-arm64-candidates.md), [Backend 연결 검증](experiments/p1-d-azure-backend-initialization.md)에 사용자 증거와 명령 결과를 구분한다.
 
 ## 진행 원칙
 
@@ -20,9 +20,9 @@
 | --- | --- | --- | --- |
 | P0 | Architecture·ADR·계약·범위·환경 가정 | 요구사항 | 설계 기준 문서화 |
 | P1 | Terraform·Tailscale·3-Node k3s·ACR·OIDC 기반 | P0, 환경 적합성 | P1-B 로컬 2-Node 구축; Azure·기반 인증·전체 수용 검증 미완료 |
-| P2 | Demo API·Multi-Arch pipeline·관측 stack | P1 | 관측 stack 구축; Demo API·Multi-Arch CI 미구현 |
-| P3 | ObserveOnly Controller·분류·후보 평가·정책 | P2 | 미착수 |
-| P4 | Runtime 실행·검증·guardrail·Demo A | P3 | 미착수 |
+| P2 | Demo API·Multi-Arch pipeline·관측 stack | P1 | 관측 stack 구축; Demo API·Multi-Arch 이미지·CI 구현(PR #2), ACR 게시·native ARM 실행 미실행 — DoD 미완료 |
+| P3 | ObserveOnly Controller·분류·후보 평가·정책 | P2 | CRD·분류·후보 평가·ObserveOnly Controller 구현, envtest 통과(PR #2); 실제 cluster 실행 미실행 — DoD 미완료 |
+| P4 | Runtime 실행·검증·guardrail·Demo A | P3 | Enforce·guardrail·Demo A 하네스 구현, envtest 통과(PR #2); Demo A 실측 미실행 — DoD 미완료 |
 | P5 | 반복 Application Failure·Bundle·격리 | P4 | 미착수 |
 | P6 | Runner·Codex·Feedback·검증·PR·Demo B | P5, Engineering 환경 | 미착수 |
 | P7 | 전체 재현·시연 결과·운영 문서·보안 보강 | P6 | 미착수 |
@@ -97,7 +97,15 @@ Go Demo API와 `/`, `/health`, `/ready`, `/metrics`, metadata 응답을 구현�
 
 기존 `infra/observability/kube-prometheus-stack.values.yaml`을 보존했다. 사용자 제공 기록은 release `opsloop-mon`, chart `91.8.1`, Prometheus 10 GiB/Grafana 2 GiB local-path PVC Bound, Control Plane 배치, Node Exporter 각 노드 1개, 주요 Targets UP와 Grafana 시각화를 확인한다. 최신 실측·Helm values 비교는 [Observability 기록](experiments/p2-observability-verification.md)을 따른다. 당시 2 Nodes / 10 Pods를 현재 Pod 수로 사용하지 않는다.
 
-실제 scrape/evaluation interval은 values의 30초이며 Architecture의 초기 10초/최대 sample age 30초 가정과 함께 P3에서 재측정·조정해야 한다. 관측 동작만으로 Candidate Evaluator freshness 검증을 완료 처리하지 않는다. Demo API의 Go 코드·테스트, 리소스 requests/limits·metadata, Multi-Arch 이미지/CI·native ARM 실행은 다음 구현 대상이다.
+실제 scrape/evaluation interval은 values의 30초이며 Architecture의 초기 10초/최대 sample age 30초 가정과 함께 P3에서 재측정·조정해야 한다. 관측 동작만으로 Candidate Evaluator freshness 검증을 완료 처리하지 않는다. Demo API의 Go 코드·테스트, 리소스 requests/limits·metadata, Multi-Arch 이미지/CI는 PR #2에서 구현했고(아래 절) native ARM 실행은 남아 있다.
+
+### 현재 구현과 증거 범위 (PR #2)
+
+- 구현: `apps/demo-api`(`/`·`/health`·`/ready`·`/metrics`, Node·Pod·Version·Architecture 응답)와 단위 테스트, 루트 `Dockerfile`(build·runtime base image digest 고정), `deploy/demo-api` kustomize(requests 50m/64Mi, limits 200m/128Mi, NodePort 30080, ServiceMonitor), gitignored 소유자 overlay 예제 `deploy/owner/kustomization.yaml.example`, `.github/workflows/ci.yaml`.
+- CI 구성: PR은 `verify`(go vet, 생성 파일 최신 여부, envtest를 포함한 `go test`)와 `image`(Docker 빌드, QEMU emulated amd64/arm64 smoke)만 credentials 없이 실행한다. `publish`(OIDC ACR 게시, index의 두 플랫폼·revision label 검사)는 main push에서만 실행된다.
+- 로컬 Windows: `go build`·`go vet`, 전 패키지 `go test`, linux/amd64·arm64 cross-compile, kustomize 렌더, actionlint 통과. Docker 빌드는 로컬에서 하지 않았다.
+- GitHub Actions(PR #2): `verify`·`image` job 통과. QEMU smoke는 emulated 결과다. `publish`는 main push 전용이라 실행되지 않았다.
+- 미실행: ACR 게시와 SHA tag·index digest·플랫폼 digest·provenance 확인, 같은 image index의 native AMD64·ARM64 실행, 클러스터 배포·Host의 NodePort 호출, Application metric 수집 확인. 따라서 P2 DoD는 미완료다.
 
 ## P3 — ObserveOnly 평가기
 
@@ -115,6 +123,12 @@ RecoveryPolicy·RecoveryIncident의 최소 CRD, Monitor, deterministic Classifie
 - score·동점·resource reserve·cooldown 경계의 단위 검증을 통과한다.
 - CRD schema·status·Incident 예약의 재시작 일관성을 검증한다.
 - ObserveOnly가 Deployment를 변경하지 않음을 확인한다.
+
+### 현재 구현과 증거 범위 (PR #2)
+
+- 구현: `api/v1alpha1`·`config/crd`(RecoveryPolicy·RecoveryIncident v1alpha1, CEL로 Policy `spec.targetRef`와 Incident spec 불변), `internal/classification`(결정적 분류·signature), `internal/candidates`(hard filter·score·Prometheus 결측/stale/범위 검사), `internal/controller`·`cmd/opsloop-controller`(Incident 예약·crash recovery·ObserveOnly), `config/rbac`(ClusterRole은 Deployment 읽기 전용), `deploy/demo-policy`(ObserveOnly, `maxSampleAge: 90s`).
+- 로컬 Windows: 분류·후보 평가·Prometheus 매핑의 단위 테스트와 envtest(kube-apiserver 1.35.0)를 통과했다. envtest는 실제 apiserver에 CRD를 설치해 기본값·검증·불변 규칙(E1), 예약·재시작·release(E2·E3·E5·E17·E20), ObserveOnly 무변경과 decision 기록(E4), circuit 상한·중복 Policy·위조 Incident·선행 Incident 정리·UID 기록 전 Policy 변경(E22–E27)을 확인한다. GitHub Actions `verify` job도 Linux에서 같은 envtest를 실행해 통과했다.
+- 제한: envtest에는 kubelet·scheduler·controller-manager가 없어 Node·Pod·ReplicaSet·EndpointSlice와 Prometheus 응답을 테스트가 만든다. 실제 cluster snapshot으로 ObserveOnly를 실행하지 않았으므로 P3 DoD는 미완료다. 실측 scrape 30초 때문에 demo Policy는 `maxSampleAge` 90초를 쓰며 CRD 기본값 30초는 유지한다([Architecture §11](architecture/architecture-v0.1.md#11-prometheus--observability)).
 
 ## P4 — Runtime Recovery와 Demo A
 
@@ -137,6 +151,12 @@ RecoveryPolicy·RecoveryIncident의 최소 CRD, Monitor, deterministic Classifie
 - T_detect, T_decide, T_place, T_recover 원자료와 환경을 기록한다.
 
 초기 warmed 복구 목표는 180초 이내지만 실측 전 보장이 아니다. 목표 미달은 원인·측정 조건·조정 결과를 남기며 숫자만 바꿔 통과시키지 않는다.
+
+### 현재 구현과 증거 범위 (PR #2)
+
+- 구현: `internal/recovery`(결정적 nodeSelector·attempt annotation 변경, 재개·outcome 판정), `internal/verification`(attempt Pod·Node·EndpointSlice·HTTP·안정화 판정, image pull 실패 분류), `internal/controller`의 Enforce 경로(resourceVersion 조건부 `Update`, 실행 직전 재평가, cooldown·예산·circuit, SUPERSEDED), Enforce 전용 namespace Role `config/rbac/enforce`, Demo A 하네스 `cmd/demo-driver`·`demos/node-failure/run.sh`·[runbook](../demos/node-failure/README.md). 자동 action은 INFRASTRUCTURE_FAILURE에만 적용하고 다른 class는 `MANUAL_REQUIRED`(`CLASS_NOT_AUTOMATED`, 근거 부족은 `INSUFFICIENT_EVIDENCE`)로 닫는다.
+- 로컬 Windows: 단위 테스트와 envtest로 조건부 변경 1회(E8), 변경 전·후 종료 뒤 재개(E9·E10·E21), 외부 변경·workload 교체 SUPERSEDED(E11·E12), 성공 판정과 `oldPodsOutstanding`(E13), PLACEMENT_TIMEOUT·cooldown·예산 소진(E14), 정책 비활성화(E15), image pull 실패·플랫폼 누락(E16), Prometheus 중단(E6), 모든 후보 reject(E18)를 통과했다. 계획했던 E7·E19는 각각 E18·E16에 병합했다. GitHub Actions `verify` job에서도 통과했다.
+- 미실행: 클러스터 배포와 Enforce Role 적용, `run.sh` 라이브 실행, Demo A 양방향 각 5회와 T_detect·T_decide·T_place·T_recover 측정, partition·ACR 인증 만료·ARM manifest 누락의 라이브 부정 시나리오, native ARM 실행. envtest는 기본 Scheduler·kubelet·실제 HTTP 경로를 포함하지 않으므로 P4 DoD는 미완료다.
 
 ## P5 — Application Failure·Evidence·격리
 

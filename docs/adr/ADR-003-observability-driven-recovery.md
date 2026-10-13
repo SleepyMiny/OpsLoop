@@ -1,6 +1,6 @@
 # ADR-003 — Observability-driven Recovery
 
-- 상태: Accepted — Architecture v0.1 설계 결정; 관측 스택 구축, Evaluator·freshness·resource 판단 미구현
+- 상태: Accepted — Architecture v0.1 설계 결정; 관측 스택 구축, Evaluator·freshness·resource 판단은 PR #2에서 코드·테스트 구현(라이브 검증 미실행)
 - 날짜: 2026-10-07
 - 관련: [Architecture](../architecture/architecture-v0.1.md), [ADR-002](ADR-002-runtime-recovery-placement.md), [Implementation Plan](../implementation-plan.md)
 
@@ -39,7 +39,7 @@
 
 CPU headroom, Memory headroom, 새 Pod·reserve를 반영한 requested headroom을 0~1로 계산한다. 초기 가중치는 0.30 / 0.35 / 0.35이며 recent failure penalty를 뺀다. 동점은 안정적인 Node 이름 순서로 해소한다. 세부 기본값은 [Architecture 정책 표](../architecture/architecture-v0.1.md)에 둔다.
 
-초기 scrape 10초, sample age 30초, CPU rate window 60초를 사용하되 실측으로 조정한다. 파생 결과 시각뿐 아니라 원본 sample timestamp·수집 상태를 확인한다. 실행 직전 상태·freshness를 재확인한다.
+초기 scrape 10초, sample age 30초, CPU rate window 60초를 사용하되 실측으로 조정한다. 구현은 window를 `2 × maxSampleAge`로 바꿨다(아래 구현 상태 기록, 구현: PR #2). 파생 결과 시각뿐 아니라 원본 sample timestamp·수집 상태를 확인한다. 실행 직전 상태·freshness를 재확인한다.
 
 ## 결과와 Trade-off
 
@@ -62,3 +62,13 @@ P3에서 경계값·단위·누락·NaN·stale·API 불일치와 ObserveOnly 결
 ## 구현 상태 기록 (2026-10-12)
 
 설계 책임 경계는 유지한다. 기존 수동 구축과 이번 읽기 전용 재검증의 범위는 [P1-B 기록](../experiments/p1-b-local-platform.md) 및 [관측 기록](../experiments/p2-observability-verification.md)을 따른다. 일부 구현은 ADR의 모든 수용시험 통과 또는 P1/P2 전체 완료를 뜻하지 않는다.
+
+## 구현 상태 기록 (2026-10-13)
+
+Candidate Evaluator와 Prometheus 조회를 구현했다. 상세는 [Architecture §8](../architecture/architecture-v0.1.md#8-recoverypolicy-model)·[§11](../architecture/architecture-v0.1.md#11-prometheus--observability)·[§17](../architecture/architecture-v0.1.md#17-demo-application과-시나리오)에 있다.
+
+- CPU rate window는 고정 60초 대신 `W = 2 × maxSampleAge`이며 W 안에 원본 표본 3개 이상을 요구한다. 실측 scrape가 30초라 demo Policy는 `maxSampleAge: 90s`를 쓰고 CRD 기본값은 30초로 둔다. 범위를 벗어난 표본 값은 `METRICS_MISSING`, 5초를 넘는 미래 표본 시각은 `METRICS_STALE`로 거부한다. (구현: PR #2)
+- image index의 플랫폼 manifest 검사는 hard filter에서 하지 않는다. Policy `requiredPlatforms`와 Node label로 `ARCH_MISMATCH`를 판정하고, index의 두 플랫폼은 CI 게시 단계에서 검사하며, 수동 배포된 단일 플랫폼 이미지는 실행 시 pull 실패를 `IMAGE_PLATFORM_MISSING`으로 분류해 cooldown한다. Controller에 registry 조회 권한을 주지 않는 대신 사전 검사가 약해진다. (구현: PR #2)
+- Demo A의 Laptop 방향 부하는 실제 CPU 부하가 아니라 requests 포화다. 배경에서 지적한 대로 CPU 사용률만으로는 requests가 가득 찬 Node를 거르지 못하므로 이 경우를 Kubernetes API 축으로 입증하고, Azure 방향은 실제 CPU 부하로 Prometheus 축을 입증한다. (구현: PR #2)
+- 결과와 Trade-off의 최소 stack 중 OpsLoop 전용 metric은 구현하지 않았다. (구현: PR #2)
+- 증거 범위: 로컬 Windows와 GitHub Actions에서 결측·stale·NaN·범위·미래 시각·중복 series 단위 테스트와 Prometheus 중단 시 WAITING → deadline `FAILED`(envtest)를 통과했다. 실제 Prometheus를 대상으로 한 ObserveOnly 판단과 실제 부하가 반대 Node 선택으로 이어지는지는 검증하지 않았다.
