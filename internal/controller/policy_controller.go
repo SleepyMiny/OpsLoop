@@ -545,7 +545,9 @@ func (r *PolicyReconciler) decide(ctx context.Context, p *v1alpha1.RecoveryPolic
 	}
 	metrics, merr := candidates.QueryMetrics(ctx, r.Prom, now, 2*spec.Filter.MaxSampleAge.Duration)
 	return candidates.Evaluate(candidates.Input{
-		Now:                  now,
+		// Collection can take several Prometheus timeouts. Evaluate against the
+		// clock after collection, not the time captured at reconcile entry.
+		Now:                  r.Now(),
 		Spec:                 spec,
 		RecentFailures:       p.Status.RecentFailures,
 		Attempts:             inc.Status.Runtime.Attempts,

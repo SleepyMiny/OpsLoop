@@ -89,7 +89,7 @@ func (r *PolicyReconciler) startAttempt(ctx context.Context, p *v1alpha1.Recover
 		// The Deployment is untouched; a stale duplicate reservation ends here.
 		return requeueOnConflict(err)
 	}
-	return r.execute(ctx, p, inc, live, now)
+	return r.execute(ctx, p, inc, live, dec)
 }
 
 // resume continues the Reserved attempt found at reconcile start, e.g. after a controller restart (7.3 ②③).
@@ -130,7 +130,7 @@ func (r *PolicyReconciler) resume(ctx context.Context, p *v1alpha1.RecoveryPolic
 	}
 	i := slices.IndexFunc(dec.Candidates, func(c v1alpha1.CandidateEvaluation) bool { return c.NodeUID == a.NodeUID })
 	if i >= 0 && dec.Candidates[i].Eligible {
-		return r.execute(ctx, p, inc, live, now)
+		return r.execute(ctx, p, inc, live, dec)
 	}
 	why := "not a candidate"
 	if i >= 0 {
@@ -146,11 +146,24 @@ func (r *PolicyReconciler) resume(ctx context.Context, p *v1alpha1.RecoveryPolic
 }
 
 // execute is the only Deployment write. The live resourceVersion rides along as the optimistic concurrency precondition.
-func (r *PolicyReconciler) execute(ctx context.Context, p *v1alpha1.RecoveryPolicy, inc *v1alpha1.RecoveryIncident, live *appsv1.Deployment, now time.Time) (ctrl.Result, error) {
+func (r *PolicyReconciler) execute(ctx context.Context, p *v1alpha1.RecoveryPolicy, inc *v1alpha1.RecoveryIncident, live *appsv1.Deployment, dec v1alpha1.RecoveryDecision) (ctrl.Result, error) {
 	if inc.Spec.Policy.Mode != v1alpha1.PolicyModeEnforce || p.Spec.Mode != v1alpha1.PolicyModeEnforce || !p.Spec.Enabled {
 		return ctrl.Result{}, fmt.Errorf("refusing to change Deployment %s: policy is not enabled in Enforce mode", live.Name)
 	}
 	a := lastReserved(inc)
+	// Never authorize a write from the persisted reservation. On resume, dec is
+	// the newly collected evaluation; its winner may differ from the reserved
+	// node, so check that node's own samples, not the winner's expiry.
+	now := r.Now()
+	if !now.Before(inc.Spec.Deadline.Time) {
+		closeAttempt(a, recovery.OutcomeCancelled, now)
+		return r.finish(ctx, p, inc, PhaseFailed, ReasonDeadlineExceeded, "", now)
+	}
+	if !attemptMetricsFresh(dec, a, inc.Spec.Policy.Filter.MaxSampleAge.Duration, now) {
+		// Defer this write without reserving another action. The next reconcile
+		// recollects metrics and either resumes or cancels under the usual rules.
+		return ctrl.Result{RequeueAfter: waitingPeriod}, nil
+	}
 	preRV := live.ResourceVersion
 	recovery.Mutate(&live.Spec.Template, a.Hostname, a.ActionID)
 	if err := r.Update(ctx, live, client.FieldOwner(fieldOwner)); err != nil {
@@ -170,6 +183,30 @@ func (r *PolicyReconciler) execute(ctx context.Context, p *v1alpha1.RecoveryPoli
 		return requeueOnConflict(err)
 	}
 	return ctrl.Result{RequeueAfter: verifyPeriod}, nil
+}
+
+// attemptMetricsFresh is the final, exclusive expiry check at the write boundary.
+// Eligibility (including numeric validity and complete metrics) comes only from
+// the current evaluation. Both raw sample times must still be inside maxAge.
+func attemptMetricsFresh(dec v1alpha1.RecoveryDecision, a *v1alpha1.Attempt, maxAge time.Duration, now time.Time) bool {
+	if a == nil || maxAge <= 0 || dec.DecidedAt.IsZero() {
+		return false
+	}
+	for _, c := range dec.Candidates {
+		if c.NodeUID != a.NodeUID || c.NodeName != a.NodeName || c.Hostname != a.Hostname {
+			continue
+		}
+		if !c.Eligible {
+			return false
+		}
+		for _, ts := range []*metav1.Time{c.Measurements.CPUSampleTime, c.Measurements.MemSampleTime} {
+			if ts == nil || ts.IsZero() || !now.Before(ts.Add(maxAge)) || ts.After(now.Add(5*time.Second)) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // verify observes the attempt Pod once (7.4); a failure re-evaluates in the same reconcile while budget remains.

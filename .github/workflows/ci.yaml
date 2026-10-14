@@ -35,6 +35,10 @@ jobs:
           KUBEBUILDER_ASSETS="$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.2 use 1.35.0 --bin-dir "$RUNNER_TEMP/envtest" -p path)"
           export KUBEBUILDER_ASSETS
           OPSLOOP_REQUIRE_ENVTEST=1 go test ./...
+      - name: Demo A reset safety (mock only)
+        run: |
+          bash -n demos/node-failure/run.sh
+          python3 -B -m unittest discover -s tests -p test_demo_reset.py -v
 
   image:
     runs-on: ubuntu-24.04

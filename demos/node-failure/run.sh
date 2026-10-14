@@ -18,10 +18,13 @@ OPSLOOP_MODE="${OPSLOOP_MODE:-Enforce}"
 OPSLOOP_ARTIFACT_DIR="${OPSLOOP_ARTIFACT_DIR:-./artifacts}"
 read -r -a KUBECTL <<<"${OPSLOOP_KUBECTL:-}"
 
-k() { "${KUBECTL[@]}" "$@"; }
+# Hard outer bound also covers API discovery/connection hangs (longest wait is 300s).
+k() { timeout --kill-after=5s 330s "${KUBECTL[@]}" "$@"; }
 now() { date -u +%FT%T.%NZ; }
 log() { printf '[%s] %s\n' "$(now)" "$*" >&2; }
-psh() { ssh -o BatchMode=yes "$OPSLOOP_PRIMARY_SSH" "$@"; }
+# Bound the whole SSH command, including a stuck systemctl; ConnectTimeout alone
+# would not bound a remote command after the connection succeeds.
+psh() { timeout --kill-after=5s 45s ssh -o BatchMode=yes -o ConnectTimeout=10 "$OPSLOOP_PRIMARY_SSH" "$@"; }
 
 # JSON string literal for free-form command output (no jq on the owner host).
 json_str() {
@@ -112,7 +115,7 @@ done
 case "$OPSLOOP_MODE" in Enforce | ObserveOnly) ;; *) fail "OPSLOOP_MODE must be Enforce or ObserveOnly" ;; esac
 case "${OPSLOOP_IMAGE_CACHE:-}" in warm | cold) ;; *) fail "OPSLOOP_IMAGE_CACHE must be warm or cold" ;; esac
 [[ -x "${OPSLOOP_DRIVER:-}" ]] || fail "OPSLOOP_DRIVER is not an executable file"
-for c in curl ssh sha256sum timedatectl; do command -v "$c" >/dev/null || fail "command not found: $c"; done
+for c in curl ssh sha256sum timedatectl timeout; do command -v "$c" >/dev/null || fail "command not found: $c"; done
 [[ -f "$REPO_ROOT/deploy/owner/kustomization.yaml" ]] || fail "deploy/owner/kustomization.yaml is missing (reset needs it)"
 if [[ " ${LOADS[*]} " == *" reserve-control-requests.yaml "* ]]; then
   # Trust boundary: only a plain milli-CPU value may reach the sed substitution.
@@ -223,47 +226,146 @@ EOF
 write_env
 
 # ---- 6. recovery and reset, armed only after preflight passed ----
-reset_die() {
-  log "RESET FAILED at: $*. Policy may be left disabled (safe state); inspect before the next run."
-  exit 1
+stop_probe() {
+  local i signal pid=$PROBE_PID
+  [[ -n "$pid" ]] || return 0
+  # Never let a stuck probe prevent recovery. Reap only after it has exited;
+  # wait itself has no timeout and could otherwise hold the reset indefinitely.
+  for signal in INT TERM; do
+    kill -"$signal" "$pid" 2>/dev/null || true
+    for ((i = 0; i < 5; i++)); do
+      if ! kill -0 "$pid" 2>/dev/null; then
+        wait "$pid" 2>/dev/null || true
+        PROBE_PID=""
+        return 0
+      fi
+      sleep 1
+    done
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+  PROBE_PID=""
+  log "probe did not exit after INT/TERM; sent KILL; probe output may be incomplete"
+  return 1
 }
 
-stop_probe() {
-  [[ -n "$PROBE_PID" ]] || return 0
-  kill -INT "$PROBE_PID" 2>/dev/null || true
-  wait "$PROBE_PID" 2>/dev/null || true
-  PROBE_PID=""
+# Every step has its own error boundary. Evidence contains fixed step names and
+# exit codes only; failure to write evidence is itself a cleanup failure.
+reset_record() {
+  if ! printf '%s\t%s\n' "$1" "$2" >>"$RUN_DIR/reset.tsv"; then
+    RESET_FAILED=1
+    log "reset: cannot write reset.tsv"
+  fi
+}
+reset_step() {
+  local step=$1 code=0
+  shift
+  "$@" || code=$?
+  reset_record "$step" "$code"
+  if ((code != 0)); then
+    RESET_FAILED=1
+    log "reset: $step failed (exit $code); continuing safety cleanup"
+  fi
+  return "$code"
+}
+reset_policy_disabled() {
+  local state
+  state="$(k -n "$NS" get recoverypolicy "$POLICY" -o jsonpath='{.metadata.uid}|{.spec.enabled}')" || return 1
+  [[ "$state" == "$P_UID|false" ]]
+}
+reset_load_absent() {
+  local pod
+  pod="$(k -n "$NS" get pod "$1" --ignore-not-found -o name)" || return 1
+  [[ -z "$pod" ]]
+}
+reset_incident_released() {
+  local i state
+  for ((i = 0; i < 30; i++)); do
+    # Empty output on an API error is never proof of release or disablement.
+    if state="$(k -n "$NS" get recoverypolicy "$POLICY" -o jsonpath='{.metadata.uid}|{.spec.enabled}|{.status.activeIncident.name}')" &&
+      [[ "$state" == "$P_UID|false|" ]]; then return 0; fi
+    sleep 2
+  done
+  return 1
+}
+reset_primary_pod_ready() {
+  local i
+  for ((i = 0; i < 60; i++)); do
+    single_primary_pod_ready && return 0
+    sleep 5
+  done
+  return 1
+}
+reset_enable_verified() {
+  local state
+  k -n "$NS" patch recoverypolicy "$POLICY" --type=merge -p '{"spec":{"enabled":true}}' || return 1
+  state="$(k -n "$NS" get recoverypolicy "$POLICY" -o jsonpath='{.metadata.uid}|{.spec.enabled}')" || return 1
+  [[ "$state" == "$P_UID|true" ]]
 }
 
 reset_all() {
-  local rc=$? i active
+  local rc=$? pod
   trap - EXIT INT TERM
-  stop_probe
-  log "reset: starting k3s-agent on the Primary (harmless if never stopped)"
-  psh sudo -n systemctl start k3s-agent </dev/null || reset_die "systemctl start k3s-agent"
-  k wait --for=condition=Ready "node/$PRIMARY" --timeout=300s || reset_die "Primary Ready"
-  k -n "$NS" delete pod "${LOAD_PODS[@]}" --ignore-not-found --grace-period=1 || reset_die "delete load Pods"
+  RESET_FAILED=0
+  reset_record original_exit "$rc"
+  # First try to restore the Primary, even when injection failed halfway.
+  # Command success alone does not prove that its service or Node is healthy.
+  reset_step start_primary psh sudo -n systemctl start k3s-agent </dev/null || true
 
-  k -n "$NS" patch recoverypolicy "$POLICY" --type=merge -p '{"spec":{"enabled":false}}' || reset_die "disable policy"
-  for ((i = 0; i < 30; i++)); do
-    # A failed get also prints nothing; only a successful empty read means released.
-    if active="$(k -n "$NS" get recoverypolicy "$POLICY" -o jsonpath='{.status.activeIncident.name}')" && [[ -z "$active" ]]; then break; fi
-    sleep 2
+  # These safety measures are independent, including each individual load Pod.
+  # Disable before waiting for Ready so a failed Primary cannot prolong Enforce.
+  reset_step disable_policy k -n "$NS" patch recoverypolicy "$POLICY" --type=merge -p '{"spec":{"enabled":false}}' || true
+  reset_step policy_disabled reset_policy_disabled || true
+  for pod in "${LOAD_PODS[@]}"; do
+    reset_step "delete_$pod" k -n "$NS" delete pod "$pod" --ignore-not-found --grace-period=1 --timeout=60s || true
+    reset_step "absent_$pod" reset_load_absent "$pod" || true
   done
-  ((i < 30)) || reset_die "activeIncident not released within 60s"
+  reset_step stop_probe stop_probe || true
+  reset_step primary_service psh sudo -n systemctl is-active --quiet k3s-agent </dev/null || true
+  reset_step primary_ready k wait --for=condition=Ready "node/$PRIMARY" --timeout=300s || true
+  reset_step incident_released reset_incident_released || true
 
-  k apply --server-side --field-manager=opsloop-deploy --force-conflicts -k "$REPO_ROOT/deploy/owner" || reset_die "apply deploy/owner"
-
-  for ((i = 0; i < 60; i++)); do
-    single_primary_pod_ready && break
-    sleep 5
-  done
-  ((i < 60)) || reset_die "single Ready demo-api Pod on $PRIMARY within 300s"
-
-  k -n "$NS" patch recoverypolicy "$POLICY" --subresource=status --type=merge \
-    -p '{"status":{"circuits":null,"recentFailures":null}}' || reset_die "clear circuits/recentFailures"
-  k -n "$NS" patch recoverypolicy "$POLICY" --type=merge -p '{"spec":{"enabled":true}}' || reset_die "enable policy"
-  log "reset: done"
+  # Only a verified safe baseline permits resetting workload placement/ledgers.
+  # deploy/owner must exclude RecoveryPolicy, as required by its example.
+  if ((RESET_FAILED == 0)); then
+    reset_step apply_owner k apply --server-side --field-manager=opsloop-deploy --force-conflicts -k "$REPO_ROOT/deploy/owner" || true
+    reset_step policy_still_disabled reset_policy_disabled || true
+    reset_step primary_pod_ready reset_primary_pod_ready || true
+  fi
+  if ((RESET_FAILED == 0)); then
+    reset_step clear_ledger k -n "$NS" patch recoverypolicy "$POLICY" --subresource=status --type=merge \
+      -p '{"status":{"circuits":null,"recentFailures":null}}' || true
+  fi
+  if ((RESET_FAILED == 0)); then
+    # Recheck conditions after potentially slow apply/rollout/ledger operations.
+    reset_step final_primary_service psh sudo -n systemctl is-active --quiet k3s-agent </dev/null || true
+    reset_step final_primary_ready node_ready "$PRIMARY" || true
+    reset_step final_primary_pod single_primary_pod_ready || true
+    reset_step final_policy reset_incident_released || true
+    for pod in "${LOAD_PODS[@]}"; do reset_step "final_absent_$pod" reset_load_absent "$pod" || true; done
+  fi
+  if ((RESET_FAILED == 0)); then
+    reset_step enable_policy reset_enable_verified || true
+  fi
+  if ((RESET_FAILED != 0)); then
+    # An enable request can succeed remotely but return an error locally.
+    # Always try disabling again; never claim it succeeded without a readback.
+    reset_step fallback_disable k -n "$NS" patch recoverypolicy "$POLICY" --type=merge -p '{"spec":{"enabled":false}}' || true
+    reset_step fallback_disabled reset_policy_disabled || true
+    log "RESET FAILED: inspect reset.tsv; Policy disablement and Primary recovery must be confirmed before the next run."
+    reset_record cleanup_exit 1
+    # Preserve a prior failure/signal code; otherwise expose cleanup failure.
+    ((rc != 0)) || rc=1
+  else
+    reset_record cleanup_exit 0
+    # The final evidence write may fail too; never return success without it.
+    if ((RESET_FAILED != 0)); then
+      reset_step fallback_disable k -n "$NS" patch recoverypolicy "$POLICY" --type=merge -p '{"spec":{"enabled":false}}' || true
+      reset_step fallback_disabled reset_policy_disabled || true
+      ((rc != 0)) || rc=1
+    else
+      log "reset: done (service, Node, workload and Policy verified)"
+    fi
+  fi
   exit "$rc"
 }
 trap reset_all EXIT
