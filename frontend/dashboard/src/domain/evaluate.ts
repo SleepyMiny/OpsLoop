@@ -21,6 +21,8 @@ import type {
  */
 export interface EvaluationInput {
   nodes: ClusterNode[];
+  /** Live previews require raw exporter inputs; legacy Demo ratios are presentation simulations. */
+  requireRawMetrics?: boolean;
   workload: WorkloadStatus;
   policy: RecoveryPolicySpec;
   now: number;
@@ -56,17 +58,24 @@ const MAX_CLOCK_SKEW_SECONDS = 5;
 function sampleAgeSeconds(sample: MetricSample, now: number): number | null {
   if (typeof sample.value !== 'number' || !Number.isFinite(sample.value)) return null;
   if (typeof sample.observedAt !== 'number' || !Number.isFinite(sample.observedAt)) return null;
-  const age = (now - sample.observedAt) / 1000;
+  if (Math.round(sample.observedAt) <= 0 || Math.round(sample.observedAt) >= 253402300800000) return null;
+  const age = (now - Math.round(sample.observedAt)) / 1000;
   if (age < -MAX_CLOCK_SKEW_SECONDS) return Number.POSITIVE_INFINITY;
   return Math.max(0, age);
 }
 
-function finitePositive(x: unknown): x is number {
-  return typeof x === 'number' && Number.isFinite(x) && x > 0;
+// All arithmetic that decides resource capacity uses exact integers. Fractional
+// simulated requests round up like resource.Quantity.Value()/MilliValue().
+function resourceInteger(x: unknown): bigint | null {
+  return typeof x === 'number' && Number.isFinite(x) && x >= 0 && Number.isSafeInteger(Math.ceil(x))
+    ? BigInt(Math.ceil(x)) : null;
 }
 
-function finiteNonNegative(x: unknown): x is number {
-  return typeof x === 'number' && Number.isFinite(x) && x >= 0;
+function requestHeadroom(alloc: unknown, requested: unknown, extra: unknown, reserve: number) {
+  const a = resourceInteger(alloc), r = resourceInteger(requested), e = resourceInteger(extra);
+  if (a === null || a <= 0n || r === null || e === null || !Number.isFinite(reserve) || reserve < 0 || reserve > 1) return null;
+  const remaining = a - a * BigInt(Math.round(reserve * 100)) / 100n - r - e;
+  return { ratio: Number(remaining) / Number(a), permille: Number(remaining > 0n ? remaining * 1000n / a : 0n) };
 }
 
 function tolerates(taint: Taint, tolerations: Toleration[]): boolean {
@@ -95,6 +104,7 @@ export function evaluateCandidate(node: ClusterNode, input: EvaluationInput): Ca
   const { workload, policy, now } = input;
   const reasons = new Set<RejectReason>();
 
+  if (!node.hostnameLabel) reasons.add('UNSUPPORTED_CONSTRAINT');
   if (node.readiness !== 'Ready') reasons.add('NODE_NOT_READY');
   if (node.unschedulable) reasons.add('UNSCHEDULABLE');
 
@@ -119,16 +129,42 @@ export function evaluateCandidate(node: ClusterNode, input: EvaluationInput): Ca
   const ages = samples.map((s) => sampleAgeSeconds(s, now));
   if (ages.some((a) => a === null)) reasons.add('METRICS_MISSING');
   if (ages.some((a) => a !== null && a > policy.filter.maxSampleAgeSeconds)) reasons.add('METRICS_STALE');
-  const metricsUsable = !reasons.has('METRICS_MISSING') && !reasons.has('METRICS_STALE');
-
   const finiteOrNull = (x: number | null): number | null =>
     typeof x === 'number' && Number.isFinite(x) ? x : null;
-  const cpu = finiteOrNull(node.usage.cpu.value);
-  const mem = finiteOrNull(node.usage.memory.value);
-  const memAvailable = finiteOrNull(node.usage.memAvailableBytes.value);
+  const rawCPU = finiteOrNull(node.usage.cpu.value);
+  // assessMetrics clamps then rounds to integer permille before filtering/scoring.
+  const cpu = rawCPU === null ? null : Math.round(clamp01(rawCPU) * 1000) / 1000;
+  let mem = finiteOrNull(node.usage.memory.value);
+  const rawAvailable = finiteOrNull(node.usage.memAvailableBytes.value);
+  // Check the raw float before truncation, exactly as Go assessMetrics does.
+  const maxMemoryBytes = 2 ** 50;
+  const availableValid = rawAvailable !== null && rawAvailable >= 0 && rawAvailable <= maxMemoryBytes;
+  const memAvailable = availableValid ? Math.trunc(rawAvailable) : null;
+  const rawTotal = node.usage.memTotalBytes;
+  const hasRawTotal = rawTotal !== undefined;
+  let memHeadroomPermille: number | undefined;
+  let memoryPressure: boolean | undefined;
+  if (hasRawTotal) {
+    if (typeof rawTotal !== 'number' || !Number.isSafeInteger(Math.trunc(rawTotal)) || rawTotal < 1 || rawTotal > maxMemoryBytes ||
+        memAvailable === null || !Number.isSafeInteger(memAvailable) || memAvailable < 0 || memAvailable > Math.trunc(rawTotal)) {
+      reasons.add('METRICS_MISSING');
+    } else {
+      const total = BigInt(Math.trunc(rawTotal)), available = BigInt(memAvailable);
+      mem = 1 - Number(available) / Number(total);
+      memHeadroomPermille = Number((1000n * available + total / 2n) / total);
+      memoryPressure = (total - available) * 100n > BigInt(Math.round(policy.filter.maxMemoryUtilization * 100)) * total;
+    }
+  } else if (input.requireRawMetrics) reasons.add('METRICS_MISSING');
+  if (mem === null || mem < 0 || mem > 1 || memAvailable === null || memAvailable < 0 || !Number.isSafeInteger(memAvailable)) reasons.add('METRICS_MISSING');
+  const count = node.usage.cpuSampleCount;
+  if ((count !== undefined || input.requireRawMetrics) && (typeof count !== 'number' || !Number.isFinite(count) || count < 3 || count > 2147483647)) reasons.add('METRICS_MISSING');
+  const up = node.usage.exporterUp;
+  if ((up !== undefined || input.requireRawMetrics) && (typeof up !== 'number' || !Number.isFinite(up))) reasons.add('METRICS_MISSING');
+  if (up === 0) reasons.add('METRICS_STALE');
+  const metricsUsable = !reasons.has('METRICS_MISSING') && !reasons.has('METRICS_STALE');
 
   if (metricsUsable && cpu !== null && cpu > policy.filter.maxCPUUtilization) reasons.add('CPU_PRESSURE');
-  if (metricsUsable && mem !== null && mem > policy.filter.maxMemoryUtilization) reasons.add('MEMORY_PRESSURE');
+  if (metricsUsable && mem !== null && (memoryPressure ?? (mem > policy.filter.maxMemoryUtilization))) reasons.add('MEMORY_PRESSURE');
   if (
     metricsUsable &&
     memAvailable !== null &&
@@ -141,24 +177,12 @@ export function evaluateCandidate(node: ClusterNode, input: EvaluationInput): Ca
   // Unparseable quantities (e.g. an unconverted resource.Quantity string) cannot
   // prove capacity, so they reject instead of passing as NaN.
   const reserve = policy.filter.requestedCapacityReserve;
-  const headroom = (alloc: unknown, requested: unknown, extra: unknown): number | null =>
-    finitePositive(alloc) && finiteNonNegative(requested) && finiteNonNegative(extra)
-      ? (alloc * (1 - reserve) - (requested + extra)) / alloc
-      : null;
-  const cpuHeadroomRaw = headroom(
-    node.allocatable.cpuMillicores,
-    node.requested.cpuMillicores,
-    workload.requests.cpuMillicores,
-  );
-  const memHeadroomRaw = headroom(
-    node.allocatable.memoryBytes,
-    node.requested.memoryBytes,
-    workload.requests.memoryBytes,
-  );
-  if (cpuHeadroomRaw === null || cpuHeadroomRaw < 0) reasons.add('INSUFFICIENT_REQUESTED_CPU');
-  if (memHeadroomRaw === null || memHeadroomRaw < 0) reasons.add('INSUFFICIENT_REQUESTED_MEMORY');
-  const requestedCpuHeadroom = cpuHeadroomRaw ?? 0;
-  const requestedMemoryHeadroom = memHeadroomRaw ?? 0;
+  const cpuRoom = requestHeadroom(node.allocatable.cpuMillicores, node.requested.cpuMillicores, workload.requests.cpuMillicores, reserve);
+  const memRoom = requestHeadroom(node.allocatable.memoryBytes, node.requested.memoryBytes, workload.requests.memoryBytes, reserve);
+  if (cpuRoom === null || cpuRoom.ratio < 0) reasons.add('INSUFFICIENT_REQUESTED_CPU');
+  if (memRoom === null || memRoom.ratio < 0) reasons.add('INSUFFICIENT_REQUESTED_MEMORY');
+  const requestedCpuHeadroom = cpuRoom?.ratio ?? 0;
+  const requestedMemoryHeadroom = memRoom?.ratio ?? 0;
 
   const cooling = (input.cooldowns ?? []).some(
     (c) => c.workloadUid === workload.uid && c.nodeName === node.name && c.until > now,
@@ -197,6 +221,8 @@ export function evaluateCandidate(node: ClusterNode, input: EvaluationInput): Ca
       requestedHeadroom: Math.min(requestedCpuHeadroom, requestedMemoryHeadroom),
       failures,
       policy,
+      memoryHeadroomPermille: memHeadroomPermille,
+      requestedHeadroomPermille: Math.min(cpuRoom!.permille, memRoom!.permille),
     });
     if (Number.isFinite(score.total)) evaluation.score = score;
   }
@@ -208,26 +234,28 @@ export function scoreCandidate(args: {
   memoryUtilization: number;
   requestedHeadroom: number;
   failures: number;
+  memoryHeadroomPermille?: number;
+  requestedHeadroomPermille?: number;
   policy: RecoveryPolicySpec;
 }): ScoreBreakdown {
   const { cpuWeight, memoryWeight, requestsWeight, recentFailurePenalty, recentFailurePenaltyCap } =
     args.policy.score;
-  const cpuHeadroom = clamp01(1 - args.cpuUtilization);
-  const memoryHeadroom = clamp01(1 - args.memoryUtilization);
-  const requestedHeadroom = clamp01(args.requestedHeadroom);
-  const weighted = {
-    cpu: round(100 * cpuWeight * cpuHeadroom, 2),
-    memory: round(100 * memoryWeight * memoryHeadroom, 2),
-    requests: round(100 * requestsWeight * requestedHeadroom, 2),
+  const cpuPermille = 1000 - Math.round(clamp01(args.cpuUtilization) * 1000);
+  const memoryPermille = args.memoryHeadroomPermille ?? Math.round(clamp01(1 - args.memoryUtilization) * 1000);
+  const requestedPermille = args.requestedHeadroomPermille ?? Math.floor(clamp01(args.requestedHeadroom) * 1000);
+  const weightedMilli = {
+    cpu: Math.round(cpuWeight * 100) * cpuPermille,
+    memory: Math.round(memoryWeight * 100) * memoryPermille,
+    requests: Math.round(requestsWeight * 100) * requestedPermille,
   };
   const penalty = Math.min(recentFailurePenalty * args.failures, recentFailurePenaltyCap ?? Number.POSITIVE_INFINITY);
   return {
-    cpuHeadroom: round(cpuHeadroom),
-    memoryHeadroom: round(memoryHeadroom),
-    requestedHeadroom: round(requestedHeadroom),
-    weighted,
+    cpuHeadroom: cpuPermille / 1000,
+    memoryHeadroom: memoryPermille / 1000,
+    requestedHeadroom: requestedPermille / 1000,
+    weighted: { cpu: weightedMilli.cpu / 1000, memory: weightedMilli.memory / 1000, requests: weightedMilli.requests / 1000 },
     penalty,
-    total: round(weighted.cpu + weighted.memory + weighted.requests - penalty, 2),
+    total: (weightedMilli.cpu + weightedMilli.memory + weightedMilli.requests - penalty * 1000) / 1000,
   };
 }
 

@@ -1,3 +1,5 @@
+import { parseMemoryQuantity } from './quantity';
+export { parseMemoryQuantity } from './quantity';
 import type {
   ActionAttempt,
   ActionResult,
@@ -62,24 +64,6 @@ export function parseDuration(value: string, path: string): number {
   return total;
 }
 
-const QUANTITY_SUFFIX: Record<string, number> = {
-  '': 1,
-  Ki: 1024,
-  Mi: 1024 ** 2,
-  Gi: 1024 ** 3,
-  Ti: 1024 ** 4,
-  k: 1e3,
-  M: 1e6,
-  G: 1e9,
-  T: 1e12,
-};
-
-/** Kubernetes memory quantity ("512Mi", "1Gi", "268435456") to bytes. */
-export function parseMemoryQuantity(value: string, path: string): number {
-  const m = /^(\d+(?:\.\d+)?)(Ki|Mi|Gi|Ti|k|M|G|T)?$/.exec(value);
-  if (!m) throw new Error(`${path} must be a memory quantity (e.g. 512Mi)`);
-  return Math.round(Number(m[1]) * QUANTITY_SUFFIX[m[2] ?? '']!);
-}
 
 function archOf(platform: string, path: string): Arch {
   if (platform === 'linux/amd64') return 'amd64';

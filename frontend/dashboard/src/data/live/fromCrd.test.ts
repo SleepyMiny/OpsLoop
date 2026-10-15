@@ -1,6 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { buildBoardModel, evaluateNow } from '../../components/candidates/model';
 import { CandidateBoard } from '../../components/candidates/CandidateBoard';
 import { ClusterMimic } from '../../components/cluster/ClusterMimic';
 import { EngineeringTrack } from '../../components/engineering/EngineeringTrack';
@@ -316,6 +317,36 @@ describe('parseSnapshot with CRD objects from a BFF', () => {
       driverReports: [{ incident: 'demo-api-recovery-0007', faultInjectedAt: '2026-10-13T05:00:14Z' }],
     };
   }
+
+  it('preserves a stored Controller decision when current Live metrics cannot be evaluated', () => {
+    const snapshot = parseSnapshot(liveBody('OBSERVED'));
+    const recorded = structuredClone(snapshot.activeIncident!.status.runtime.decision!);
+    // The older BFF payload lacks the raw inputs required for a trustworthy preview.
+    expect(evaluateNow(snapshot).selected).toBeNull();
+    expect(evaluateNow(snapshot).candidates.every(c => c.rejectReasons.includes('METRICS_MISSING'))).toBe(true);
+    const model = buildBoardModel(snapshot);
+    expect(model.kind).toBe('decision');
+    expect(model.rows.find(r => r.winner)?.nodeName).toBe('opsloop-control');
+    expect(model.rows.find(r => r.winner)?.score?.total).toBe(54.245);
+    expect(snapshot.activeIncident!.status.runtime.decision).toEqual(recorded);
+  });
+
+  it('converts exponent and fractional byte policy quantities through the Live adapter', () => {
+    const body = liveBody('OBSERVED');
+    body.policy.spec.filter.minimumAvailableMemory = '1e6';
+    body.policy.spec.filter.startupMemoryBudget = '1m';
+    const snapshot = parseSnapshot(body);
+    expect(snapshot.policy.spec.filter.minimumAvailableMemoryBytes).toBe(1000000);
+    expect(snapshot.policy.spec.filter.startupMemoryBudgetBytes).toBe(1);
+    body.policy.spec.filter.minimumAvailableMemory = '9007199254740991.1';
+    expect(() => parseSnapshot(body)).toThrow(/minimumAvailableMemory.*safe integer/);
+  });
+
+  it('rejects invalid raw metric metadata rather than presenting it as normal', () => {
+    const body = liveBody('OBSERVED');
+    body.cluster.nodes[0].usage.memTotalBytes = Number.NaN;
+    expect(() => parseSnapshot(body)).toThrow(/memTotalBytes/);
+  });
 
   it('converts the CRDs and every region renders the live snapshot', () => {
     for (const phase of ['RECOVERED', 'OBSERVED', 'WAITING'] as const) {

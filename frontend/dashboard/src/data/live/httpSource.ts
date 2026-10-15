@@ -233,6 +233,12 @@ function validateNode(node: unknown, path: string): void {
   validateSample(node.usage.cpu, `${path}.usage.cpu`);
   validateSample(node.usage.memory, `${path}.usage.memory`);
   validateSample(node.usage.memAvailableBytes, `${path}.usage.memAvailableBytes`);
+  for (const field of ['memTotalBytes', 'cpuSampleCount', 'exporterUp']) {
+    const value = node.usage[field];
+    if (value !== undefined && value !== null && (typeof value !== 'number' || !Number.isFinite(value))) {
+      throw new Error(`${path}.usage.${field} must be a finite number or null`);
+    }
+  }
   if (!Array.isArray(node.pods)) throw new Error(`${path}.pods missing`);
   validateOptionalArray(
     node.taints,

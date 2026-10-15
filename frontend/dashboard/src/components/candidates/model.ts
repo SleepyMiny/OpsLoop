@@ -515,12 +515,13 @@ export interface BoardModel {
   aside: { label: string; code: string | null; lamp: LampState };
 }
 
-/** Live evaluation of the current cluster, the same way the Runtime would run it now. */
+/** Current-state preview only. Persisted Controller decisions use decisionModel unchanged. */
 export function evaluateNow(snapshot: DashboardSnapshot) {
   const incident = snapshot.activeIncident;
   const trigger = incident?.spec.trigger;
   const input: EvaluationInput = {
     nodes: snapshot.cluster.nodes,
+    requireRawMetrics: snapshot.source === 'live',
     workload: snapshot.workload,
     policy: snapshot.policy.spec,
     now: snapshot.observedAt,

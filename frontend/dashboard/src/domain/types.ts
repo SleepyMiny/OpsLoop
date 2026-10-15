@@ -102,6 +102,10 @@ export interface ClusterNode {
     /** 0..1, 1 - MemAvailable/MemTotal. */
     memory: MetricSample;
     memAvailableBytes: MetricSample;
+    /** Raw exporter data required for exact Live preview parity with the Go evaluator. */
+    memTotalBytes?: number | null;
+    cpuSampleCount?: number | null;
+    exporterUp?: number | null;
   };
   /** Recent scrape history (oldest first) for sparklines; optional for live sources. */
   usageHistory?: UsagePoint[];

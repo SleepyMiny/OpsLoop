@@ -47,7 +47,7 @@ Go CRD 타입은 백엔드 브랜치 `claude/orchestrate-project-status-e3aa92`�
 | --- | --- | --- |
 | `metav1.Time` (RFC 3339) | epoch ms | `Date.parse`, 실패 시 필드 경로를 담은 오류 |
 | `metav1.Duration` (`"20s"`, `"30m"`) | 초 | Go duration 파서 |
-| `resource.Quantity` (`"512Mi"`) | bytes | Ki/Mi/Gi/Ti, k/M/G/T, 정수 |
+| `resource.Quantity` (`"512Mi"`) | bytes | DecimalSI(n/u/m/k/M/G/T/P/E), BinarySI(Ki..Ei), 지수 표기(1e6). 양수 소수 bytes는 Go Value()처럼 올림. 음수·숫자 없는 표기·안전 정수 범위 초과는 필드 경로 오류 |
 | 정책 percent(`maxCPUUtilizationPercent: 85`), 가중치 합 100 | 0..1 | ÷ 100 |
 | `cpuUtilizationPermille`, `*HeadroomPermille` | 0..1 | ÷ 1000 |
 | `scoreMilli`, `penaltyMilli` | 점 | ÷ 1000. 가중 기여도는 `spec.policy` 가중치로 다시 계산 |
@@ -75,3 +75,27 @@ v1alpha1에 아직 없는 정책 항목(격리, Engineering)은 화면에서 "�
 - 응답은 오지만 `observedAt`이 polling 3회(15초)보다 오래됨 → `stale`, 헤더 배지 "데이터 지연".
 - 시각·수량이 숫자가 아니거나(변환되지 않은 RFC 3339·`resource.Quantity`), arch·readiness·pressure가 알 수 없는 값 → 해당 필드 경로를 담은 오류로 거부한다(`parseSnapshot`). NaN으로 계산하거나 모르는 라벨을 그리지 않는다.
 - 평가 함수도 같은 원칙을 따른다: 숫자가 아닌 표본은 `METRICS_MISSING`, 5초 넘게 미래인 표본은 `METRICS_STALE`, 해석할 수 없는 allocatable은 `INSUFFICIENT_REQUESTED_*`로 거부한다.
+
+## Live 후보 미리보기의 정수 계약
+
+Controller가 저장한 `runtime.decision`은 현재 메트릭으로 다시 평가하지 않는다.
+후보의 적격 여부, rejectReasons, selectedNodeUID, scoreMilli를 그대로 표시한다.
+현재 후보 미리보기는 별도의 계산이며 Controller의 실행 권한을 대신하지 않는다.
+
+Live BFF는 `cluster.nodes[].usage`에 기존 cpu/memory/memAvailableBytes 외에
+`memTotalBytes`(원본 총 메모리 bytes), `cpuSampleCount`(CPU 쿼리 표본 수),
+`exporterUp`(원본 up 값)을 제공해야 한다. 숫자 또는 null이며, 누락·null은
+미리보기에서 METRICS_MISSING으로 처리한다. 기존 payload도 저장 Decision 표시는
+가능하지만 이 세 값 없이 현재 후보를 적격이라고 추정하지 않는다.
+BFF는 각 쿼리의 노드당 단일 결과, CPU/메모리 원본 시각을 보존해야 한다.
+메모리 observedAt은 available/total 중 오래된 시각이어야 한다. 중복 시리즈나
+쿼리 오류를 임의의 첫 값으로 축약하지 말고 null로 전달한다.
+
+CPU는 clamp 후 정수 permille 반올림, reserve는 정수 percent 곱의 내림,
+요청 headroom은 정수 permille 내림, 메모리 headroom은 정수 반올림으로 계산한다.
+점수는 Go의 scoreMilli를 따라 0.001점까지 유지하고 동점은 노드 이름 순이다.
+Demo의 합성 비율 fallback은 Live의 원본 메트릭 계약과 구분한다.
+숫자 모델의 최대 byte 값은 Number.MAX_SAFE_INTEGER이다. 그보다 큰 유효한
+Kubernetes Quantity도 오류로 표시하며 반올림 손실을 숨기지 않는다.
+
+Go b4fb78d 기준 계약 벡터 및 재생성 방법: [contracts/README.md](../contracts/README.md).
