@@ -1,6 +1,6 @@
 # ADR-002 — Runtime Recovery Placement
 
-- 상태: Accepted — Architecture v0.1 설계 결정, 미구현
+- 상태: Accepted — Architecture v0.1 설계 결정; PR #2에서 코드·envtest 구현, 클러스터 수용시험 미실행
 - 날짜: 2026-10-07
 - 관련: [Architecture](../architecture/architecture-v0.1.md), [ADR-003](ADR-003-observability-driven-recovery.md), [Implementation Plan](../implementation-plan.md)
 
@@ -18,7 +18,7 @@ OpsLoop는 실시간 자원 상태로 Recovery Target을 선택해야 한다. Ku
 - `RollingUpdate`, `maxSurge=1`, `maxUnavailable=0`을 사용한다.
 - 고유 `opsloop.io/attempt-id` annotation으로 동일 Node restart와 새 ReplicaSet을 구분한다.
 - 기본 kubelet restart·eviction을 유지하고 OpsLoop action 예산과 별도로 기록한다.
-- intent를 먼저 저장하고 UID·baseline template/image·resourceVersion 사전조건을 검증해 변경한다.
+- intent를 먼저 저장하고 UID·baseline template/image·resourceVersion 사전조건을 검증해 변경한다. 구현은 resourceVersion을 실은 `Update`를 쓴다(아래 구현 상태 기록, 구현: PR #2).
 - 외부 desired state 변경은 SUPERSEDED로 중단한다. force delete와 자동 failback은 하지 않는다.
 
 ## 고려한 대안
@@ -54,3 +54,11 @@ P4에서 Demo A 양방향 각 5회, patch 직후 재시작, 중복 action, 외�
 
 - [Kubernetes Assigning Pods to Nodes](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/)
 - [Kubernetes Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
+
+## 구현 상태 기록 (2026-10-13)
+
+결정의 책임 경계는 유지한다. 구현에서 구체화하거나 달라진 점은 다음과 같다. 상세는 [Architecture §7](../architecture/architecture-v0.1.md#7-runtime-recovery-state-machine)과 [§14](../architecture/architecture-v0.1.md#14-security-boundary)에 있다.
+
+- "patch"는 JSON Patch `test` 대신 live resourceVersion을 실은 Deployment `Update`로 구현했다. 선택 hostname label 값의 nodeSelector와 `opsloop.io/attempt-id` annotation을 결정적으로 기록한다. Controller ClusterRole은 Deployment를 읽기만 하고, 쓰기는 Enforce 승인 뒤 적용하는 namespace Role의 verb `update`(대상 `demo-api` 한 개)로 한정한다. (구현: PR #2)
+- 외부 desired-state 변경은 template을 제외한 spec 전체의 `SpecHash`와 `TemplateHash`로 감지해 SUPERSEDED로 중단한다. 재개는 예약 시 계산한 `targetTemplateHash`로 이미 적용했는지 판정하며, terminal 진입 시 남은 Reserved attempt는 `ReservedOutcome`으로 `Patched`·`Cancelled`·`Superseded` 중 하나로 확정한다. (구현: PR #2)
+- 증거 범위: envtest(kube-apiserver 1.35.0)로 조건부 변경 1회, 변경 전·후 종료 뒤 재개, 외부 image·replicas·paused 변경과 workload 교체의 SUPERSEDED, Pending의 `PLACEMENT_TIMEOUT`, 구 Pod가 남은 상태의 성공 판정을 확인했다. envtest에는 기본 Scheduler·kubelet이 없으므로 이 ADR의 Demo A 양방향 5회, partition, old Pod 종료 지연의 실제 cluster 검증은 실행하지 않았다.

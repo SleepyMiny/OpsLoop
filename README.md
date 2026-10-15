@@ -4,7 +4,9 @@
 
 OpsLoop는 Kubernetes 장애를 근거 기반 규칙으로 분류하고, 자원 상태를 고려한 Runtime Recovery를 시도하도록 설계된 프로젝트입니다. 운영 단계에서 해결되지 않는 반복 Application Failure만 독립된 Engineering Runner로 넘겨 Evidence 수집, 코드 분석·수정, Build/Test Feedback, Verification, Pull Request 생성으로 연결합니다.
 
-> **현재 상태 (2026-10-13): P1-B 로컬 AMD64 2-Node k3s와 P2 Observability 부분 구축, Azure Remote Backend 연결 완료.** 10월 12일 조회에서 Helm values 일치, PVC Bound, 관측 Pod 정상 및 Prometheus Targets 17개 UP를 확인했으며 이는 당시 관측값입니다. 10월 13일에는 `opsloop-control`·`sarmubuntuserver`의 Ready, Tailscale Node IP, k3s `v1.35.9+k3s1`을 재확인했습니다. Control Plane → Worker Pod HTTP/DNS와 Grafana 화면 시각화는 사용자 제공 증거로 구분합니다. 승인된 실제 backend init/validate와 빈 Remote State 연결 검증은 통과했습니다. Azure ARM64·ACR/OIDC는 미구축이어서 **P1 전체 미완료**, Demo API·Multi-Arch CI는 미구현이어서 **P2 전체 미완료**입니다. CRD·Controller·Runner와 P3~P8 기능도 저장소에 구현되어 있지 않습니다.
+> **현재 상태 (2026-10-13): P1-B 로컬 AMD64 2-Node k3s와 P2 Observability 부분 구축, Azure Remote Backend 연결 완료.** 10월 12일 조회에서 Helm values 일치, PVC Bound, 관측 Pod 정상 및 Prometheus Targets 17개 UP를 확인했으며 이는 당시 관측값입니다. 10월 13일에는 `opsloop-control`·`sarmubuntuserver`의 Ready, Tailscale Node IP, k3s `v1.35.9+k3s1`을 재확인했습니다. Control Plane → Worker Pod HTTP/DNS와 Grafana 화면 시각화는 사용자 제공 증거로 구분합니다. 승인된 실제 backend init/validate와 빈 Remote State 연결 검증은 통과했습니다. Azure ARM64·ACR/OIDC는 미구축이어서 **P1 전체 미완료**입니다.
+>
+> **P2~P4는 코드·테스트까지 구현했고 라이브 수용은 실행하지 않았습니다.** [PR #2](https://github.com/SleepyMiny/OpsLoop/pull/2)에서 Go Demo API·Multi-Arch 이미지·CI(P2), RecoveryPolicy/RecoveryIncident CRD·분류·후보 평가·ObserveOnly Controller(P3), Enforce Runtime Recovery·Demo A 하네스(P4)를 추가했습니다. 로컬 Windows에서 `go build`·`go vet`, 전 패키지 `go test`, envtest(kube-apiserver 1.35.0)로 CRD 설치와 E1–E27 통합 시나리오(E7·E19는 E18·E16에 병합), linux/amd64·arm64 cross-compile, kustomize 렌더, actionlint를 통과했습니다. PR #2의 GitHub Actions에서는 verify·image job(Docker 빌드와 QEMU emulated smoke 포함)이 통과했고, publish job은 main push 전용이라 실행되지 않았습니다. ACR 게시, Azure Apply·ARM worker join, 클러스터 배포, ObserveOnly 라이브 실행, Demo A 실측(5회 반복), native ARM 실행은 하지 않았으므로 **P2·P3·P4 DoD는 미완료**입니다. Engineering Runner와 P5~P8은 미착수입니다.
 
 ## 프로젝트의 중심
 
@@ -47,7 +49,7 @@ Tailscale 실험망과 Multi-Architecture 이미지를 사용합니다. 이 구�
 - **Demo A — Node Failure:** Physical Server 장애 후, CPU·Memory 상태에 따라 Laptop VM 또는 Azure ARM64 Node를 선택합니다. 후보별 reject reason과 실제 HTTP 복구를 검증합니다.
 - **Demo B — Application Failure:** 고정 입력으로 Application Crash를 반복 재현합니다. Runtime 예산 소진, Evidence 보존, workload 격리, Engineering Feedback loop를 거쳐 검증된 PR을 생성합니다.
 
-두 Demo 모두 아직 구현·실행되지 않았습니다.
+Demo A는 Controller의 Enforce 경로와 하네스(`cmd/demo-driver`, `demos/node-failure/run.sh`, [runbook](demos/node-failure/README.md))를 구현했지만 라이브 실행과 5회 반복 측정은 하지 않았습니다. Demo B는 구현하지 않았습니다.
 
 ## 핵심 설계 결정
 
@@ -70,6 +72,9 @@ Tailscale 실험망과 Multi-Architecture 이미지를 사용합니다. 이 구�
 | [ADR-003: Observability 기반 복구](docs/adr/ADR-003-observability-driven-recovery.md) | 데이터 권위, filter, score, freshness |
 | [ADR-004: Engineering 경계](docs/adr/ADR-004-engineering-recovery-boundary.md) | Runner, Codex, 검증·게시 권한 분리 |
 | [ADR-005: Hybrid / Multi-Arch Testbed](docs/adr/ADR-005-hybrid-multi-architecture-testbed.md) | Tailscale, Azure, ACR, CI/CD, Production 구분 |
+| [Demo A runbook](demos/node-failure/README.md) | Node Failure 시나리오별 기대값, `run.sh` 실행 순서, 승인이 필요한 소유자 절차 |
+
+구현 진입점은 [Controller](cmd/opsloop-controller/main.go)·[Reconciler](internal/controller/policy_controller.go), [CRD 타입](api/v1alpha1/recoverypolicy_types.go), [Demo API](apps/demo-api/main.go), [Demo Driver](cmd/demo-driver/main.go), [CI](.github/workflows/ci.yaml)입니다. 배포 manifest는 `config/`(CRD·RBAC·manager)와 `deploy/`(Demo API·demo Policy·소유자 overlay 예제)에 있으며 아직 클러스터에 적용하지 않았습니다.
 
 개발 순서는 **환경 적합성 확인 → 플랫폼 → ObserveOnly → Runtime Demo A → Incident Bundle → Engineering Demo B**입니다. 과거 [P1-A Inventory](docs/experiments/p1-a-environment-inventory.md)는 당시 조사 기록으로 보존합니다. 최신 근거는 [P1-B 로컬 구축 검증](docs/experiments/p1-b-local-platform.md), [Observability 검증](docs/experiments/p2-observability-verification.md), [Azure 후보 조사](docs/experiments/p1-c-azure-arm64-candidates.md)에 있습니다.
 

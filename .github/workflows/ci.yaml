@@ -1,0 +1,168 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions: {}
+
+defaults:
+  run:
+    # Explicit bash enables pipefail so curl/jq pipelines fail the step.
+    shell: bash
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.27.2
+      - name: go vet
+        run: go vet ./...
+      - name: generated files up to date
+        # Porcelain also catches new untracked generated files.
+        run: go generate ./... && test -z "$(git status --porcelain)"
+      - name: go test (envtest)
+        run: |
+          KUBEBUILDER_ASSETS="$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.2 use 1.35.0 --bin-dir "$RUNNER_TEMP/envtest" -p path)"
+          export KUBEBUILDER_ASSETS
+          OPSLOOP_REQUIRE_ENVTEST=1 go test ./...
+      - name: Demo A reset safety (mock only)
+        run: |
+          bash -n demos/node-failure/run.sh
+          python3 -B -m unittest discover -s tests -p test_demo_reset.py -v
+
+  image:
+    runs-on: ubuntu-24.04
+    needs: verify
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          # Pin by digest so a retag cannot change the privileged binfmt image.
+          image: docker.io/tonistiigi/binfmt:qemu-v10.2.3-68@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # Pin by digest so a retag cannot change the builder.
+          driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+      - name: controller multi-arch build (no push)
+        run: docker buildx build --platform linux/amd64,linux/arm64 --build-arg APP=cmd/opsloop-controller --build-arg "VERSION=$GITHUB_SHA" .
+      - name: demo-api smoke (QEMU emulated)
+        run: |
+          echo "## demo-api smoke (QEMU emulated)" >> "$GITHUB_STEP_SUMMARY"
+          for arch in amd64 arm64; do
+            docker buildx build --platform "linux/$arch" --load -t "smoke:$arch" .
+            docker run -d --name "smoke-$arch" --platform "linux/$arch" -p 18080:8080 "smoke:$arch"
+            if ! timeout 30 sh -c 'until curl -fsS localhost:18080/health >/dev/null; do sleep 1; done'; then
+              docker logs "smoke-$arch"
+              exit 1
+            fi
+            curl -fsS localhost:18080/ | jq -e --arg a "$arch" '.arch == $a'
+            docker rm -f "smoke-$arch"
+            echo "- linux/$arch: /health 200, arch=$arch (QEMU emulated)" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    needs: [verify, image]
+    environment: acr-publish
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: publish-main
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: base images pinned by digest
+        run: awk 'toupper($1)=="FROM" || tolower($0) ~ /^#[ \t]*syntax[ \t]*=/{n+=toupper($1)=="FROM"; if ($0 !~ /@sha256:[0-9a-f]{64}/) bad=1} END{exit bad || !n}' Dockerfile
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # Pin by digest so a retag cannot change the builder.
+          driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: acr login
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        run: az acr login --name "$ACR_NAME"
+      - name: publish demo-api
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+          IMAGE: demo-api
+          APP: apps/demo-api
+        run: |
+          REF="$ACR_NAME.azurecr.io/opsloop/$IMAGE:sha-$GITHUB_SHA"
+          # Only a "not found" failure means the tag is free; any other error (auth etc.) must not lead to a push.
+          if out=$(docker buildx imagetools inspect "$REF" 2>&1); then
+            echo "tag exists: $REF"; exit 1
+          elif ! grep -qi 'not found' <<<"$out"; then
+            echo "$out"; exit 1
+          fi
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --build-arg "APP=$APP" --build-arg "VERSION=$GITHUB_SHA" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --provenance=mode=min --push -t "$REF" .
+          docker buildx imagetools inspect "$REF" --format '{{json .Manifest}}' > idx.json
+          jq -e '[.manifests[].platform | "\(.os)/\(.architecture)"] | (index("linux/amd64") != null and index("linux/arm64") != null)' idx.json
+          {
+            echo "## $IMAGE"
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| ref | \`$REF\` |"
+            echo "| index digest | \`$(jq -r .digest idx.json)\` |"
+            jq -r '.manifests[] | select(.platform.os != "unknown") | "| \(.platform.os)/\(.platform.architecture) digest | `\(.digest)` |"' idx.json
+            echo "| source SHA | \`$GITHUB_SHA\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          docker buildx imagetools inspect "$REF" --format '{{json .Image}}' \
+            | jq -e --arg s "$GITHUB_SHA" '[."linux/amd64", ."linux/arm64"] | all(.config.Labels["org.opencontainers.image.revision"] == $s)'
+      - name: publish controller
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+          IMAGE: controller
+          APP: cmd/opsloop-controller
+        run: |
+          REF="$ACR_NAME.azurecr.io/opsloop/$IMAGE:sha-$GITHUB_SHA"
+          # Only a "not found" failure means the tag is free; any other error (auth etc.) must not lead to a push.
+          if out=$(docker buildx imagetools inspect "$REF" 2>&1); then
+            echo "tag exists: $REF"; exit 1
+          elif ! grep -qi 'not found' <<<"$out"; then
+            echo "$out"; exit 1
+          fi
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --build-arg "APP=$APP" --build-arg "VERSION=$GITHUB_SHA" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --provenance=mode=min --push -t "$REF" .
+          docker buildx imagetools inspect "$REF" --format '{{json .Manifest}}' > idx.json
+          jq -e '[.manifests[].platform | "\(.os)/\(.architecture)"] | (index("linux/amd64") != null and index("linux/arm64") != null)' idx.json
+          {
+            echo "## $IMAGE"
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| ref | \`$REF\` |"
+            echo "| index digest | \`$(jq -r .digest idx.json)\` |"
+            jq -r '.manifests[] | select(.platform.os != "unknown") | "| \(.platform.os)/\(.platform.architecture) digest | `\(.digest)` |"' idx.json
+            echo "| source SHA | \`$GITHUB_SHA\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          docker buildx imagetools inspect "$REF" --format '{{json .Image}}' \
+            | jq -e --arg s "$GITHUB_SHA" '[."linux/amd64", ."linux/arm64"] | all(.config.Labels["org.opencontainers.image.revision"] == $s)'

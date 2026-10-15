@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opsloop-demo
+  labels:
+    # demo-api and the demos/node-failure load Pods all satisfy restricted.
+    pod-security.kubernetes.io/enforce: restricted

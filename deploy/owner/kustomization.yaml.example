@@ -1,0 +1,12 @@
+# Copy to the gitignored kustomization.yaml and fill values from the CI publish summary.
+resources:
+  - ../demo-api
+  - ../../config/default          # after P3-c
+  # - ../../config/rbac/enforce   # only after P4 Enforce approval
+images:
+  - name: demo-api
+    newName: REPLACE_ACR_LOGIN_SERVER/opsloop/demo-api
+    digest: sha256:REPLACE_INDEX_DIGEST
+  - name: opsloop-controller
+    newName: REPLACE_ACR_LOGIN_SERVER/opsloop/controller
+    digest: sha256:REPLACE_INDEX_DIGEST
