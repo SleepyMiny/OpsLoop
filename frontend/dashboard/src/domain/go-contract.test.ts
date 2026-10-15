@@ -17,7 +17,7 @@ interface Vector {
   decision: CrdDecision;
 }
 
-// The same raw Go Input and its actual Evaluate output, exported by contracts/export_test.go.
+// The same raw Go Input and its actual Evaluate output, exported by contracts/export_test.go.txt.
 // This adapter only translates units/shape. Expected scores and eligibility are never recomputed here.
 describe('Go Controller candidate contract', () => {
   for (const vector of vectors as unknown as Vector[]) {

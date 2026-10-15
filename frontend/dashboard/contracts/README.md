@@ -2,7 +2,7 @@
 
 Backend reference: `b4fb78d0707afdbc93867d087fea5d1511203208` (PR #2 Runtime Safety fix).
 Dashboard base: `ccbe94667fa7921b252da422ea2dc6d90e604eec` (PR #1).
-No backend files are merged into this branch. `export_test.go` runs **inside a
+No backend files are merged into this branch. `export_test.go.txt` runs **inside a
 scratch archive** of the pinned backend alongside its existing fixture helpers.
 It calls the real `candidates.Evaluate` and Kubernetes `resource.Quantity.Value`.
 
@@ -36,3 +36,9 @@ negative memory, and digitless tokens (Go ParseQuantity accepts `.` as zero).
 UI conversion rejects unsupported values with their field path instead of
 silently approximating them. Existing fixed examples additionally cover
 malformed input and very large exponents without allocating enormous integers.
+
+The exporter is a `.go.txt` template deliberately excluded from the root Go
+package scan. It references private helpers in the backend candidates package.
+`regenerate.sh` installs it as `dashboard_contract_test.go` only in its scratch
+archive. Integration regression: root `go vet ./...` and `go test ./...` must not
+compile a standalone frontend/dashboard/contracts package.

@@ -8,7 +8,7 @@ scratch=$(mktemp -d "${TMPDIR:-/tmp}/opsloop-dashboard-contract.XXXXXXXX")
 trap 'rm -rf -- "$scratch"' EXIT
 umask 077
 git -C "$backend" archive "$ref" | tar -x -C "$scratch"
-cp "$contract_dir/export_test.go" "$scratch/internal/candidates/dashboard_contract_test.go"
+cp "$contract_dir/export_test.go.txt" "$scratch/internal/candidates/dashboard_contract_test.go"
 DASHBOARD_CONTRACT_OUT="$contract_dir/../src/domain/__fixtures__/go-candidates.json" \
 DASHBOARD_QUANTITY_OUT="$contract_dir/../src/domain/__fixtures__/go-quantities.json" \
 go -C "$scratch" test ./internal/candidates -run '^TestDashboard(Contract|Quantity)Export$' -count=1
