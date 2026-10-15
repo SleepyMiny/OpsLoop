@@ -1,0 +1,337 @@
+/*
+ * RecoveryPolicy rule sheet. A short live header (identity and status) over a
+ * multi-column sheet of rules; the sheet flows into as many 12rem columns as the
+ * container allows, so the TV shows three and a laptop two without media queries.
+ */
+
+.root {
+  container-type: inline-size;
+  container-name: policy;
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+  max-height: 100%;
+  overflow: auto;
+  padding-right: var(--space-1);
+  scrollbar-width: thin;
+}
+
+.num {
+  font-family: var(--font-sign);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Identity (instrument header) ---------- */
+
+.identity {
+  display: grid;
+  justify-items: end;
+  gap: 0.05rem;
+  color: var(--c-ink);
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+}
+.line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0 var(--space-3);
+}
+.mode {
+  margin-right: -0.4em;
+  font-family: var(--font-sign);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+.name {
+  font-weight: 600;
+}
+.namespace {
+  color: var(--c-ink-2);
+  font-weight: 500;
+}
+.stale {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  color: var(--c-caution);
+  font-weight: 600;
+}
+
+/* ---------- Live status ---------- */
+
+.status {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) auto minmax(0, 1.5fr);
+  margin: 0;
+  background: var(--c-face-sunk);
+  border: 1px solid var(--c-rule);
+  border-radius: var(--radius-instrument);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+}
+.status > div {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-2);
+  min-width: 0;
+  padding: 0.1rem var(--space-3);
+}
+.status > div + div {
+  border-left: 1px solid var(--c-rule);
+}
+.status dt {
+  color: var(--c-ink-2);
+  font-size: var(--fs-xs);
+}
+.status dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-2);
+  margin: 0;
+  min-width: 0;
+}
+.none {
+  color: var(--c-ink-2);
+}
+
+.cooldowns {
+  display: grid;
+  gap: 0.1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cooldowns li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-2);
+  padding-bottom: 4px;
+}
+.cooldowns li {
+  position: relative;
+}
+.remaining {
+  font-variant-numeric: tabular-nums;
+}
+.drain {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--c-rule);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.drain > span {
+  display: block;
+  height: 100%;
+  background: var(--c-caution);
+  transform-origin: left;
+}
+
+/* ---------- Score band ---------- */
+
+.score {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'title bar penalty'
+    'note note note';
+  align-items: center;
+  gap: 0.1rem var(--space-4);
+}
+.scoreTitle {
+  grid-area: title;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+/* Neutral tones: a weight is data, not state. */
+.weights {
+  grid-area: bar;
+  display: flex;
+  gap: 2px;
+}
+.weight {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.4em;
+  min-width: 0;
+  padding: 0.1rem 0.45rem;
+  border-radius: 2px;
+  line-height: 1.2;
+  background: color-mix(in srgb, var(--c-ink) 16%, var(--c-face));
+}
+.weight[data-key='memory'] {
+  background: color-mix(in srgb, var(--c-ink) 28%, var(--c-face));
+}
+.weight[data-key='requests'] {
+  background: color-mix(in srgb, var(--c-ink) 40%, var(--c-face));
+  color: var(--c-face);
+}
+.weightLabel {
+  font-size: var(--fs-xs);
+}
+.weightValue {
+  font-family: var(--font-sign);
+  font-size: var(--fs-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.penalty {
+  grid-area: penalty;
+  margin: 0;
+  font-size: calc(var(--fs-body) * 0.82);
+  line-height: 1.2;
+}
+.penalty > div {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.penalty dt {
+  color: var(--c-ink-2);
+  font-size: var(--fs-xs);
+}
+.penalty dd {
+  margin: 0;
+  font-family: var(--font-sign);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.weightNote {
+  grid-area: note;
+  color: var(--c-ink-2);
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+}
+
+/* ---------- Rule sheet ---------- */
+
+.sheet {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2) var(--space-3);
+  align-items: start;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--c-rule);
+}
+.sheetCol {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  min-width: 0;
+}
+.group {
+  min-width: 0;
+}
+
+.groupTitle {
+  margin-bottom: 0.05rem;
+  padding-bottom: 0.05rem;
+  border-bottom: 2px solid var(--c-ink);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.rows {
+  display: grid;
+  margin: 0;
+}
+.rows > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 var(--space-2);
+  padding: 0.03rem 0;
+  border-bottom: 1px dotted var(--c-rule-strong);
+  font-size: calc(var(--fs-body) * 0.78);
+  line-height: 1.2;
+}
+.rows dt {
+  color: var(--c-ink-2);
+  font-size: var(--fs-xs);
+}
+.rows dd {
+  margin: 0 0 0 auto;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: right;
+  font-family: var(--font-sign);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-ink);
+}
+
+@container policy (min-width: 400px) {
+  .sheet {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container policy (min-width: 620px) {
+  .sheet {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+@container policy (max-width: 499px) {
+  .score {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'title penalty'
+      'bar bar'
+      'note note';
+  }
+}
+
+/* ---------- Narrow container ---------- */
+
+@container policy (max-width: 419px) {
+  .status {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .status > div + div {
+    border-left: none;
+    border-top: 1px solid var(--c-rule);
+  }
+}
+
+/* ---------- Short viewports (1366x768 laptops) ---------- */
+
+@media (min-width: 1200px) and (max-height: 860px) {
+  .root {
+    gap: var(--space-2);
+  }
+  .name {
+    font-size: var(--fs-xs);
+  }
+  .version,
+  .status,
+  .rows > div,
+  .penalty {
+    font-size: var(--fs-xs);
+  }
+  .rows dt,
+  .penalty dt {
+    font-size: calc(var(--fs-body) * 0.68);
+  }
+  .weightValue {
+    font-size: var(--fs-sm);
+  }
+  .groupTitle,
+  .scoreTitle {
+    font-size: var(--fs-xs);
+  }
+}

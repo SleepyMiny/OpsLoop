@@ -74,10 +74,57 @@ jobs:
             echo "- linux/$arch: /health 200, arch=$arch (QEMU emulated)" >> "$GITHUB_STEP_SUMMARY"
           done
 
+  dashboard:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.27.2
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.14.1'
+          cache: npm
+          cache-dependency-path: frontend/dashboard/package-lock.json
+      - name: install locked Dashboard dependencies
+        working-directory: frontend/dashboard
+        run: npm ci
+      - name: Dashboard typecheck
+        working-directory: frontend/dashboard
+        run: npm run typecheck
+      - name: Dashboard Vitest
+        working-directory: frontend/dashboard
+        run: npm test
+      - name: Dashboard production build
+        working-directory: frontend/dashboard
+        run: npm run build
+      - name: Pinned Go contract fixtures remain identical
+        run: |
+          git cat-file -e b4fb78d0707afdbc93867d087fea5d1511203208^{commit}
+          bash frontend/dashboard/contracts/regenerate.sh "$PWD"
+          git diff --exit-code -- frontend/dashboard/src/domain/__fixtures__/go-candidates.json frontend/dashboard/src/domain/__fixtures__/go-quantities.json
+      - name: Current merged Go backend agrees with committed fixtures
+        run: |
+          contract_tmp=$(mktemp -d "$RUNNER_TEMP/opsloop-contract.XXXXXXXX")
+          trap 'rm -rf -- "$contract_tmp"' EXIT
+          mkdir "$contract_tmp/backend"
+          git archive HEAD | tar -x -C "$contract_tmp/backend"
+          cp frontend/dashboard/contracts/export_test.go.txt "$contract_tmp/backend/internal/candidates/dashboard_contract_test.go"
+          DASHBOARD_CONTRACT_OUT="$contract_tmp/current-candidates.json" \
+          DASHBOARD_QUANTITY_OUT="$contract_tmp/current-quantities.json" \
+          go -C "$contract_tmp/backend" test ./internal/candidates -run '^TestDashboard(Contract|Quantity)Export$' -count=1
+          cmp frontend/dashboard/src/domain/__fixtures__/go-candidates.json "$contract_tmp/current-candidates.json"
+          cmp frontend/dashboard/src/domain/__fixtures__/go-quantities.json "$contract_tmp/current-quantities.json"
+
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    needs: [verify, image]
+    needs: [verify, image, dashboard]
     environment: acr-publish
     permissions:
       contents: read

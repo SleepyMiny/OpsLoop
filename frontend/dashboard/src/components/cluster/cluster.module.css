@@ -1,0 +1,1213 @@
+/*
+ * Cluster mimic (hero). A recessed mimic board inside the instrument: station
+ * plates sit on the Tailscale mesh bus, and the route lamp (--c-act) is the only
+ * thing that moves. Sizes adapt through container queries, not the viewport:
+ *   opsloop-mimic   full ≥ 900px (booth TV), compact < 900px (laptop, tablet),
+ *                   stacked < 600px (phone; stations in a column, route as text)
+ *   opsloop-gauges  recorder type steps down when a station gets short.
+ * Container names are global (CSS Modules does not scope them), hence the prefix.
+ */
+
+.aside {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.root {
+  container: opsloop-mimic / inline-size;
+  height: 100%;
+  min-height: 0;
+}
+
+.layout {
+  --station-gap: var(--space-5);
+  --row-gap: 0.375rem;
+  --band-h: 2.25rem;
+  --stop-r: 6px;
+  --loop-w: 1.75rem;
+  --tick-h: 2.25rem;
+  --tick-glyph: 0.6rem;
+  --gauges-natural: 6.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Recessed board; the dashed edge is the cluster boundary. */
+.cluster {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.625rem var(--space-3) var(--space-2);
+  background: var(--c-face-sunk);
+  border: 1px dashed var(--c-rule-strong);
+  border-radius: var(--radius-instrument);
+}
+
+.empty {
+  padding: var(--space-4);
+  color: var(--c-ink-2);
+}
+
+/* ---------- Stations ---------- */
+
+/* Stations share row tracks (subgrid) so plates, status lines, recorders and
+   Pod tokens line up across stations even when only one hosts the Demo API. */
+.stations {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr));
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  column-gap: var(--station-gap);
+  row-gap: 0;
+}
+
+.station {
+  grid-row: span 4;
+  display: grid;
+  grid-template-rows: subgrid;
+  row-gap: var(--row-gap);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 var(--space-3) 0.625rem;
+  background: var(--c-face);
+  border: 1px solid var(--c-rule-strong);
+  border-radius: var(--radius-chip);
+}
+
+.station[data-down] {
+  border-color: var(--c-fault);
+  box-shadow: inset 0 0 0 1px var(--c-fault);
+}
+.station[data-route='target'],
+.station[data-route='loop'] {
+  border-color: var(--c-act);
+  box-shadow: inset 0 0 0 1px var(--c-act);
+}
+.station[data-route-stage='verified'] {
+  border-color: var(--c-ok);
+  box-shadow: inset 0 0 0 1px var(--c-ok);
+}
+
+/* Nameplate */
+.plate {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-2);
+  margin: 0 calc(var(--space-3) * -1);
+  padding: 0.375rem var(--space-3);
+  border-bottom: 1px solid var(--c-rule);
+}
+.station[data-down] .plate {
+  background: var(--c-fault-soft);
+}
+
+.stationName {
+  min-width: 0;
+  font-size: var(--fs-md);
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plateArch {
+  display: inline-flex;
+}
+
+.plateSub {
+  grid-column: 2 / 4;
+  display: flex;
+  gap: var(--space-3);
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+  color: var(--c-ink-2);
+  white-space: nowrap;
+}
+.plateRole[data-role='control-plane'] {
+  font-weight: 600;
+  color: var(--c-ink);
+}
+
+/* Status line: readiness, conditions, node name, quiet Pods */
+.meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.meta > * {
+  flex: none;
+}
+
+.readiness {
+  font-weight: 600;
+}
+.readiness[data-tone='fault'] {
+  color: var(--c-fault);
+}
+
+.flag {
+  padding: 0 0.4em;
+  border-left: 3px solid var(--c-caution);
+  background: var(--c-caution-soft);
+  font-size: var(--fs-xs);
+}
+
+.metaCode {
+  display: inline-flex;
+}
+.metaArch {
+  display: none;
+}
+.metaName {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quiet {
+  display: inline-flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+.quietGroup {
+  display: inline-flex;
+  gap: 2px;
+}
+.quietToken {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 1px;
+  background: var(--c-rule-strong);
+}
+.quietToken[data-tone='caution'] {
+  background: var(--c-caution);
+}
+.quietToken[data-tone='fault'] {
+  background: var(--c-fault);
+}
+
+/* Recorders: name | value | strip chart | level meter. A size container so the
+   type can step down when the station is short instead of being clipped. */
+.gauges {
+  container: opsloop-gauges / size;
+  contain-intrinsic-block-size: var(--gauges-natural);
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  padding-right: 3px;
+  display: grid;
+  grid-template-columns: max-content max-content minmax(0, 1fr) 0.6rem;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: var(--row-gap) var(--space-2);
+}
+
+.gaugeName {
+  grid-column: 1;
+  align-self: center;
+  font-family: var(--font-sign);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  color: var(--c-ink-2);
+  line-height: 1;
+}
+
+.gaugeValue {
+  grid-column: 2;
+  align-self: center;
+  min-width: 3.3ch;
+  font-family: var(--font-sign);
+  font-weight: 600;
+  font-size: var(--fs-lg);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: right;
+}
+.gaugeValue[data-level='over'] {
+  color: var(--c-caution);
+}
+.gaugeValue[data-level='stale'],
+.gaugeValue[data-level='missing'] {
+  color: var(--c-ink-3);
+}
+
+.chart {
+  grid-column: 3;
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--c-face-sunk);
+  border: 1px solid var(--c-rule);
+  border-radius: 2px;
+}
+.chartSvg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.chartLine {
+  fill: none;
+  stroke: var(--c-ink-2);
+  stroke-width: 1.75;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.chartLimit {
+  stroke: var(--c-ink-3);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+.chart[data-level='over'] .chartLine {
+  stroke: var(--c-caution);
+}
+.chart[data-level='stale'] .chartSvg,
+.chart[data-level='missing'] .chartSvg {
+  opacity: 0.35;
+}
+
+.overTag {
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  padding: 0 0.35em;
+  background: var(--c-caution-soft);
+  border-left: 3px solid var(--c-caution);
+  color: var(--c-ink);
+  font-size: var(--fs-xs);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.level {
+  grid-column: 4;
+  position: relative;
+  min-height: 0;
+  background: var(--c-face-sunk);
+  border: 1px solid var(--c-rule-strong);
+  border-radius: 2px;
+}
+.levelFill {
+  position: absolute;
+  inset: 0;
+  background: var(--c-ink-2);
+  transform: scaleY(var(--fill, 0));
+  transform-origin: bottom;
+}
+.level[data-level='over'] .levelFill {
+  background: var(--c-caution);
+}
+.level[data-level='stale'] .levelFill {
+  background: var(--c-ink-3);
+  opacity: 0.5;
+}
+.level[data-level='missing'] .levelFill {
+  display: none;
+}
+.levelLimit {
+  position: absolute;
+  left: -3px;
+  right: -3px;
+  bottom: calc(var(--limit, 0.85) * 100%);
+  height: 2px;
+  background: var(--c-ink);
+}
+
+/* Stale or missing samples: one caption over both charts, kept inside the
+   chart column so it never covers the level meters. */
+.notice {
+  grid-column: 3;
+  grid-row: 1 / 3;
+  align-self: center;
+  justify-self: stretch;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0 3px;
+  padding: var(--space-1) var(--space-2);
+  overflow: hidden;
+  background: var(--c-face);
+  border: 1px solid var(--c-caution);
+  border-left-width: 4px;
+  border-radius: 2px;
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+}
+.noticeLamp {
+  display: inline-flex;
+  flex: none;
+}
+
+/* Narrow recorder (laptop, tablet): the short form "관측값 N초 전". */
+@container opsloop-gauges (width < 18rem) {
+  .noticeRest,
+  .noticeLamp {
+    display: none;
+  }
+  .notice {
+    padding: var(--space-1);
+    font-size: var(--fs-xs);
+    line-height: 1.25;
+  }
+}
+
+@container opsloop-gauges (height < 5rem) {
+  .gaugeValue {
+    font-size: var(--fs-md);
+  }
+  .gaugeName {
+    font-size: var(--fs-xs);
+  }
+}
+
+@container opsloop-gauges (height < 3.25rem) {
+  .gaugeValue {
+    font-size: var(--fs-sm);
+  }
+  .overTag {
+    top: 1px;
+    left: 2px;
+    font-size: calc(var(--fs-xs) * 0.9);
+    line-height: 1.1;
+  }
+  .notice {
+    gap: var(--space-1);
+    padding: 0 var(--space-1);
+    font-size: var(--fs-xs);
+    line-height: 1.2;
+  }
+}
+
+/* Demo API Pod token: the one Pod visitors follow. */
+.demoPods {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.demoPod {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0.2em 0.6em;
+  background: var(--c-face);
+  border: 2px solid var(--c-rule-strong);
+  border-radius: var(--radius-chip);
+}
+.demoPod[data-tone='ok'] {
+  background: var(--c-ok-soft);
+  border-color: var(--c-ok);
+}
+.demoPod[data-tone='caution'] {
+  background: var(--c-caution-soft);
+  border-color: var(--c-caution);
+}
+.demoPod[data-tone='fault'] {
+  background: var(--c-fault-soft);
+  border-color: var(--c-fault);
+}
+.demoPod[data-presence='fading'] {
+  opacity: 0.55;
+  border-style: dashed;
+}
+.demoPod[data-presence='ghost'] {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--c-ink-3);
+  color: var(--c-ink-2);
+}
+.demoPod[data-slim] {
+  padding: 0 0.5em;
+  border-width: 1px;
+  font-size: var(--fs-xs);
+}
+
+.demoPodMain {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  white-space: nowrap;
+}
+.demoPodName {
+  flex: none;
+  font-family: var(--font-sign);
+  font-weight: 700;
+  font-size: var(--fs-body);
+  line-height: 1.3;
+}
+.demoPod[data-slim] .demoPodName {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.demoPodState {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+.demoPod[data-slim] .demoPodState {
+  font-size: var(--fs-xs);
+}
+.demoPodCodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-3);
+  min-width: 0;
+  line-height: 1.3;
+}
+
+/* ---------- Mesh band and route ---------- */
+
+/* Everything here is positioned with CSS against the station grid: --col is one
+   station column, so a station centre is col * (i + .5) + gap * i. */
+.band {
+  --col: calc((100% - (var(--n, 3) - 1) * var(--station-gap)) / var(--n, 3));
+  --bus-y: calc(var(--band-h) * 0.4);
+  --arc-depth: calc(var(--band-h) * 0.6 - 3px);
+  position: relative;
+  flex: none;
+  height: var(--band-h);
+}
+
+.stub,
+.meshLink,
+.stop,
+.route,
+.routeArrow,
+.meshLabel,
+.routePlate {
+  position: absolute;
+}
+
+.stub {
+  top: 0;
+  width: 2px;
+  height: calc(var(--bus-y) - var(--stop-r));
+  margin-left: -1px;
+  background: var(--c-rule-strong);
+}
+
+.meshLink[data-kind='bus'] {
+  top: calc(var(--bus-y) - 1.5px);
+  border-top: 3px solid var(--c-ink-3);
+}
+.meshLink[data-kind='arc'] {
+  top: var(--bus-y);
+  height: var(--arc-depth);
+  border: 3px solid var(--c-ink-3);
+  border-top: 0;
+  border-radius: 0 0 50% 50% / 0 0 100% 100%;
+}
+.meshLink[data-broken] {
+  border-color: var(--c-rule-strong);
+  border-style: dashed;
+}
+.meshLink[data-kind='bus'][data-broken] {
+  top: calc(var(--bus-y) - 1px);
+  border-top-width: 2px;
+}
+
+.meshLabel {
+  top: var(--bus-y);
+  right: calc(100% - var(--col) * 0.5 + var(--stop-r) + 0.6rem);
+  transform: translateY(-50%);
+  font-family: var(--font-sign);
+  font-weight: 600;
+  font-size: var(--fs-xs);
+  line-height: 1;
+  color: var(--c-ink-2);
+  white-space: nowrap;
+}
+
+.stop {
+  z-index: 1;
+  top: var(--bus-y);
+  width: calc(var(--stop-r) * 2);
+  height: calc(var(--stop-r) * 2);
+  transform: translate(-50%, -50%);
+  background: var(--c-face);
+  border: 2px solid var(--c-ink-2);
+  border-radius: 50%;
+}
+.stop[data-down] {
+  border-color: var(--c-fault);
+  border-style: dashed;
+}
+.stop[data-role='origin'] {
+  border-width: 3px;
+}
+.stop[data-role='target'] {
+  width: calc(var(--stop-r) * 2 + 4px);
+  height: calc(var(--stop-r) * 2 + 4px);
+  background: var(--c-act);
+  border-color: var(--c-face);
+}
+.stop[data-verified] {
+  background: var(--c-ok);
+}
+
+/* The route lamp. It reveals from the origin side once per action (--dur-move). */
+.route {
+  animation: route-draw-ltr var(--dur-move) var(--ease-out) both;
+  transition: background-color var(--dur-quick) var(--ease-out), border-color var(--dur-quick) var(--ease-out);
+}
+.route[data-dir='-1'] {
+  animation-name: route-draw-rtl;
+}
+.route[data-kind='straight'] {
+  top: calc(var(--bus-y) - 2.5px);
+  height: 5px;
+  background: var(--c-act);
+  border-radius: 3px;
+}
+.route[data-kind='arc'],
+.route[data-kind='loop'] {
+  top: var(--bus-y);
+  height: var(--arc-depth);
+  border: 5px solid var(--c-act);
+  border-top: 0;
+  border-radius: 0 0 50% 50% / 0 0 100% 100%;
+}
+.route[data-kind='loop'] {
+  width: calc(var(--loop-w) * 2);
+  margin-left: calc(var(--loop-w) * -1);
+  border-width: 4px;
+}
+.route[data-verified] {
+  background-color: var(--c-ok);
+  border-color: var(--c-ok);
+}
+.route[data-verified][data-kind='arc'],
+.route[data-verified][data-kind='loop'] {
+  background-color: transparent;
+}
+
+.routeArrow {
+  z-index: 1;
+  top: var(--bus-y);
+  width: calc(var(--stop-r) * 2);
+  height: calc(var(--stop-r) * 2 + 2px);
+  background: var(--c-act);
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+  transform: translate(calc(-100% - var(--stop-r) - 1px), -50%);
+  animation: route-reveal 200ms var(--ease-out) calc(var(--dur-move) * 0.8) both;
+}
+.routeArrow[data-dir='-1'] {
+  clip-path: polygon(100% 0, 0 50%, 100% 100%);
+  transform: translate(calc(var(--stop-r) + 1px), -50%);
+}
+.routeArrow[data-verified] {
+  background: var(--c-ok);
+}
+
+.routePlate {
+  z-index: 2;
+  top: var(--bus-y);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.05em 0.6em;
+  overflow: hidden;
+  white-space: nowrap;
+  background: var(--c-face);
+  border: 2px solid var(--c-act);
+  border-radius: var(--radius-chip);
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+  transform: translate(-50%, -50%);
+  animation: route-reveal 240ms var(--ease-out) calc(var(--dur-move) * 0.6) both;
+}
+.routePlate[data-align='after'] {
+  transform: translate(calc(var(--stop-r) + 0.6rem), -50%);
+}
+.routePlate[data-align='before'] {
+  transform: translate(calc(-100% - var(--stop-r) - 0.6rem), -50%);
+}
+.routePlate[data-align='after'][data-kind='loop'] {
+  transform: translate(calc(var(--loop-w) + 0.4rem), -50%);
+}
+.routePlate[data-align='before'][data-kind='loop'] {
+  transform: translate(calc(-100% - var(--loop-w) - 0.4rem), -50%);
+}
+.routePlate[data-verified] {
+  border-color: var(--c-ok);
+}
+.routePlate strong {
+  font-family: var(--font-sign);
+  font-weight: 700;
+}
+.routeCode {
+  display: inline-flex;
+}
+.routeStage {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes route-draw-ltr {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes route-draw-rtl {
+  from {
+    clip-path: inset(0 0 0 100%);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes route-reveal {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route,
+  .routeArrow,
+  .routePlate {
+    animation: none;
+  }
+}
+
+/* Route as a sentence; shown only when the band is hidden (stacked). */
+.routeLine {
+  display: none;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--c-face);
+  border: 2px solid var(--c-act);
+  border-radius: var(--radius-chip);
+  font-weight: 600;
+}
+.routeLine[data-verified] {
+  border-color: var(--c-ok);
+}
+
+/* ---------- Deployment strip ---------- */
+
+.workload {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+  min-width: 0;
+  padding-top: 0.375rem;
+  border-top: 1px solid var(--c-rule);
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+}
+
+.field {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.fieldLabel {
+  font-size: var(--fs-xs);
+  color: var(--c-ink-2);
+  white-space: nowrap;
+}
+.fieldNumber {
+  font-family: var(--font-sign);
+  font-weight: 600;
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.fieldNote {
+  color: var(--c-ink-2);
+}
+
+.quarantine {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.1em 0.7em;
+  background: var(--c-act-soft);
+  border: 2px solid var(--c-act);
+  border-radius: var(--radius-chip);
+  white-space: nowrap;
+}
+.quarantine[data-tone='caution'] {
+  background: var(--c-caution-soft);
+  border-color: var(--c-caution);
+}
+.quarantine strong {
+  font-family: var(--font-sign);
+  font-weight: 700;
+  font-size: var(--fs-md);
+  line-height: 1.15;
+}
+
+.image {
+  display: inline-flex;
+  align-items: stretch;
+  margin-left: auto;
+  overflow: hidden;
+  background: var(--c-face);
+  border: 1px solid var(--c-rule-strong);
+  border-radius: var(--radius-chip);
+}
+.imageIndex {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 0.1em 0.6em;
+  white-space: nowrap;
+}
+
+.platform {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.1em 0.6em;
+  border-left: 1px solid var(--c-rule-strong);
+  color: var(--c-ink-2);
+  white-space: nowrap;
+}
+.platform[data-serving] {
+  color: var(--c-ink);
+  box-shadow: inset 0 -3px 0 currentColor;
+}
+.platform[data-serving][data-arch='amd64'] {
+  background: color-mix(in srgb, var(--c-amd64) 14%, var(--c-face));
+}
+.platform[data-serving][data-arch='arm64'] {
+  background: color-mix(in srgb, var(--c-arm64) 14%, var(--c-face));
+}
+.platformGlyph {
+  width: 0.85em;
+  height: 0.85em;
+  flex: none;
+}
+.platform[data-arch='amd64'] .platformGlyph {
+  fill: var(--c-amd64);
+}
+.platform[data-arch='arm64'] .platformGlyph {
+  fill: var(--c-arm64);
+}
+.platformName {
+  font-family: var(--font-sign);
+  font-weight: 600;
+}
+.platformServing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  font-size: var(--fs-xs);
+}
+
+/* ---------- HTTP strip (outside the cluster) ---------- */
+
+.http {
+  flex: none;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+
+.host {
+  display: flex;
+  flex-direction: column;
+  padding: 0.2em 0.7em;
+  border: 1.5px dashed var(--c-ink-3);
+  border-radius: var(--radius-chip);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.hostName {
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+.hostNote {
+  font-size: var(--fs-xs);
+  color: var(--c-ink-2);
+}
+
+.probes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.probeHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+  color: var(--c-ink-2);
+  white-space: nowrap;
+}
+.probeTitle {
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.probeEndpoint {
+  display: inline-flex;
+  min-width: 0;
+  overflow: hidden;
+}
+.probeAxis {
+  margin-left: auto;
+}
+.probeEmpty {
+  height: var(--tick-h);
+  display: flex;
+  align-items: center;
+  font-size: var(--fs-sm);
+  color: var(--c-ink-2);
+}
+
+/* One cell per probe slot. Success: bar from under the arch glyph down to the
+   baseline. Failure: bar below the baseline. Heights are CSS, so they never
+   collapse whatever the width. */
+.ticks {
+  --tick-base: 66%;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--slots, 45), minmax(0, 1fr));
+  column-gap: 2px;
+  height: var(--tick-h);
+  min-width: 0;
+}
+.ticks::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--tick-base);
+  border-top: 1px solid var(--c-rule-strong);
+}
+.tick {
+  position: relative;
+  min-width: 0;
+}
+.tick::before {
+  content: '';
+  position: absolute;
+  left: 10%;
+  right: 10%;
+}
+.tick[data-state='ok']::before {
+  top: calc(var(--tick-glyph) + 2px);
+  bottom: calc(100% - var(--tick-base));
+  background: var(--c-ok);
+}
+.tick[data-state='fail']::before {
+  top: calc(var(--tick-base) + 2px);
+  bottom: 0;
+  background: var(--c-fault);
+}
+.tickGlyph {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: min(100%, var(--tick-glyph));
+  aspect-ratio: 1;
+  transform: translateX(-50%);
+}
+.tick[data-arch='amd64'] .tickGlyph {
+  background: var(--c-amd64);
+  clip-path: inset(6% round 10%);
+}
+.tick[data-arch='arm64'] .tickGlyph {
+  background: var(--c-arm64);
+  clip-path: polygon(50% 0, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+}
+
+.availability {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin: 0;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+.availabilityValue {
+  font-family: var(--font-sign);
+  font-weight: 600;
+  font-size: var(--fs-xl);
+  font-variant-numeric: tabular-nums;
+}
+.availabilityNote {
+  font-size: var(--fs-xs);
+  color: var(--c-ink-2);
+}
+
+.lastProbe {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  column-gap: var(--space-2);
+  min-width: 6.5em;
+  margin: 0;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.lastProbeText {
+  font-weight: 600;
+}
+.lastProbe[data-tone='fault'] .lastProbeText {
+  color: var(--c-fault);
+}
+.lastProbeDetail {
+  grid-column: 2;
+  font-family: var(--font-sign);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--c-ink-2);
+}
+
+/* ---------- Compact: presenter laptop, tablet ---------- */
+
+@container opsloop-mimic (width < 900px) {
+  .layout {
+    --station-gap: var(--space-3);
+    --row-gap: var(--space-1);
+    --band-h: 1.375rem;
+    --stop-r: 4.5px;
+    --loop-w: 1.25rem;
+    --tick-h: 1.5rem;
+    --gauges-natural: 3.75rem;
+    gap: var(--space-2);
+  }
+
+  .cluster {
+    padding: var(--space-2) var(--space-2) var(--space-1);
+  }
+
+  .station {
+    padding: 0 var(--space-2) var(--space-2);
+  }
+  .plate {
+    margin: 0 calc(var(--space-2) * -1);
+    padding: var(--space-1) var(--space-2);
+  }
+  /* The name keeps the whole plate; the architecture moves to the status line. */
+  .plateArch {
+    display: none;
+  }
+  .metaArch {
+    display: inline-flex;
+  }
+  .plateSub,
+  .metaName,
+  .metaCode,
+  .flag {
+    display: none;
+  }
+  .meta {
+    font-size: var(--fs-xs);
+  }
+
+  .demoPod {
+    padding: 0.05em 0.5em;
+    border-width: 1.5px;
+  }
+  .demoPodName {
+    font-size: var(--fs-sm);
+  }
+  .demoPodState {
+    font-size: var(--fs-xs);
+  }
+  .demoPodCodes {
+    display: none;
+  }
+
+  .routePlate {
+    gap: var(--space-1);
+    border-width: 1.5px;
+    font-size: var(--fs-xs);
+  }
+  .routeCode {
+    display: none;
+  }
+
+  .workload {
+    gap: var(--space-1) var(--space-3);
+    padding-top: var(--space-1);
+    font-size: var(--fs-xs);
+  }
+  .field:first-child .fieldLabel,
+  .imageIndex .fieldLabel,
+  .platformServingText {
+    display: none;
+  }
+  .fieldNumber {
+    font-size: var(--fs-body);
+  }
+  .quarantine strong {
+    font-size: var(--fs-sm);
+  }
+
+  .http {
+    gap: var(--space-1) var(--space-3);
+  }
+  .host {
+    padding: 0.05em 0.5em;
+  }
+  .hostNote,
+  .probeHead {
+    display: none;
+  }
+  .availability {
+    flex-direction: row;
+    align-items: baseline;
+    gap: var(--space-1);
+  }
+  .availabilityValue {
+    font-size: var(--fs-md);
+  }
+  .lastProbe {
+    grid-template-columns: auto auto auto;
+    min-width: 0;
+  }
+  .lastProbeText {
+    font-size: var(--fs-sm);
+  }
+  .lastProbeDetail {
+    grid-column: auto;
+    font-size: var(--fs-xs);
+  }
+
+  /* At this size the far-pair arc reads as a second track; the bus alone is clearer. */
+  .meshLink[data-kind='arc'] {
+    display: none;
+  }
+
+  /* Narrow cells: the arch shape is cut into the top of the success bar, so the
+     bar keeps ~13px, the failure bar ~9px, and the shape stays readable. */
+  .ticks {
+    --tick-base: 56%;
+  }
+  .tick[data-state='ok']::before {
+    top: 0;
+  }
+  .tickGlyph {
+    top: 2px;
+    width: min(70%, 0.45rem);
+  }
+  .tick[data-arch='amd64'] .tickGlyph,
+  .tick[data-arch='arm64'] .tickGlyph {
+    background: var(--c-face);
+  }
+}
+
+/* ---------- Stacked: phone ---------- */
+
+@container opsloop-mimic (width < 600px) {
+  .layout {
+    --gauges-natural: 5rem;
+    gap: var(--space-3);
+    height: auto;
+    overflow: visible;
+  }
+  .cluster {
+    gap: var(--space-3);
+  }
+
+  .stations {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-auto-rows: auto;
+    row-gap: var(--space-3);
+  }
+  .station {
+    row-gap: var(--space-2);
+  }
+  .plateSub {
+    display: flex;
+  }
+  .plateArch {
+    display: inline-flex;
+  }
+  .metaArch {
+    display: none;
+  }
+
+  .band {
+    display: none;
+  }
+  .routeLine {
+    display: flex;
+  }
+
+  .workload {
+    gap: var(--space-2) var(--space-4);
+  }
+  .image {
+    flex-wrap: wrap;
+    margin-left: 0;
+  }
+
+  .http {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      'host last'
+      'probes probes'
+      'avail avail';
+  }
+  .host {
+    grid-area: host;
+  }
+  .probes {
+    grid-area: probes;
+  }
+  .availability {
+    grid-area: avail;
+  }
+  .lastProbe {
+    grid-area: last;
+    justify-self: end;
+  }
+}
