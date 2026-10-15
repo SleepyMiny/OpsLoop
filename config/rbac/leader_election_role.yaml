@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: opsloop-leader-election
+  namespace: opsloop-system
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, watch, create, update, patch]
+  # Leader election records an Event when it acquires the Lease.
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]

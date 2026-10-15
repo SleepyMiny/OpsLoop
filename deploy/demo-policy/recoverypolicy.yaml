@@ -1,0 +1,21 @@
+# Applied once with field manager opsloop-policy; afterwards mode and enabled change only by kubectl patch.
+# Kept out of every kustomization so a reset re-apply never reverts them. Other fields use the CRD defaults.
+apiVersion: opsloop.io/v1alpha1
+kind: RecoveryPolicy
+metadata:
+  name: demo-api
+  namespace: opsloop-demo
+spec:
+  targetRef:
+    name: demo-api
+  enabled: true
+  mode: ObserveOnly
+  candidateSelector:
+    matchLabels:
+      opsloop.io/recovery-candidate: "true"
+  filter:
+    # 3x the current 30s scrape (D2); return to 30s if scrape moves to 10s.
+    maxSampleAge: 90s
+  verification:
+    serviceName: demo-api
+    port: 8080

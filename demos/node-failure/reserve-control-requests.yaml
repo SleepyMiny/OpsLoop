@@ -1,0 +1,30 @@
+# Fills opsloop-control's requested CPU without real load so it is rejected with INSUFFICIENT_REQUESTED_CPU.
+# run.sh validates OPSLOOP_RESERVE_CPU (^[1-9][0-9]*m$) and substitutes it with sed; this file is not valid as-is.
+# busybox:1.37.0 OCI index digest (registry-1.docker.io, checked 2026-10-13).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: opsloop-reserve-requests
+  namespace: opsloop-demo
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: opsloop-control
+  automountServiceAccountToken: false
+  # Meets the opsloop-demo namespace's restricted Pod Security level.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: reserve
+      image: docker.io/library/busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+      command: ["sleep", "86400"]
+      resources:
+        requests: {cpu: ${OPSLOOP_RESERVE_CPU}, memory: 16Mi}
+        limits: {cpu: ${OPSLOOP_RESERVE_CPU}, memory: 32Mi}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]

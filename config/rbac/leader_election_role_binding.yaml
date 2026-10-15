@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opsloop-leader-election
+  namespace: opsloop-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: opsloop-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: opsloop-controller
+    namespace: opsloop-system
