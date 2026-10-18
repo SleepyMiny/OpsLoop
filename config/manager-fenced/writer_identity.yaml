@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opsloop-controller
+  namespace: opsloop-system
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+    rollingUpdate: null
+  template:
+    spec:
+      serviceAccountName: opsloop-controller-fenced-v1
+      containers:
+        - name: manager
+          # Deliberately distinct from the old owner image key. The owner must
+          # pin a newly reviewed fence-aware image, not inherit the old digest.
+          image: opsloop-controller-fenced-v1

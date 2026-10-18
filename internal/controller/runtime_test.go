@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -129,7 +130,7 @@ func (e *enforceFixture) withFuncs(funcs interceptor.Funcs, run func()) {
 func (e *enforceFixture) crashBeforeUpdate() {
 	e.t.Helper()
 	e.withFuncs(interceptor.Funcs{Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
-		if _, ok := obj.(*appsv1.Deployment); ok {
+		if d, ok := obj.(*appsv1.Deployment); ok && d.Spec.Template.Annotations[recovery.AttemptAnnotation] != "" {
 			return apierrors.NewConflict(schema.GroupResource{Group: "apps", Resource: "deployments"}, obj.GetName(), errors.New("injected"))
 		}
 		return c.Update(ctx, obj, opts...)
@@ -141,7 +142,7 @@ func (e *enforceFixture) crashBeforeUpdate() {
 	inc := e.onlyIncident()
 	wantPhase(e.t, inc, PhaseExecuting, candidates.DecisionSelected)
 	e.wantOutcomes(inc, recovery.OutcomeReserved)
-	if d := e.liveDeployment(); d.Generation != 1 {
+	if d := e.liveDeployment(); e.workloadChanged(d) {
 		e.t.Fatalf("Deployment changed before crash: generation %d", d.Generation)
 	}
 }
@@ -160,7 +161,7 @@ func (e *enforceFixture) crashAfterUpdate() {
 		}
 	})
 	e.wantOutcomes(e.onlyIncident(), recovery.OutcomeReserved)
-	if d := e.liveDeployment(); d.Generation != 2 {
+	if d := e.liveDeployment(); !e.workloadChanged(d) {
 		e.t.Fatalf("Deployment generation %d after crash, want 2", d.Generation)
 	}
 }
@@ -174,6 +175,13 @@ func (e *enforceFixture) wantOutcomes(inc *v1alpha1.RecoveryIncident, outcomes .
 	if !slices.Equal(got, outcomes) {
 		e.t.Fatalf("attempt outcomes %v, want %v", got, outcomes)
 	}
+}
+
+// workloadChanged compares the persisted pod template with the fixture baseline.
+// Deployment metadata annotations also increase generation, so generation alone
+// cannot distinguish a fence claim/close from a rollout-producing template write.
+func (e *enforceFixture) workloadChanged(d *appsv1.Deployment) bool {
+	return v1alpha1.TemplateHash(d.Spec.Template) != v1alpha1.TemplateHash(e.deploy.Spec.Template)
 }
 
 func lastAttempt(inc *v1alpha1.RecoveryIncident) v1alpha1.Attempt {
@@ -273,6 +281,9 @@ func candidateReasons(d v1alpha1.RecoveryDecision, node string) []string {
 func TestE8EnforceExecutesConditionalUpdate(t *testing.T) {
 	e := newEnforce(t, candidateIP)
 	before := e.liveDeployment()
+	_, err := e.r.claimExecutionFence(e.ctx, e.policy(), before)
+	e.must(err)
+	before = e.liveDeployment()
 
 	e.reconcile()
 
@@ -313,79 +324,74 @@ func TestE9ReservedBeforeUpdateAppliesOnce(t *testing.T) {
 	inc := e.onlyIncident()
 	wantPhase(t, inc, PhaseVerifying, "")
 	e.wantOutcomes(inc, recovery.OutcomePatched)
-	if d := e.liveDeployment(); d.Generation != 2 || d.Spec.Template.Annotations[recovery.AttemptAnnotation] != lastAttempt(inc).ActionID {
+	if d := e.liveDeployment(); !e.workloadChanged(d) || d.Spec.Template.Annotations[recovery.AttemptAnnotation] != lastAttempt(inc).ActionID {
 		t.Fatalf("want exactly one change, generation %d", d.Generation)
 	}
 }
 
 func TestE10ReservedAfterUpdateResumesWithoutUpdate(t *testing.T) {
-	t.Run("applied", func(t *testing.T) {
+	t.Run("applied_ack_not_persisted", func(t *testing.T) {
 		e := newEnforce(t, candidateIP)
 		e.crashAfterUpdate()
+		before := e.liveDeployment().Spec.DeepCopy()
+		if e.onlyIncident().Status.Runtime.WorkloadDispatchActionID == "" {
+			t.Fatal("write-ahead evidence absent")
+		}
+		e.reconcile()
+		requireSafetyHeld(t, e, true)
+		if !reflect.DeepEqual(before, &e.liveDeployment().Spec) {
+			t.Fatal("uncertain resume changed workload again")
+		}
+	})
+	t.Run("applied_then_image_changed", func(t *testing.T) {
+		e := newEnforce(t, candidateIP)
+		e.crashAfterUpdate()
+		e.updateDeployment(func(d *appsv1.Deployment) { d.Spec.Template.Spec.Containers[0].Image = "demo-api:external" })
+		e.reconcile()
+		inc := e.onlyIncident()
+		wantPhase(t, inc, PhaseManualRequired, "SAFETY_HALTED")
+		e.wantOutcomes(inc, recovery.OutcomeSuperseded)
+		if e.liveDeployment().Spec.Template.Spec.Containers[0].Image != "demo-api:external" {
+			t.Fatal("external image overwritten")
+		}
+		f, err := readFence(e.liveDeployment())
+		e.must(err)
+		if f.SafetyHold == nil {
+			t.Fatal("uncertain dispatch not fenced")
+		}
+	})
+	t.Run("legacy_already_applied", func(t *testing.T) {
+		e := newEnforce(t, candidateIP)
+		e.crashAfterUpdate()
+		legacy := e.onlyIncident()
+		legacy.Status.Runtime.WorkloadDispatchActionID = ""
+		e.must(e.c.Status().Update(e.ctx, legacy))
 		rv := e.liveDeployment().ResourceVersion
-
 		e.reconcile()
 		inc := e.onlyIncident()
 		wantPhase(t, inc, PhaseVerifying, "")
 		e.wantOutcomes(inc, recovery.OutcomePatched)
-		a := lastAttempt(inc)
-		if inc.Status.Runtime.Message != "resumed" || inc.Status.Runtime.ExpectedTemplateHash != a.TargetTemplateHash {
-			t.Fatalf("runtime = %+v", inc.Status.Runtime)
-		}
-		if a.PatchedAt == nil || !a.PatchedAt.Equal(&a.ReservedAt) {
-			t.Fatalf("patchedAt %v, want reservedAt %v without an attempt RS", a.PatchedAt, a.ReservedAt)
-		}
-		if e.liveDeployment().ResourceVersion != rv {
-			t.Fatal("resume updated the Deployment again")
-		}
-	})
-	t.Run("applied then image changed", func(t *testing.T) {
-		e := newEnforce(t, candidateIP)
-		e.crashAfterUpdate()
-		e.updateDeployment(func(d *appsv1.Deployment) { d.Spec.Template.Spec.Containers[0].Image = "demo-api:external" })
-
-		e.reconcile()
-		inc := e.onlyIncident()
-		wantPhase(t, inc, PhaseSuperseded, ReasonTemplateChanged)
-		e.wantOutcomes(inc, recovery.OutcomeSuperseded)
-		if img := e.liveDeployment().Spec.Template.Spec.Containers[0].Image; img != "demo-api:external" {
-			t.Fatalf("external image overwritten: %s", img)
+		if inc.Status.Runtime.Message != "resumed" || e.liveDeployment().ResourceVersion != rv {
+			t.Fatal("legacy applied intent was replayed")
 		}
 	})
 }
 
+// A Reserved cancellation fences delayed workers before reporting completion.
 func TestE21ReservedReevaluatesBeforeApplying(t *testing.T) {
-	t.Run("reserved node not ready", func(t *testing.T) {
-		e := newEnforce(t, candidateIP)
-		e.crashBeforeUpdate()
-		rv := e.liveDeployment().ResourceVersion
-		e.setReady(e.cands[0], corev1.ConditionFalse)
-
-		e.reconcile()
-		inc := e.onlyIncident()
-		if inc.Status.Runtime.Phase != PhaseWaiting {
-			t.Fatalf("phase %s, want WAITING", inc.Status.Runtime.Phase)
-		}
-		e.wantOutcomes(inc, recovery.OutcomeCancelled)
-		if lastAttempt(inc).CompletedAt == nil || e.liveDeployment().ResourceVersion != rv {
-			t.Fatal("cancelled attempt must close without changing the Deployment")
-		}
-	})
-	t.Run("failed node ready again", func(t *testing.T) {
-		e := newEnforce(t, candidateIP)
-		e.crashBeforeUpdate()
-		rv := e.liveDeployment().ResourceVersion
-		primary := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: e.ns + "-primary"}}
-		e.setReady(primary, corev1.ConditionTrue)
-
-		e.reconcile()
-		inc := e.onlyIncident()
-		wantPhase(t, inc, PhaseAborted, ReasonTriggerCleared)
-		e.wantOutcomes(inc, recovery.OutcomeCancelled)
-		if e.liveDeployment().ResourceVersion != rv {
-			t.Fatal("Deployment changed")
-		}
-	})
+	for _, change := range []string{"ready", "trigger_ready"} {
+		t.Run(change, func(t *testing.T) {
+			e := newEnforce(t, candidateIP)
+			e.crashBeforeUpdate()
+			before := e.liveDeployment()
+			mutateExecutionNode(e, change)
+			e.reconcile()
+			requireSafetyHeld(t, e, false)
+			if e.workloadChanged(e.liveDeployment()) || e.liveDeployment().ResourceVersion == before.ResourceVersion {
+				t.Fatal("reserved cancellation did not store metadata-only barrier")
+			}
+		})
+	}
 }
 
 func TestE11ExternalChangesSupersede(t *testing.T) {
@@ -544,28 +550,28 @@ func TestE15PolicyDisabledAborts(t *testing.T) {
 	t.Run("verifying", func(t *testing.T) {
 		e := newEnforce(t, candidateIP)
 		e.reconcile()
-		rv := e.liveDeployment().ResourceVersion
+		before := e.liveDeployment().Spec.DeepCopy()
 		disable(e)
 
 		e.reconcile()
 		inc := e.onlyIncident()
 		wantPhase(t, inc, PhaseAborted, ReasonPolicyDisabled)
 		e.wantOutcomes(inc, recovery.OutcomePatched)
-		if lastAttempt(inc).CompletedAt == nil || e.liveDeployment().ResourceVersion != rv {
+		if lastAttempt(inc).CompletedAt == nil || !reflect.DeepEqual(before, &e.liveDeployment().Spec) {
 			t.Fatal("patched attempt left open or Deployment changed after disable")
 		}
 	})
 	t.Run("reserved", func(t *testing.T) {
 		e := newEnforce(t, candidateIP)
 		e.crashBeforeUpdate()
-		rv := e.liveDeployment().ResourceVersion
+		before := e.liveDeployment().Spec.DeepCopy()
 		disable(e)
 
 		e.reconcile()
 		inc := e.onlyIncident()
 		wantPhase(t, inc, PhaseAborted, ReasonPolicyDisabled)
 		e.wantOutcomes(inc, recovery.OutcomeCancelled)
-		if lastAttempt(inc).CompletedAt == nil || e.liveDeployment().ResourceVersion != rv {
+		if lastAttempt(inc).CompletedAt == nil || !reflect.DeepEqual(before, &e.liveDeployment().Spec) {
 			t.Fatal("reserved attempt not settled or Deployment changed")
 		}
 	})

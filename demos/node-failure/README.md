@@ -127,3 +127,24 @@ sed 's/${OPSLOOP_RESERVE_CPU}/3300m/' demos/node-failure/reserve-control-request
 **3번째(ARM) Node가 없을 때(축소)**: `primary-only` 5회 + `all-rejected` 1회만 실행한다(`OPSLOOP_TIME_SSH=opsloop-control`). 이것은 양방향 resource-aware 선택과 ARM native 실행을 입증하지 못하므로 실험 기록에 **"P4 DoD 미충족(3노드 미구성)"**으로 명시한다. `scripts/verify-platform.py`는 2노드 baseline 전용이며 이 판정에 쓰지 않는다.
 
 **O13 결과 정리**(문서 commit 승인 필요): `bin/demo-driver summarize "$OPSLOOP_ARTIFACT_DIR/demo-a"` 출력(회차 표, 시나리오별 PASS 수와 PASS 회차의 T_recover median/max)을 `docs/experiments/`의 실험 기록에 붙이고, 원자료 디렉터리 위치와 환경(kubectl version·policyHash·index digest·netPath·nodeTimeSync)을 남긴다. 숫자만 바꿔 통과시키지 않는다.
+
+## Policy 정리의 객체 식별 경계 (SAF-01)
+
+정리의 disable, ledger 초기화, enable 및 실패 시 fallback disable은 preflight에서
+기록한 Policy UID와 변경 직전에 읽은 resourceVersion을 JSON Patch `test`로
+검증한다. 조건 검증과 필드 변경은 같은 API 요청에 포함된다. 같은 이름의 새
+Policy, 삭제 중인 객체, 조회 실패 또는 누락된 resourceVersion은 변경하지 않는다.
+ledger 초기화와 enable은 같은 snapshot에서 disabled 및 activeIncident 부재도
+확인한다. 조회 뒤 생긴 status/spec 변경은 resourceVersion 조건으로 거절된다.
+
+충돌한 작업을 강제로 덮어쓰거나 enable/ledger를 재시도하지 않는다. 정리 실패는
+기존처럼 nonzero exit와 `reset.tsv`로 남긴다. 독립 안전 조치인 fallback disable은
+새로 읽은 **동일 UID** snapshot에 한 번 더 조건부 요청할 수 있다. enable의 응답이
+유실됐고 이후 조회도 실패하면 비활성화를 확인할 수 없으므로 성공으로 보고하지
+않는다. UID가 달라졌다고 확인되면 이후 Policy mutation은 계속 금지한다.
+
+이 보호는 Policy 객체에 한정된다. 기존 load Pod의 이름 기반 삭제, owner overlay
+전체 재적용, reset 전체 시간 예산(SAF-02), 문서 sudo 권한 계약(SAF-03), 물리 Primary
+중단 및 NodePort 전제는 별도 검토·수정 대상이다. 따라서 이 수정만으로 현재
+ClusterIP 환경의 IMAGE_PULL 또는 Enforce 실험에 이 스크립트를 사용할 수 있다고
+판정하지 않는다. 실제 실험·배포·권한 변경은 별도 승인 대상이다.

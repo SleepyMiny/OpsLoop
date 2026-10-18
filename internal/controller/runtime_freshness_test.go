@@ -48,7 +48,7 @@ func TestRuntimeFreshnessSlowQueries(t *testing.T) {
 	if s.calls != 7 {
 		t.Fatalf("queries=%d, want 7", s.calls)
 	}
-	if d.Generation != 1 {
+	if e.workloadChanged(d) {
 		t.Fatal("expired metrics changed Deployment")
 	}
 }
@@ -64,14 +64,16 @@ func TestRuntimeFreshnessReservationBoundary(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnforce(t, candidateIP)
 			fixedMetrics(e, e.now.Add(-20*time.Second), 0)
+			delayed := false
 			e.withFuncs(interceptor.Funcs{SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 				err := c.SubResource(sub).Update(ctx, obj, opts...)
-				if inc, ok := obj.(*v1alpha1.RecoveryIncident); ok && lastReserved(inc) != nil && err == nil {
+				if inc, ok := obj.(*v1alpha1.RecoveryIncident); ok && lastReserved(inc) != nil && err == nil && !delayed {
+					delayed = true
 					e.now = e.now.Add(tc.delay)
 				}
 				return err
 			}}, func() { e.reconcile() })
-			if d := e.liveDeployment(); d.Generation != tc.want {
+			if d := e.liveDeployment(); e.workloadChanged(d) != (tc.want == 2) {
 				t.Fatalf("generation=%d, want %d", d.Generation, tc.want)
 			}
 			if tc.want == 1 {
@@ -82,7 +84,7 @@ func TestRuntimeFreshnessReservationBoundary(t *testing.T) {
 				e.r.Prom = e.prom.api()
 				e.reconcile()
 				e.reconcile()
-				if d := e.liveDeployment(); d.Generation != 2 {
+				if d := e.liveDeployment(); !e.workloadChanged(d) {
 					t.Fatalf("fresh resume generation=%d", d.Generation)
 				}
 				if at := e.onlyIncident().Status.Runtime.Attempts; len(at) != 1 || at[0].Outcome != recovery.OutcomePatched {
@@ -112,7 +114,7 @@ func TestRuntimeFreshnessRestartAfterConflict(t *testing.T) {
 			if fresh {
 				want = 2
 			}
-			if d := e.liveDeployment(); d.Generation != want {
+			if d := e.liveDeployment(); e.workloadChanged(d) != (want == 2) {
 				t.Fatalf("generation=%d want=%d", d.Generation, want)
 			}
 		})
@@ -127,7 +129,7 @@ func TestRuntimeFreshnessInvalidMetrics(t *testing.T) {
 			s := fixedMetrics(e, e.now, 0)
 			e.r.Prom = &alteredMetrics{API: s, kind: kind}
 			e.reconcile()
-			if d := e.liveDeployment(); d.Generation != 1 {
+			if d := e.liveDeployment(); e.workloadChanged(d) {
 				t.Fatalf("%s metrics changed Deployment", kind)
 			}
 		})
@@ -176,7 +178,7 @@ func TestRuntimeFreshnessAlreadyAppliedRestart(t *testing.T) {
 	e.r = &restarted
 	e.reconcile()
 	e.wantOutcomes(e.onlyIncident(), recovery.OutcomePatched)
-	if d := e.liveDeployment(); d.Generation != 2 {
+	if d := e.liveDeployment(); !e.workloadChanged(d) {
 		t.Fatalf("already applied generation=%d", d.Generation)
 	}
 }
@@ -191,13 +193,13 @@ func TestRuntimeFreshnessReservedNodeOwnExpiry(t *testing.T) {
 	slow := fixedMetrics(e, base, time.Second)
 	e.r.Prom = &reservedBoundaryMetrics{API: slow, older: base.Add(-23 * time.Second)}
 	e.reconcile()
-	if d := e.liveDeployment(); d.Generation != 1 {
+	if d := e.liveDeployment(); e.workloadChanged(d) {
 		t.Fatalf("winner's fresh metrics authorized expired reserved node: generation=%d", d.Generation)
 	}
 	e.wantOutcomes(e.onlyIncident(), recovery.OutcomeReserved)
 	e.r.Prom = e.prom.api()
 	e.reconcile()
-	if d := e.liveDeployment(); d.Generation != 2 || d.Spec.Template.Spec.NodeSelector[hostnameLabel] != e.cands[0].Labels[hostnameLabel] {
+	if d := e.liveDeployment(); !e.workloadChanged(d) || d.Spec.Template.Spec.NodeSelector[hostnameLabel] != e.cands[0].Labels[hostnameLabel] {
 		t.Fatalf("reservation not resumed once on original node: %+v", d.Spec.Template.Spec.NodeSelector)
 	}
 }
@@ -232,8 +234,8 @@ func TestRuntimeFreshnessDeadlineDuringReservation(t *testing.T) {
 		}
 		return err
 	}}, func() { e.reconcile() })
-	wantPhase(t, e.onlyIncident(), PhaseFailed, ReasonDeadlineExceeded)
-	if d := e.liveDeployment(); d.Generation != 1 {
+	requireSafetyHeld(t, e, false)
+	if d := e.liveDeployment(); e.workloadChanged(d) {
 		t.Fatalf("deadline reached before write, generation=%d", d.Generation)
 	}
 	e.wantOutcomes(e.onlyIncident(), recovery.OutcomeCancelled)

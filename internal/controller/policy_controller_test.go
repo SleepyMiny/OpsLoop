@@ -309,9 +309,18 @@ func wantPhase(t *testing.T, inc *v1alpha1.RecoveryIncident, phase, reason strin
 
 func wantCondition(t *testing.T, p *v1alpha1.RecoveryPolicy, reason string) {
 	t.Helper()
-	c := p.Status.Conditions
-	if len(c) != 1 || c[0].Type != CondMonitoring || c[0].Reason != reason {
-		t.Fatalf("conditions = %+v, want only %s with reason %s", c, CondMonitoring, reason)
+	var monitoring []metav1.Condition
+	for _, c := range p.Status.Conditions {
+		if c.Type == CondMonitoring {
+			monitoring = append(monitoring, c)
+		}
+	}
+	status := metav1.ConditionFalse
+	if reason == CondActive || reason == CondIncidentActive {
+		status = metav1.ConditionTrue
+	}
+	if len(monitoring) != 1 || monitoring[0].Reason != reason || monitoring[0].Status != status {
+		t.Fatalf("conditions = %+v, want one %s with status %s and reason %s", p.Status.Conditions, CondMonitoring, status, reason)
 	}
 }
 
@@ -569,8 +578,11 @@ func TestE24ForgedIncidentIsNotAdopted(t *testing.T) {
 	if a := got.Status.ActiveIncident; a == nil || a.Name != forged.Name || a.IncidentUID != "" {
 		t.Fatalf("activeIncident = %+v, want reserved %s without incidentUID", a, forged.Name)
 	}
-	if c := got.Status.Conditions; len(c) != 1 || c[0].Reason != CondIncidentActive || !strings.Contains(c[0].Message, "does not match") {
-		t.Fatalf("conditions = %+v, want mismatch message", c)
+	wantCondition(t, got, CondIncidentActive)
+	for _, c := range got.Status.Conditions {
+		if c.Type == CondMonitoring && !strings.Contains(c.Message, "does not match") {
+			t.Fatalf("conditions = %+v, want mismatch message", got.Status.Conditions)
+		}
 	}
 	if inc := f.onlyIncident(); inc.Status.Runtime.Phase != "" || inc.Status.Runtime.Decision != nil {
 		t.Fatalf("forged incident progressed: %+v", inc.Status.Runtime)

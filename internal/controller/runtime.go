@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/SleepyMiny/OpsLoop/api/v1alpha1"
+	"github.com/SleepyMiny/OpsLoop/internal/candidates"
 	"github.com/SleepyMiny/OpsLoop/internal/recovery"
 	"github.com/SleepyMiny/OpsLoop/internal/verification"
 )
@@ -66,7 +68,7 @@ func nextActionID(inc *v1alpha1.RecoveryIncident) string {
 
 // startAttempt persists the action intent before any Deployment change, then executes it in the same reconcile (7.3 ①②).
 // live is this reconcile's APIReader Deployment whose template the global check matched against the expected hash.
-func (r *PolicyReconciler) startAttempt(ctx context.Context, p *v1alpha1.RecoveryPolicy, inc *v1alpha1.RecoveryIncident, live *appsv1.Deployment, dec v1alpha1.RecoveryDecision, now time.Time) (ctrl.Result, error) {
+func (r *PolicyReconciler) startAttempt(ctx context.Context, p *v1alpha1.RecoveryPolicy, inc *v1alpha1.RecoveryIncident, live *appsv1.Deployment, dec v1alpha1.RecoveryDecision, inputs candidates.Input, now time.Time) (ctrl.Result, error) {
 	if !budgetLeft(inc) {
 		return r.finish(ctx, p, inc, PhaseFailed, ReasonBudgetExhausted, "", now)
 	}
@@ -89,7 +91,7 @@ func (r *PolicyReconciler) startAttempt(ctx context.Context, p *v1alpha1.Recover
 		// The Deployment is untouched; a stale duplicate reservation ends here.
 		return requeueOnConflict(err)
 	}
-	return r.execute(ctx, p, inc, live, dec)
+	return r.execute(ctx, p, inc, live, dec, inputs)
 }
 
 // resume continues the Reserved attempt found at reconcile start, e.g. after a controller restart (7.3 ②③).
@@ -101,6 +103,17 @@ func (r *PolicyReconciler) resume(ctx context.Context, p *v1alpha1.RecoveryPolic
 		closeAttempt(a, recovery.OutcomeSuperseded, now)
 		return r.finish(ctx, p, inc, PhaseSuperseded, reason, "", now)
 	case recovery.AlreadyApplied:
+		current, reason, err := (deploymentExecution{r}).executionPolicy(ctx, p, inc)
+		if err != nil {
+			return r.haltAndSettle(ctx, p, inc, "POLICY_OBSERVATION_UNKNOWN: "+err.Error())
+		}
+		if reason != "" {
+			return r.cancelAndSettle(ctx, current, inc, reason)
+		}
+		observed := (deploymentExecution{r}).ObserveApplied(ctx, inc, live, a)
+		if observed.HaltReason != "" {
+			return r.haltAndSettle(ctx, p, inc, observed.HaltReason)
+		}
 		var rss appsv1.ReplicaSetList
 		if err := r.List(ctx, &rss, client.InNamespace(live.Namespace)); err != nil {
 			return ctrl.Result{}, err
@@ -120,69 +133,92 @@ func (r *PolicyReconciler) resume(ctx context.Context, p *v1alpha1.RecoveryPolic
 	}
 
 	// A decision reserved before a long controller outage may have expired, so the reserved Node is checked again.
-	dec, cleared, err := r.decide(ctx, p, inc, live, now, "")
+	dec, inputs, cleared, err := r.decide(ctx, p, inc, live, now, "")
 	if err != nil {
-		return ctrl.Result{}, err
+		return r.haltAndSettle(ctx, p, inc, "NODE_OBSERVATION_UNKNOWN: "+err.Error())
 	}
 	if cleared {
-		closeAttempt(a, recovery.OutcomeCancelled, now)
-		return r.finish(ctx, p, inc, PhaseAborted, ReasonTriggerCleared, "", now)
+		return r.haltAndSettle(ctx, p, inc, ReasonTriggerCleared)
 	}
 	i := slices.IndexFunc(dec.Candidates, func(c v1alpha1.CandidateEvaluation) bool { return c.NodeUID == a.NodeUID })
 	if i >= 0 && dec.Candidates[i].Eligible {
-		return r.execute(ctx, p, inc, live, dec)
+		return r.execute(ctx, p, inc, live, dec, inputs)
 	}
 	why := "not a candidate"
 	if i >= 0 {
 		why = strings.Join(dec.Candidates[i].RejectReasons, ",")
 	}
-	closeAttempt(a, recovery.OutcomeCancelled, now)
-	inc.Status.Runtime.Decision = &dec
-	setPhase(inc, PhaseWaiting, dec.DecisionReason, "reserved node "+a.NodeName+" no longer eligible: "+why, now)
-	if err := r.Status().Update(ctx, inc); err != nil {
-		return requeueOnConflict(err)
-	}
-	return ctrl.Result{RequeueAfter: waitingPeriod}, nil
+	return r.haltAndSettle(ctx, p, inc, "RESERVED_NODE_INVALID: "+why)
 }
 
-// execute is the only Deployment write. The live resourceVersion rides along as the optimistic concurrency precondition.
-func (r *PolicyReconciler) execute(ctx context.Context, p *v1alpha1.RecoveryPolicy, inc *v1alpha1.RecoveryIncident, live *appsv1.Deployment, dec v1alpha1.RecoveryDecision) (ctrl.Result, error) {
-	if inc.Spec.Policy.Mode != v1alpha1.PolicyModeEnforce || p.Spec.Mode != v1alpha1.PolicyModeEnforce || !p.Spec.Enabled {
-		return ctrl.Result{}, fmt.Errorf("refusing to change Deployment %s: policy is not enabled in Enforce mode", live.Name)
+// execute records status only; deploymentExecution owns authorization and mutation.
+func (r *PolicyReconciler) execute(ctx context.Context, p *v1alpha1.RecoveryPolicy, inc *v1alpha1.RecoveryIncident, live *appsv1.Deployment, dec v1alpha1.RecoveryDecision, inputs candidates.Input) (ctrl.Result, error) {
+	out, err := (deploymentExecution{r}).AdvanceAttempt(ctx, p, inc, dec, inputs, func() error { return r.recordDispatch(ctx, inc) })
+	if err != nil {
+		// Only definitive pre-dispatch failures/409 reach this error branch.
+		return requeueOnConflict(errors.Join(err, r.clearDispatch(ctx, inc)))
 	}
-	a := lastReserved(inc)
-	// Never authorize a write from the persisted reservation. On resume, dec is
-	// the newly collected evaluation; its winner may differ from the reserved
-	// node, so check that node's own samples, not the winner's expiry.
-	now := r.Now()
-	if !now.Before(inc.Spec.Deadline.Time) {
-		closeAttempt(a, recovery.OutcomeCancelled, now)
-		return r.finish(ctx, p, inc, PhaseFailed, ReasonDeadlineExceeded, "", now)
+	if out.HaltReason != "" {
+		return r.haltAndSettle(ctx, p, inc, out.HaltReason)
 	}
-	if !attemptMetricsFresh(dec, a, inc.Spec.Policy.Filter.MaxSampleAge.Duration, now) {
-		// Defer this write without reserving another action. The next reconcile
-		// recollects metrics and either resumes or cancels under the usual rules.
+	if out.Unauthorized != "" {
+		return r.cancelAndSettle(ctx, out.Policy, inc, out.Unauthorized)
+	}
+	if out.Deferred {
+		if err := r.clearDispatch(ctx, inc); err != nil {
+			return requeueOnConflict(err)
+		}
 		return ctrl.Result{RequeueAfter: waitingPeriod}, nil
 	}
-	preRV := live.ResourceVersion
-	recovery.Mutate(&live.Spec.Template, a.Hostname, a.ActionID)
-	if err := r.Update(ctx, live, client.FieldOwner(fieldOwner)); err != nil {
-		// Never overwrite on conflict; whether the change landed is settled by the next reconcile's Resume.
-		return requeueOnConflict(err)
-	}
-	h := v1alpha1.TemplateHash(live.Spec.Template)
-	msg := ""
-	if h != a.TargetTemplateHash {
-		msg = "applied template hash " + h + " differs from target (apiserver defaulting)"
-	}
+	a := lastReserved(inc)
+	now := r.Now()
 	t := metav1.NewTime(now)
-	a.Outcome, a.PreResourceVersion, a.PatchedAt = recovery.OutcomePatched, preRV, &t
-	inc.Status.Runtime.ExpectedTemplateHash = h
-	setPhase(inc, PhaseVerifying, "", msg, now)
+	a.Outcome, a.PreResourceVersion, a.PatchedAt = recovery.OutcomePatched, out.PreResourceVersion, &t
+	inc.Status.Runtime.ExpectedTemplateHash = v1alpha1.TemplateHash(out.Live.Spec.Template)
+	inc.Status.Runtime.WorkloadDispatchActionID = ""
+	setPhase(inc, PhaseVerifying, "", "", now)
 	if err := r.Status().Update(ctx, inc); err != nil {
 		return requeueOnConflict(err)
 	}
 	return ctrl.Result{RequeueAfter: verifyPeriod}, nil
+}
+
+// haltAndSettle never releases before a confirmed same-Deployment barrier and
+// fresh settlement. The marker survives API outages/restarts; status is not the
+// authority. Even a pending status conflict still attempts the durable CAS.
+func (r *PolicyReconciler) haltAndSettle(ctx context.Context, p *v1alpha1.RecoveryPolicy, inc *v1alpha1.RecoveryIncident, reason string) (ctrl.Result, error) {
+	var statusErr error
+	pendingReason := inc.Status.Runtime.SafetyHaltReason
+	if pendingReason == "" {
+		pendingReason = v1alpha1.Truncate(reason, 256)
+	}
+	if inc.Status.Runtime.SafetyHaltReason == "" {
+		inc.Status.Runtime.SafetyHaltReason = pendingReason
+		statusErr = r.Status().Update(ctx, inc)
+	}
+	live, err := (deploymentExecution{r}).Hold(ctx, inc, pendingReason)
+	if inc.Status.Runtime.SafetyHaltReason == "" {
+		statusErr = errors.Join(statusErr, fmt.Errorf("safety halt retry marker not persisted; update CRD before using this controller"))
+	}
+	if err != nil || statusErr != nil {
+		return requeueOnConflict(errors.Join(statusErr, err))
+	}
+	now := r.Now()
+	settleReserved(inc, live, now)
+	inc.Status.Runtime.WorkloadDispatchActionID = ""
+	if p == nil {
+		setPhase(inc, PhaseManualRequired, "SAFETY_HALTED", inc.Status.Runtime.SafetyHaltReason, now)
+		return requeueOnConflict(r.Status().Update(ctx, inc))
+	}
+	return r.finish(ctx, p, inc, PhaseManualRequired, "SAFETY_HALTED", inc.Status.Runtime.SafetyHaltReason, now)
+}
+
+func executionReservationMatches(p *v1alpha1.RecoveryPolicy, inc *v1alpha1.RecoveryIncident) bool {
+	if p == nil || string(p.UID) != inc.Spec.PolicyRef.UID || p.Name != inc.Spec.PolicyRef.Name || p.Namespace != inc.Namespace {
+		return false
+	}
+	a := p.Status.ActiveIncident
+	return a != nil && a.Name == inc.Name && a.IncidentUID == string(inc.UID) && a.Sequence == inc.Spec.Sequence
 }
 
 // attemptMetricsFresh is the final, exclusive expiry check at the write boundary.
@@ -219,11 +255,11 @@ func (r *PolicyReconciler) verify(ctx context.Context, p *v1alpha1.RecoveryPolic
 	spec := inc.Spec.Policy
 	var rss appsv1.ReplicaSetList
 	if err := r.List(ctx, &rss, client.InNamespace(live.Namespace)); err != nil {
-		return ctrl.Result{}, err
+		return r.haltAndSettle(ctx, p, inc, "VERIFICATION_OBSERVATION_UNKNOWN: "+err.Error())
 	}
 	var pods corev1.PodList
 	if err := r.List(ctx, &pods, client.InNamespace(live.Namespace)); err != nil {
-		return ctrl.Result{}, err
+		return r.haltAndSettle(ctx, p, inc, "VERIFICATION_OBSERVATION_UNKNOWN: "+err.Error())
 	}
 	rs, pod := verification.AttemptPod(rss.Items, pods.Items, live.UID, rt.Attempts[i].ActionID)
 	in := verification.Input{Now: now, Attempt: rt.Attempts[i], Verification: spec.Verification, Budget: spec.Budget, RS: rs, Pod: pod}
@@ -233,10 +269,14 @@ func (r *PolicyReconciler) verify(ctx context.Context, p *v1alpha1.RecoveryPolic
 	}
 	var eps discoveryv1.EndpointSliceList
 	if err := r.List(ctx, &eps, client.InNamespace(live.Namespace), client.MatchingLabels{discoveryv1.LabelServiceName: spec.Verification.ServiceName}); err != nil {
-		return ctrl.Result{}, err
+		return r.haltAndSettle(ctx, p, inc, "VERIFICATION_OBSERVATION_UNKNOWN: "+err.Error())
 	}
 	in.Slices = eps.Items
 
+	observed := (deploymentExecution{r}).ObserveApplied(ctx, inc, live, &rt.Attempts[i])
+	if observed.HaltReason != "" {
+		return r.haltAndSettle(ctx, p, inc, observed.HaltReason)
+	}
 	next, outcome := verification.Step(in)
 	rt.Attempts[i] = next
 	switch outcome {
@@ -299,4 +339,51 @@ func (r *PolicyReconciler) getDeployment(ctx context.Context, key types.Namespac
 		return nil, err
 	}
 	return d, nil
+}
+
+// recordDispatch and clearDispatch are Incident status CAS owned by the single
+// Reconciler status writer. An old worker cannot clear another action's marker.
+func (r *PolicyReconciler) recordDispatch(ctx context.Context, inc *v1alpha1.RecoveryIncident) error {
+	a := lastReserved(inc)
+	if a == nil || inc.UID == "" || inc.Status.Runtime.WorkloadDispatchActionID != "" {
+		return fmt.Errorf("dispatch requires an identified, unmarked reserved action")
+	}
+	actionID := a.ActionID
+	inc.Status.Runtime.WorkloadDispatchActionID = actionID
+	if err := r.Status().Update(ctx, inc); err != nil {
+		return err
+	}
+	if inc.Status.Runtime.WorkloadDispatchActionID != actionID {
+		return fmt.Errorf("dispatch marker not persisted; update CRD before using this controller")
+	}
+	return nil
+}
+func (r *PolicyReconciler) clearDispatch(ctx context.Context, inc *v1alpha1.RecoveryIncident) error {
+	marker := inc.Status.Runtime.WorkloadDispatchActionID
+	if marker == "" {
+		return nil
+	}
+	a := lastReserved(inc)
+	if a == nil || a.ActionID != marker {
+		return fmt.Errorf("dispatch marker/action mismatch; manual inspection required")
+	}
+	inc.Status.Runtime.WorkloadDispatchActionID = ""
+	return r.Status().Update(ctx, inc)
+}
+func (r *PolicyReconciler) cancelAndSettle(ctx context.Context, p *v1alpha1.RecoveryPolicy, inc *v1alpha1.RecoveryIncident, reason string) (ctrl.Result, error) {
+	live, err := (deploymentExecution{r}).CloseAttempt(ctx, inc)
+	if err != nil {
+		return requeueOnConflict(err)
+	}
+	now := r.Now()
+	settleReserved(inc, live, now)
+	inc.Status.Runtime.WorkloadDispatchActionID = ""
+	setPhase(inc, PhaseAborted, reason, "execution policy no longer authorizes this incident; generation barrier confirmed", now)
+	if err := r.Status().Update(ctx, inc); err != nil {
+		return requeueOnConflict(err)
+	}
+	if executionReservationMatches(p, inc) {
+		return r.release(ctx, p, inc, now)
+	}
+	return ctrl.Result{RequeueAfter: monitorPeriod}, nil
 }

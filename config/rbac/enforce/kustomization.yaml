@@ -1,5 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+# Requires the base config/rbac roles. Apply only after the legacy-writer
+# transition gate in docs/runbooks/controller-writer-transition.md is satisfied.
 resources:
+  - service_account.yaml
+  - base_role_binding.yaml
+  - leader_election_role_binding.yaml
   - role.yaml
   - role_binding.yaml

@@ -9,5 +9,5 @@ roleRef:
   name: opsloop-controller-enforce
 subjects:
   - kind: ServiceAccount
-    name: opsloop-controller
+    name: opsloop-controller-fenced-v1
     namespace: opsloop-system
