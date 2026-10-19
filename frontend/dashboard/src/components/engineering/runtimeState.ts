@@ -1,3 +1,4 @@
+import { displayIncident } from '../../domain/displayIncident';
 import { RUNTIME_PHASE_LABEL } from '../../domain/labels';
 import type { DashboardSnapshot } from '../../domain/types';
 import type { LampState } from '../shared/primitives';
@@ -15,9 +16,9 @@ export interface RuntimeAlongside {
   fact: string;
 }
 
-export function runtimeAlongside(snapshot: Pick<DashboardSnapshot, 'activeIncident' | 'workload'>): RuntimeAlongside {
+export function runtimeAlongside(snapshot: Pick<DashboardSnapshot, 'activeIncident' | 'workload'> & Partial<Pick<DashboardSnapshot, 'source' | 'recentIncidents'>>): RuntimeAlongside {
   const fact = `replicas=${snapshot.workload.replicas}`;
-  const runtime = snapshot.activeIncident?.status.runtime;
+  const runtime = displayIncident(snapshot)?.status.runtime;
   if (!runtime) return { tone: 'ok', state: '감시 중, 열린 장애 없음', fact };
 
   switch (runtime.quarantine) {

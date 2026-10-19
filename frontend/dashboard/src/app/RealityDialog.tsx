@@ -10,7 +10,7 @@ export function RealityDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  source: 'demo' | 'live';
+  source: 'demo' | 'live' | 'replay';
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -31,13 +31,13 @@ export function RealityDialog({
       <p className={styles.dialogLead}>
         {source === 'demo'
           ? '지금 화면은 Demo Mode입니다. Runtime·Engineering 동작은 설계 문서(architecture v0.1)의 감지·분류·후보 평가 규칙과 점수 공식을 시뮬레이션 지표에 적용한 결과입니다.'
-          : '지금 화면은 Live 데이터를 표시합니다. 아래는 저장소 문서 기준의 구현 상태입니다.'}{' '}
+          : source === 'replay' ? '지금 화면은 과거 실환경 증거의 보존 시점만 재생합니다. 현재 클러스터 상태나 자동 복구 실증이 아닙니다.' : '지금 화면은 BFF가 조회한 현재 데이터입니다. 현재 Incident가 없으면 빈 상태를 표시합니다.'}{' '}
         저장소 기준 {REALITY_AS_OF} 상태는 다음과 같습니다.
       </p>
       <div className={styles.realityGrid}>
         <RealityColumn title="구축됨" state="ok" items={REALITY.built} />
-        <RealityColumn title="준비됨, 아직 만들지 않음" state="caution" items={REALITY.prepared} />
-        <RealityColumn title="이 화면에서 시뮬레이션" state="act" items={REALITY.simulated} />
+        <RealityColumn title="남은 검증 및 배포" state="caution" items={REALITY.prepared} />
+        <RealityColumn title="데이터 출처 구분" state="act" items={REALITY.simulated} />
       </div>
     </dialog>
   );

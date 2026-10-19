@@ -706,3 +706,17 @@
   color: var(--c-ink-2);
   font-size: var(--fs-sm);
 }
+
+.modeLinks { display: flex; gap: .65rem; font-size: .8rem; }
+.modeLinks a { color: var(--c-ink-2); text-decoration: none; padding: .3rem; }
+.modeLinks a[aria-current] { color: var(--c-act); text-decoration: underline; font-weight: 700; }
+.replayControls { display: flex; flex-wrap: wrap; gap: .6rem; font-size: .75rem; }
+.replayControls label { display: grid; gap: .25rem; }
+.replayControls select { max-width: 20rem; padding: .4rem; background: var(--c-panel); color: var(--c-ink); border: 1px solid var(--c-rule); border-radius: .3rem; }
+.sourceNotice { margin: .6rem 1rem; padding: .7rem 1rem; border: 1px solid var(--c-rule); border-left: 4px solid var(--c-act); border-radius: .4rem; font-size: .8rem; line-height: 1.5; }
+.sourceNotice p, .sourceNotice ul { margin: .35rem 0; }
+.sourceNotice code { overflow-wrap: anywhere; }
+.sourceNotice[data-source="replay"] { border-left-color: var(--c-caution); }
+
+.app { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.sourceNotice { max-height: 26dvh; overflow: auto; }

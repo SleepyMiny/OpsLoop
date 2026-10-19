@@ -1,3 +1,4 @@
+import { displayIncident } from '../../domain/displayIncident';
 import { useMemo } from 'react';
 import { RUNTIME_PHASE_LABEL } from '../../domain/labels';
 import type { RecoveryPolicySpec, RuntimePhase } from '../../domain/types';
@@ -42,7 +43,7 @@ const LOOPS_BACK: ReadonlySet<string> = new Set<LaneId>(['WAITING', 'COOLDOWN'])
 const GROUP_START: ReadonlySet<string> = new Set<LaneId>(['RUNTIME_RECOVERY_EXHAUSTED', 'FAILED']);
 
 export function PipelineLadder({ snapshot, emphasized }: RegionProps) {
-  const incident = snapshot.activeIncident;
+  const incident = displayIncident(snapshot);
   const runtime = incident?.status.runtime ?? null;
   const spec = snapshot.policy.spec;
 

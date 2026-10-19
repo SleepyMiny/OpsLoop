@@ -1,0 +1,155 @@
+{
+  "activeIncident": null,
+  "cluster": {
+    "k3sVersion": "v1.35.9+k3s1",
+    "name": "opsloop",
+    "nodes": [
+      {
+        "allocatable": {
+          "cpuMillicores": 4000,
+          "memoryBytes": 8589934592
+        },
+        "arch": "amd64",
+        "displayName": "opsloop-control",
+        "hostnameLabel": "opsloop-control",
+        "name": "opsloop-control",
+        "pods": [
+          {
+            "name": "demo-pod",
+            "namespace": "opsloop-demo",
+            "phase": "Running",
+            "ready": false,
+            "restarts": 0,
+            "role": "system",
+            "uid": "fixture-pod"
+          }
+        ],
+        "pressure": [],
+        "readiness": "Ready",
+        "recoveryCandidate": true,
+        "requested": {
+          "cpuMillicores": 50,
+          "memoryBytes": 67108864
+        },
+        "role": "control-plane",
+        "site": "laptop-vm",
+        "taints": [],
+        "uid": "fixture-control",
+        "unschedulable": false,
+        "usage": {
+          "cpu": {
+            "observedAt": 1792454380000,
+            "value": 0.25
+          },
+          "cpuSampleCount": 6,
+          "exporterUp": 1,
+          "memAvailableBytes": {
+            "observedAt": 1792454370000,
+            "value": 4294967296
+          },
+          "memTotalBytes": 8589934592,
+          "memory": {
+            "observedAt": 1792454370000,
+            "value": 0.5
+          }
+        }
+      }
+    ]
+  },
+  "diagnostics": {
+    "metricsAvailable": true,
+    "readOnly": true,
+    "warnings": [
+      "Image platform index not queried: preview fails closed until a verified manifest source is configured.",
+      "HTTP recovery probes/driver timings are not collected by this BFF.",
+      "Pod requests use the Controller contract; native sidecar/Pod overhead limitations apply."
+    ]
+  },
+  "http": {
+    "endpoint": "",
+    "probes": []
+  },
+  "observedAt": 1792454400000,
+  "policy": {
+    "apiVersion": "opsloop.io/v1alpha1",
+    "kind": "RecoveryPolicy",
+    "metadata": {
+      "creationTimestamp": "2026-10-20T00:00:00Z",
+      "generation": 2,
+      "name": "demo-api",
+      "namespace": "opsloop-demo",
+      "uid": "fixture-policy"
+    },
+    "spec": {
+      "targetRef": {
+        "name": "demo-api"
+      },
+      "enabled": true,
+      "mode": "ObserveOnly",
+      "candidateSelector": {
+        "matchLabels": {
+          "opsloop.io/recovery-candidate": "true"
+        }
+      },
+      "requiredPlatforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ],
+      "detection": {
+        "nodeUnreadyFor": "20s",
+        "restartThreshold": 3,
+        "restartWindow": "2m0s"
+      },
+      "filter": {
+        "maxCPUUtilizationPercent": 85,
+        "maxMemoryUtilizationPercent": 85,
+        "minimumAvailableMemory": "512Mi",
+        "startupMemoryBudget": "256Mi",
+        "requestedCapacityReservePercent": 10,
+        "maxSampleAge": "1m30s"
+      },
+      "score": {
+        "cpuWeight": 30,
+        "memoryWeight": 35,
+        "requestsWeight": 35,
+        "recentFailurePenalty": 15,
+        "maxRecentFailurePenalty": 45,
+        "recentFailureWindow": "30m0s"
+      },
+      "budget": {
+        "maxActionsPerIncident": 2,
+        "cooldown": "2m0s",
+        "placementTimeout": "1m30s",
+        "verificationTimeout": "1m0s",
+        "incidentDeadline": "10m0s"
+      },
+      "verification": {
+        "serviceName": "demo-api",
+        "port": 8080,
+        "consecutiveSuccesses": 5,
+        "stabilityWindow": "30s"
+      }
+    },
+    "status": {
+      "observedGeneration": 2
+    }
+  },
+  "policyHash": "b362c9710ce400cf6bb958f42ce624007826cefd7a0f068294682e00eaf673a9",
+  "recentIncidents": [],
+  "source": "live",
+  "workload": {
+    "imageIndexDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "name": "demo-api",
+    "namespace": "opsloop-demo",
+    "nodeSelectorHostname": "opsloop-control",
+    "platforms": [],
+    "replicas": 1,
+    "requests": {
+      "cpuMillicores": 50,
+      "memoryBytes": 67108864
+    },
+    "tolerations": [],
+    "uid": "fixture-workload",
+    "unsupportedConstraints": []
+  }
+}

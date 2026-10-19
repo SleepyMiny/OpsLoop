@@ -1,0 +1,768 @@
+{
+  "schemaVersion": "opsloop-evidence-replay/v1",
+  "experiments": [
+    {
+      "id": "image-pull",
+      "title": "IMAGE_PULL · 실환경 장애 분류",
+      "verification": "LIVE VERIFIED / ObserveOnly",
+      "limitations": [
+        "과거 실증 기록이며 현재 클러스터 상태가 아닙니다.",
+        "전체 과거 Node snapshot은 미포함입니다. 저장된 Controller Decision을 재평가하지 않습니다.",
+        "자동 재배치/Enforce/Engineering·PR 자동화는 미실증입니다.",
+        "첫 frame의 시각은 Policy 생성 시각이며 상태 조회 시각은 별도 보존되지 않았습니다."
+      ],
+      "milestones": [
+        {
+          "label": "Controller 장애 감지",
+          "at": 1792418189000
+        }
+      ],
+      "frames": [
+        {
+          "label": "등록 상태 · Disabled (생성 시각 기준)",
+          "snapshot": {
+            "source": "replay",
+            "observedAt": 1792418175000,
+            "cluster": {
+              "name": "보존된 실험 기록",
+              "k3sVersion": "기록에 없음",
+              "nodes": []
+            },
+            "workload": {
+              "uid": "evidence-object-1",
+              "namespace": "opsloop-imagepull-test",
+              "name": "image-pull-test",
+              "replicas": 1,
+              "nodeSelectorHostname": "opsloop-control",
+              "imageIndexDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+              "platforms": [],
+              "requests": {
+                "cpuMillicores": 50,
+                "memoryBytes": 67108864
+              },
+              "unsupportedConstraints": []
+            },
+            "http": {
+              "endpoint": "",
+              "probes": []
+            },
+            "policy": {
+              "apiVersion": "opsloop.io/v1alpha1",
+              "kind": "RecoveryPolicy",
+              "metadata": {
+                "name": "image-pull-test",
+                "namespace": "opsloop-imagepull-test",
+                "uid": "evidence-object-2",
+                "generation": 1,
+                "creationTimestamp": "2026-10-19T13:56:15Z"
+              },
+              "spec": {
+                "targetRef": {
+                  "name": "image-pull-test"
+                },
+                "enabled": false,
+                "mode": "ObserveOnly",
+                "candidateSelector": {
+                  "matchLabels": {
+                    "opsloop.io/recovery-candidate": "true"
+                  }
+                },
+                "requiredPlatforms": [
+                  "linux/amd64",
+                  "linux/arm64"
+                ],
+                "detection": {
+                  "nodeUnreadyFor": "20s",
+                  "restartThreshold": 3,
+                  "restartWindow": "120s"
+                },
+                "filter": {
+                  "maxCPUUtilizationPercent": 85,
+                  "maxMemoryUtilizationPercent": 85,
+                  "maxSampleAge": "90s",
+                  "minimumAvailableMemory": "512Mi",
+                  "requestedCapacityReservePercent": 10,
+                  "startupMemoryBudget": "256Mi"
+                },
+                "score": {
+                  "cpuWeight": 30,
+                  "maxRecentFailurePenalty": 45,
+                  "memoryWeight": 35,
+                  "recentFailurePenalty": 15,
+                  "recentFailureWindow": "30m",
+                  "requestsWeight": 35
+                },
+                "budget": {
+                  "cooldown": "120s",
+                  "incidentDeadline": "10m",
+                  "maxActionsPerIncident": 2,
+                  "placementTimeout": "90s",
+                  "verificationTimeout": "60s"
+                },
+                "verification": {
+                  "consecutiveSuccesses": 5,
+                  "port": 8080,
+                  "serviceName": "image-pull-test",
+                  "stabilityWindow": "30s"
+                }
+              },
+              "status": {
+                "observedGeneration": 1
+              }
+            },
+            "activeIncident": null,
+            "recentIncidents": []
+          }
+        },
+        {
+          "label": "종료 기록 · MANUAL_REQUIRED",
+          "snapshot": {
+            "source": "replay",
+            "observedAt": 1792418225078,
+            "cluster": {
+              "name": "보존된 실험 기록",
+              "k3sVersion": "기록에 없음",
+              "nodes": []
+            },
+            "workload": {
+              "uid": "evidence-object-1",
+              "namespace": "opsloop-imagepull-test",
+              "name": "image-pull-test",
+              "replicas": 1,
+              "nodeSelectorHostname": "opsloop-control",
+              "imageIndexDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+              "platforms": [],
+              "requests": {
+                "cpuMillicores": 50,
+                "memoryBytes": 67108864
+              },
+              "unsupportedConstraints": []
+            },
+            "http": {
+              "endpoint": "",
+              "probes": []
+            },
+            "policy": {
+              "apiVersion": "opsloop.io/v1alpha1",
+              "kind": "RecoveryPolicy",
+              "metadata": {
+                "name": "image-pull-test",
+                "namespace": "opsloop-imagepull-test",
+                "uid": "evidence-object-2",
+                "generation": 3,
+                "creationTimestamp": "2026-10-19T13:56:15Z"
+              },
+              "spec": {
+                "targetRef": {
+                  "name": "image-pull-test"
+                },
+                "enabled": false,
+                "mode": "ObserveOnly",
+                "candidateSelector": {
+                  "matchLabels": {
+                    "opsloop.io/recovery-candidate": "true"
+                  }
+                },
+                "requiredPlatforms": [
+                  "linux/amd64",
+                  "linux/arm64"
+                ],
+                "detection": {
+                  "nodeUnreadyFor": "20s",
+                  "restartThreshold": 3,
+                  "restartWindow": "120s"
+                },
+                "filter": {
+                  "maxCPUUtilizationPercent": 85,
+                  "maxMemoryUtilizationPercent": 85,
+                  "maxSampleAge": "90s",
+                  "minimumAvailableMemory": "512Mi",
+                  "requestedCapacityReservePercent": 10,
+                  "startupMemoryBudget": "256Mi"
+                },
+                "score": {
+                  "cpuWeight": 30,
+                  "maxRecentFailurePenalty": 45,
+                  "memoryWeight": 35,
+                  "recentFailurePenalty": 15,
+                  "recentFailureWindow": "30m",
+                  "requestsWeight": 35
+                },
+                "budget": {
+                  "cooldown": "120s",
+                  "incidentDeadline": "10m",
+                  "maxActionsPerIncident": 2,
+                  "placementTimeout": "90s",
+                  "verificationTimeout": "60s"
+                },
+                "verification": {
+                  "consecutiveSuccesses": 5,
+                  "port": 8080,
+                  "serviceName": "image-pull-test",
+                  "stabilityWindow": "30s"
+                }
+              },
+              "status": {
+                "observedGeneration": 3,
+                "incidentSequence": 1,
+                "circuits": [
+                  {
+                    "class": "CONFIGURATION_FAILURE",
+                    "incident": "image-pull-test-2d0f8aae-00001",
+                    "openedAt": "2026-10-19T13:56:29Z",
+                    "phase": "MANUAL_REQUIRED",
+                    "signature": "4545e89bf0ef2ae19e4d639cffe17b4cd8b023697ae96349ade26431baebe346"
+                  }
+                ]
+              }
+            },
+            "activeIncident": null,
+            "recentIncidents": [
+              {
+                "apiVersion": "opsloop.io/v1alpha1",
+                "kind": "RecoveryIncident",
+                "metadata": {
+                  "name": "image-pull-test-2d0f8aae-00001",
+                  "namespace": "opsloop-imagepull-test",
+                  "uid": "evidence-object-3",
+                  "generation": 1,
+                  "creationTimestamp": "2026-10-19T13:56:29Z"
+                },
+                "spec": {
+                  "sequence": 1,
+                  "policyGeneration": 2,
+                  "policyHash": "07f4b1e58a26da2d2d069cd8a7a5c11b3ef24ae3a80ad0f1d804b843384fe7c2",
+                  "detectedAt": "2026-10-19T13:56:29Z",
+                  "deadline": "2026-10-19T14:06:29Z",
+                  "policyRef": {
+                    "name": "image-pull-test",
+                    "uid": "evidence-object-2"
+                  },
+                  "workload": {
+                    "name": "image-pull-test",
+                    "uid": "evidence-object-1"
+                  },
+                  "policy": {
+                    "targetRef": {
+                      "name": "image-pull-test"
+                    },
+                    "enabled": true,
+                    "mode": "ObserveOnly",
+                    "candidateSelector": {
+                      "matchLabels": {
+                        "opsloop.io/recovery-candidate": "true"
+                      }
+                    },
+                    "requiredPlatforms": [
+                      "linux/amd64",
+                      "linux/arm64"
+                    ],
+                    "detection": {
+                      "nodeUnreadyFor": "20s",
+                      "restartThreshold": 3,
+                      "restartWindow": "2m0s"
+                    },
+                    "filter": {
+                      "maxCPUUtilizationPercent": 85,
+                      "maxMemoryUtilizationPercent": 85,
+                      "maxSampleAge": "1m30s",
+                      "minimumAvailableMemory": "512Mi",
+                      "requestedCapacityReservePercent": 10,
+                      "startupMemoryBudget": "256Mi"
+                    },
+                    "score": {
+                      "cpuWeight": 30,
+                      "maxRecentFailurePenalty": 45,
+                      "memoryWeight": 35,
+                      "recentFailurePenalty": 15,
+                      "recentFailureWindow": "30m0s",
+                      "requestsWeight": 35
+                    },
+                    "budget": {
+                      "cooldown": "2m0s",
+                      "incidentDeadline": "10m0s",
+                      "maxActionsPerIncident": 2,
+                      "placementTimeout": "1m30s",
+                      "verificationTimeout": "1m0s"
+                    },
+                    "verification": {
+                      "consecutiveSuccesses": 5,
+                      "port": 8080,
+                      "serviceName": "image-pull-test",
+                      "stabilityWindow": "30s"
+                    }
+                  },
+                  "trigger": {
+                    "class": "CONFIGURATION_FAILURE",
+                    "reason": "IMAGE_PULL",
+                    "signature": "4545e89bf0ef2ae19e4d639cffe17b4cd8b023697ae96349ade26431baebe346",
+                    "ruleVersion": "classify-v1",
+                    "nodeName": "opsloop-control",
+                    "nodeUID": "evidence-object-4",
+                    "podName": "image-pull-test-554dbc48c4-nsrmb",
+                    "podUID": "evidence-object-5",
+                    "observedAt": "2026-10-19T13:56:29Z"
+                  },
+                  "baseline": {
+                    "templateHash": "e55948f7ace36ebee5db4143b36989c032d5a28e0f29fce24c347a9af9a5cd11",
+                    "specHash": "c09bb0e33654da152d96c0bc25d162089672de2de7d6ad064202397bb1b9a2b5",
+                    "imageDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                    "replicas": 1,
+                    "hostname": "opsloop-control"
+                  }
+                },
+                "status": {
+                  "runtime": {
+                    "phase": "MANUAL_REQUIRED",
+                    "reason": "CLASS_NOT_AUTOMATED",
+                    "completedAt": "2026-10-19T13:56:29Z",
+                    "lastTransitionTime": "2026-10-19T13:56:29Z",
+                    "attempts": []
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "provenance": [
+        {
+          "file": "evidence-before-delete.json",
+          "sha256": "5a7b386c33b246029a6895c2ac1fa9a0d01bf8b26f0e7793fc97bda74fd99a68"
+        },
+        {
+          "file": "initial-policy-disabled-verified.json",
+          "sha256": "a3aac8ddfb2d6c4b9f538a4dc6df540c72a389733571861c3904d02e6e2bfbe5"
+        }
+      ]
+    },
+    {
+      "id": "node-not-ready",
+      "title": "NODE_NOT_READY · 후보 평가와 운영자 복원",
+      "verification": "LIVE VERIFIED / ObserveOnly",
+      "limitations": [
+        "과거 실증 기록이며 현재 클러스터 상태가 아닙니다.",
+        "전체 과거 Node snapshot은 미포함입니다. 저장된 Controller Decision을 재평가하지 않습니다.",
+        "자동 재배치/Enforce/Engineering·PR 자동화는 미실증입니다.",
+        "첫 frame의 시각은 Policy 생성 시각이며 상태 조회 시각은 별도 보존되지 않았습니다."
+      ],
+      "milestones": [
+        {
+          "label": "Controller 장애 감지",
+          "at": 1792441154000
+        },
+        {
+          "label": "Azure agent stop 요청",
+          "at": 1792441089167
+        },
+        {
+          "label": "운영자 start-only 복원 요청 (자동 복구 아님)",
+          "elapsedSeconds": 69.05494557396742
+        },
+        {
+          "label": "Node Ready + agent active 확인",
+          "elapsedSeconds": 89.26975220796885
+        }
+      ],
+      "frames": [
+        {
+          "label": "등록 상태 · Disabled (생성 시각 기준)",
+          "snapshot": {
+            "source": "replay",
+            "observedAt": 1792437486000,
+            "cluster": {
+              "name": "보존된 실험 기록",
+              "k3sVersion": "기록에 없음",
+              "nodes": []
+            },
+            "workload": {
+              "uid": "evidence-object-6",
+              "namespace": "opsloop-nodenotready-test",
+              "name": "node-not-ready-test",
+              "replicas": 1,
+              "nodeSelectorHostname": "opsloop-azure-worker",
+              "imageIndexDigest": "sha256:583d033d32d0186191d44edb3844f163e674caf0084d0f3a6ad789a828b335b6",
+              "platforms": [],
+              "requests": {
+                "cpuMillicores": 50,
+                "memoryBytes": 67108864
+              },
+              "unsupportedConstraints": []
+            },
+            "http": {
+              "endpoint": "",
+              "probes": []
+            },
+            "policy": {
+              "apiVersion": "opsloop.io/v1alpha1",
+              "kind": "RecoveryPolicy",
+              "metadata": {
+                "name": "node-not-ready-test",
+                "namespace": "opsloop-nodenotready-test",
+                "uid": "evidence-object-7",
+                "generation": 1,
+                "creationTimestamp": "2026-10-19T19:18:06Z"
+              },
+              "spec": {
+                "targetRef": {
+                  "name": "node-not-ready-test"
+                },
+                "enabled": false,
+                "mode": "ObserveOnly",
+                "candidateSelector": {
+                  "matchLabels": {
+                    "opsloop.io/recovery-candidate": "true"
+                  }
+                },
+                "requiredPlatforms": [
+                  "linux/amd64",
+                  "linux/arm64"
+                ],
+                "detection": {
+                  "nodeUnreadyFor": "20s",
+                  "restartThreshold": 3,
+                  "restartWindow": "120s"
+                },
+                "filter": {
+                  "maxCPUUtilizationPercent": 85,
+                  "maxMemoryUtilizationPercent": 85,
+                  "maxSampleAge": "90s",
+                  "minimumAvailableMemory": "512Mi",
+                  "requestedCapacityReservePercent": 10,
+                  "startupMemoryBudget": "256Mi"
+                },
+                "score": {
+                  "cpuWeight": 30,
+                  "maxRecentFailurePenalty": 45,
+                  "memoryWeight": 35,
+                  "recentFailurePenalty": 15,
+                  "recentFailureWindow": "30m",
+                  "requestsWeight": 35
+                },
+                "budget": {
+                  "cooldown": "120s",
+                  "incidentDeadline": "10m",
+                  "maxActionsPerIncident": 2,
+                  "placementTimeout": "90s",
+                  "verificationTimeout": "60s"
+                },
+                "verification": {
+                  "consecutiveSuccesses": 5,
+                  "port": 8080,
+                  "serviceName": "node-not-ready-test",
+                  "stabilityWindow": "30s"
+                }
+              },
+              "status": {
+                "observedGeneration": 1
+              }
+            },
+            "activeIncident": null,
+            "recentIncidents": []
+          }
+        },
+        {
+          "label": "종료 기록 · OBSERVED",
+          "snapshot": {
+            "source": "replay",
+            "observedAt": 1792441197069,
+            "cluster": {
+              "name": "보존된 실험 기록",
+              "k3sVersion": "기록에 없음",
+              "nodes": []
+            },
+            "workload": {
+              "uid": "evidence-object-6",
+              "namespace": "opsloop-nodenotready-test",
+              "name": "node-not-ready-test",
+              "replicas": 1,
+              "nodeSelectorHostname": "opsloop-azure-worker",
+              "imageIndexDigest": "sha256:583d033d32d0186191d44edb3844f163e674caf0084d0f3a6ad789a828b335b6",
+              "platforms": [],
+              "requests": {
+                "cpuMillicores": 50,
+                "memoryBytes": 67108864
+              },
+              "unsupportedConstraints": []
+            },
+            "http": {
+              "endpoint": "",
+              "probes": []
+            },
+            "policy": {
+              "apiVersion": "opsloop.io/v1alpha1",
+              "kind": "RecoveryPolicy",
+              "metadata": {
+                "name": "node-not-ready-test",
+                "namespace": "opsloop-nodenotready-test",
+                "uid": "evidence-object-7",
+                "generation": 3,
+                "creationTimestamp": "2026-10-19T19:18:06Z"
+              },
+              "spec": {
+                "targetRef": {
+                  "name": "node-not-ready-test"
+                },
+                "enabled": false,
+                "mode": "ObserveOnly",
+                "candidateSelector": {
+                  "matchLabels": {
+                    "opsloop.io/recovery-candidate": "true"
+                  }
+                },
+                "requiredPlatforms": [
+                  "linux/amd64",
+                  "linux/arm64"
+                ],
+                "detection": {
+                  "nodeUnreadyFor": "20s",
+                  "restartThreshold": 3,
+                  "restartWindow": "120s"
+                },
+                "filter": {
+                  "maxCPUUtilizationPercent": 85,
+                  "maxMemoryUtilizationPercent": 85,
+                  "maxSampleAge": "90s",
+                  "minimumAvailableMemory": "512Mi",
+                  "requestedCapacityReservePercent": 10,
+                  "startupMemoryBudget": "256Mi"
+                },
+                "score": {
+                  "cpuWeight": 30,
+                  "maxRecentFailurePenalty": 45,
+                  "memoryWeight": 35,
+                  "recentFailurePenalty": 15,
+                  "recentFailureWindow": "30m",
+                  "requestsWeight": 35
+                },
+                "budget": {
+                  "cooldown": "120s",
+                  "incidentDeadline": "10m",
+                  "maxActionsPerIncident": 2,
+                  "placementTimeout": "90s",
+                  "verificationTimeout": "60s"
+                },
+                "verification": {
+                  "consecutiveSuccesses": 5,
+                  "port": 8080,
+                  "serviceName": "node-not-ready-test",
+                  "stabilityWindow": "30s"
+                }
+              },
+              "status": {
+                "observedGeneration": 3,
+                "incidentSequence": 1,
+                "circuits": [
+                  {
+                    "class": "INFRASTRUCTURE_FAILURE",
+                    "incident": "node-not-ready-test-81eec703-00001",
+                    "openedAt": "2026-10-19T20:19:14Z",
+                    "phase": "OBSERVED",
+                    "signature": "ce0c0bbeb52b57d09085abadb716882cdc4d8ffb0e670561c03f8b0a00e05f65"
+                  }
+                ]
+              }
+            },
+            "activeIncident": null,
+            "recentIncidents": [
+              {
+                "apiVersion": "opsloop.io/v1alpha1",
+                "kind": "RecoveryIncident",
+                "metadata": {
+                  "name": "node-not-ready-test-81eec703-00001",
+                  "namespace": "opsloop-nodenotready-test",
+                  "uid": "evidence-object-8",
+                  "generation": 1,
+                  "creationTimestamp": "2026-10-19T20:19:14Z"
+                },
+                "spec": {
+                  "sequence": 1,
+                  "policyGeneration": 2,
+                  "policyHash": "06e88433fc606b13ddb4f4dc10a33ff649a2f454ef6ee18d604b42f33c7284dc",
+                  "detectedAt": "2026-10-19T20:19:14Z",
+                  "deadline": "2026-10-19T20:29:14Z",
+                  "policyRef": {
+                    "name": "node-not-ready-test",
+                    "uid": "evidence-object-7"
+                  },
+                  "workload": {
+                    "name": "node-not-ready-test",
+                    "uid": "evidence-object-6"
+                  },
+                  "policy": {
+                    "targetRef": {
+                      "name": "node-not-ready-test"
+                    },
+                    "enabled": true,
+                    "mode": "ObserveOnly",
+                    "candidateSelector": {
+                      "matchLabels": {
+                        "opsloop.io/recovery-candidate": "true"
+                      }
+                    },
+                    "requiredPlatforms": [
+                      "linux/amd64",
+                      "linux/arm64"
+                    ],
+                    "detection": {
+                      "nodeUnreadyFor": "20s",
+                      "restartThreshold": 3,
+                      "restartWindow": "2m0s"
+                    },
+                    "filter": {
+                      "maxCPUUtilizationPercent": 85,
+                      "maxMemoryUtilizationPercent": 85,
+                      "maxSampleAge": "1m30s",
+                      "minimumAvailableMemory": "512Mi",
+                      "requestedCapacityReservePercent": 10,
+                      "startupMemoryBudget": "256Mi"
+                    },
+                    "score": {
+                      "cpuWeight": 30,
+                      "maxRecentFailurePenalty": 45,
+                      "memoryWeight": 35,
+                      "recentFailurePenalty": 15,
+                      "recentFailureWindow": "30m0s",
+                      "requestsWeight": 35
+                    },
+                    "budget": {
+                      "cooldown": "2m0s",
+                      "incidentDeadline": "10m0s",
+                      "maxActionsPerIncident": 2,
+                      "placementTimeout": "1m30s",
+                      "verificationTimeout": "1m0s"
+                    },
+                    "verification": {
+                      "consecutiveSuccesses": 5,
+                      "port": 8080,
+                      "serviceName": "node-not-ready-test",
+                      "stabilityWindow": "30s"
+                    }
+                  },
+                  "trigger": {
+                    "class": "INFRASTRUCTURE_FAILURE",
+                    "reason": "NODE_NOT_READY",
+                    "signature": "ce0c0bbeb52b57d09085abadb716882cdc4d8ffb0e670561c03f8b0a00e05f65",
+                    "ruleVersion": "classify-v1",
+                    "nodeName": "opsloop-azure-worker",
+                    "nodeUID": "evidence-object-9",
+                    "podName": "node-not-ready-test-69b4bff84c-t4z82",
+                    "podUID": "evidence-object-10",
+                    "observedAt": "2026-10-19T20:19:14Z"
+                  },
+                  "baseline": {
+                    "templateHash": "b83539c431d5180ea076b251b73181ba5772d1b3952f3bcc7802e61779173676",
+                    "specHash": "b079bff4e3e0fecd96953906dc0869c686dde654b1069e0acdeabead46aa87fb",
+                    "imageDigest": "sha256:583d033d32d0186191d44edb3844f163e674caf0084d0f3a6ad789a828b335b6",
+                    "replicas": 1,
+                    "hostname": "opsloop-azure-worker"
+                  }
+                },
+                "status": {
+                  "runtime": {
+                    "phase": "OBSERVED",
+                    "reason": "SELECTED_HIGHEST_SCORE",
+                    "completedAt": "2026-10-19T20:19:14Z",
+                    "lastTransitionTime": "2026-10-19T20:19:14Z",
+                    "attempts": [],
+                    "decision": {
+                      "incidentID": "node-not-ready-test-81eec703-00001",
+                      "policyGeneration": 2,
+                      "policyHash": "06e88433fc606b13ddb4f4dc10a33ff649a2f454ef6ee18d604b42f33c7284dc",
+                      "workloadUID": "evidence-object-6",
+                      "baselineTemplateHash": "b83539c431d5180ea076b251b73181ba5772d1b3952f3bcc7802e61779173676",
+                      "imageIndexDigest": "sha256:583d033d32d0186191d44edb3844f163e674caf0084d0f3a6ad789a828b335b6",
+                      "queryVersion": "node-exporter-v1",
+                      "snapshotObservedAt": "2026-10-19T20:19:14Z",
+                      "snapshotExpiresAt": "2026-10-19T20:20:30Z",
+                      "selectedNodeUID": "evidence-object-4",
+                      "selectedNodeName": "opsloop-control",
+                      "selectedHostname": "opsloop-control",
+                      "actionType": "Relocation",
+                      "decisionReason": "SELECTED_HIGHEST_SCORE",
+                      "decidedAt": "2026-10-19T20:19:14Z",
+                      "candidates": [
+                        {
+                          "nodeName": "opsloop-azure-worker",
+                          "nodeUID": "evidence-object-9",
+                          "hostname": "opsloop-azure-worker",
+                          "platform": "linux/arm64",
+                          "eligible": false,
+                          "rejectReasons": [
+                            "NODE_NOT_READY",
+                            "UNTOLERATED_TAINT"
+                          ],
+                          "measurements": {
+                            "cpuUtilizationPermille": 15,
+                            "cpuSampleCount": 6,
+                            "cpuSampleTime": "2026-10-19T20:18:49Z",
+                            "memAvailableBytes": 3454705664,
+                            "memTotalBytes": 4089188352,
+                            "memSampleTime": "2026-10-19T20:18:49Z",
+                            "allocatableCPUMilli": 2000,
+                            "allocatableMemoryBytes": 4089188352,
+                            "requestedCPUMilli": 60,
+                            "requestedMemoryBytes": 92274688,
+                            "newPodCPUMilli": 50,
+                            "newPodMemoryBytes": 67108864,
+                            "reserveCPUMilli": 200,
+                            "reserveMemoryBytes": 408918835
+                          }
+                        },
+                        {
+                          "nodeName": "opsloop-control",
+                          "nodeUID": "evidence-object-4",
+                          "hostname": "opsloop-control",
+                          "platform": "linux/amd64",
+                          "eligible": true,
+                          "measurements": {
+                            "cpuUtilizationPermille": 61,
+                            "cpuSampleCount": 6,
+                            "cpuSampleTime": "2026-10-19T20:19:00Z",
+                            "memAvailableBytes": 5899911168,
+                            "memTotalBytes": 8322293760,
+                            "memSampleTime": "2026-10-19T20:19:00Z",
+                            "allocatableCPUMilli": 4000,
+                            "allocatableMemoryBytes": 8322293760,
+                            "requestedCPUMilli": 510,
+                            "requestedMemoryBytes": 1178599424,
+                            "newPodCPUMilli": 50,
+                            "newPodMemoryBytes": 67108864,
+                            "reserveCPUMilli": 400,
+                            "reserveMemoryBytes": 832229376
+                          },
+                          "score": {
+                            "cpuHeadroomPermille": 939,
+                            "memoryHeadroomPermille": 709,
+                            "requestedHeadroomPermille": 750,
+                            "recentFailures": 0,
+                            "penaltyMilli": 0,
+                            "scoreMilli": 79235
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "provenance": [
+        {
+          "file": "evidence-before-delete.json",
+          "sha256": "61dfdb5cca78cac90d5ab3f722a3dafc9db490717e7c7513610d342d3037ee31"
+        },
+        {
+          "file": "experiment-timeline.json",
+          "sha256": "7b9c3eb03cb85ec4bd2251f83e79f54c24fc1e705c71078d787c719126ce2335"
+        },
+        {
+          "file": "policy-preflight.json",
+          "sha256": "eadd6a0d478bb3567f0329b5be29fd79f5b7abafa7d2ac94560cdf2796e86e53"
+        }
+      ]
+    }
+  ]
+}

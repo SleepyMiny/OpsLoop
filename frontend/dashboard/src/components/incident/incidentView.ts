@@ -41,9 +41,9 @@ export function timingBasis(t: RuntimeTimings): TimingBasis {
   return typeof t.faultInjectedAt === 'number' ? 'injection' : 'api-signal';
 }
 
-export function timingCaption(source: 'demo' | 'live', basis: TimingBasis): string {
+export function timingCaption(source: 'demo' | 'live' | 'replay', basis: TimingBasis): string {
   const base = basis === 'injection' ? '장애 주입 기준(§18)' : 'API 장애 신호 기준 · 장애 주입 시각 없음';
-  return source === 'demo' ? `시뮬레이션 시간 · 실측 아님 · ${base}` : base;
+  return source === 'demo' ? `시뮬레이션 시간 · 실측 아님 · ${base}` : source === 'replay' ? `과거 실증 기록 · ${base}` : base;
 }
 
 /** T_decide and T_place run stage to stage; T_detect and T_recover start at fault injection (§18). */
@@ -85,7 +85,7 @@ export function deriveTimings(t: RuntimeTimings): TimingCell[] {
 // --- Trigger --------------------------------------------------------------
 
 export interface TriggerView {
-  code: IncidentTrigger['type'];
+  code: string;
   label: string;
   /** Node or Pod the trigger refers to. */
   subject: string;
@@ -95,9 +95,11 @@ export interface TriggerView {
 }
 
 export function describeTrigger(trigger: IncidentTrigger): TriggerView {
+  if (trigger.type === 'ImagePull') return {code: trigger.reason ?? trigger.type, label: '이미지 Pull 실패', subject: trigger.podName, detail: 'Kubernetes 이미지 Pull 오류를 Controller가 분류했습니다.', extra: null};
+  if (trigger.type === 'FailureSignal') return {code: trigger.reason ?? trigger.type, label: trigger.reason, subject: trigger.subject, detail: '기록된 원본 장애 신호', extra: null};
   if (trigger.type === 'NodeNotReady') {
     return {
-      code: trigger.type,
+      code: trigger.reason ?? trigger.type,
       label: '노드 응답 없음',
       subject: trigger.nodeName,
       detail: 'Kubernetes API가 Ready가 아니라고 보고했습니다.',
@@ -105,7 +107,7 @@ export function describeTrigger(trigger: IncidentTrigger): TriggerView {
     };
   }
   return {
-    code: trigger.type,
+    code: trigger.reason ?? trigger.type,
     label: '반복 재시작',
     subject: trigger.podName,
     detail:

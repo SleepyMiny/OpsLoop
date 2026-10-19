@@ -1,6 +1,6 @@
-# Live 데이터 계약 (초안)
+# Live 데이터 계약 v1
 
-대시보드가 실제 데이터를 받으려면 **읽기 전용 BFF**가 필요하다. 이 문서는 그 BFF가 돌려줄 JSON 형태를 정의한다. 아직 저장소에 BFF는 없고, 이 문서는 [architecture v0.1](../../../docs/architecture/architecture-v0.1.md)과 Go `api/v1alpha1` CRD를 화면 관점에서 연결한 초안이다.
+읽기 전용 구현은 [`cmd/dashboard-bff`](../../../cmd/dashboard-bff/main.go)와 [`internal/dashboardbff`](../../../internal/dashboardbff/bff.go)에 있습니다. 기존 snapshot/CRD 변환 계약을 유지하며 Kubernetes 쓰기 기능은 없습니다. 이 문서는 로컬 구현 계약이며 운영 배포 완료를 의미하지 않습니다.
 
 ## 왜 BFF인가
 
@@ -41,7 +41,7 @@ TypeScript 정의가 기준이다: [`src/domain/types.ts`](../src/domain/types.t
 
 ## Go `api/v1alpha1` CRD를 그대로 받기
 
-Go CRD 타입은 백엔드 브랜치 `claude/orchestrate-project-status-e3aa92`의 커밋 `f47c7d1`(`api/v1alpha1`)에 있다. BFF는 `policy`, `activeIncident`, `recentIncidents[]`에 **CRD 객체를 변환 없이** 넣어도 된다(`kind: RecoveryPolicy` / `kind: RecoveryIncident`로 구분). 대시보드가 [`src/data/live/fromCrd.ts`](../src/data/live/fromCrd.ts)에서 화면 모델로 바꾼다. 화면 모델 형태(`kind` 없음)로 보내도 그대로 받는다.
+Go CRD 타입은 현재 main의 `api/v1alpha1`에 있다(Fence v2 포함). BFF는 `policy`, `activeIncident`, `recentIncidents[]`에 **타입에 맞는 CRD 객체를** 넣어도 된다(`kind: RecoveryPolicy` / `kind: RecoveryIncident`로 구분). 대시보드가 [`src/data/live/fromCrd.ts`](../src/data/live/fromCrd.ts)에서 화면 모델로 바꾼다. 화면 모델 형태(`kind` 없음)로 보내도 그대로 받는다.
 
 | CRD 형식 | 화면 모델 | 변환 |
 | --- | --- | --- |
@@ -56,7 +56,7 @@ Go CRD 타입은 백엔드 브랜치 `claude/orchestrate-project-status-e3aa92`�
 | `actionType: Relocation \| None` | `relocation \| null` | v1alpha1에는 restart가 없다(Demo A 범위) |
 | `attempts[].outcome` | `result` | Reserved·Patched → pending(PodReady 이후 placed), Succeeded → verified, Failed·Superseded·Cancelled → failed |
 | `status.recentFailures[]` + `budget.cooldown` | `cooldowns[]`, 감점 입력 | 실패 시각 + cooldown. 정책은 workload 하나를 대상으로 하므로 workload UID를 붙인다 |
-| `spec.detectedAt`, 첫 attempt의 `decision.decidedAt`·`podReadyAt`, `status.runtime.completedAt` | `timings` | CRD에는 timings 객체가 없어 흩어진 시각을 모은다 |
+| `spec.detectedAt`, `runtime.decision.decidedAt`(없으면 첫 attempt 결정 시각)·`podReadyAt`, `status.runtime.completedAt` | `timings` | CRD에는 timings 객체가 없어 흩어진 시각을 모은다 |
 | `spec.baseline.hostname` | `decision.sourceNodeName` | 경로 출발점 |
 | (없음) | `events[]` | CRD 시각만으로 만든 사건 목록(로그 본문 없음) |
 
@@ -88,7 +88,7 @@ Live BFF는 `cluster.nodes[].usage`에 기존 cpu/memory/memAvailableBytes 외�
 미리보기에서 METRICS_MISSING으로 처리한다. 기존 payload도 저장 Decision 표시는
 가능하지만 이 세 값 없이 현재 후보를 적격이라고 추정하지 않는다.
 BFF는 각 쿼리의 노드당 단일 결과, CPU/메모리 원본 시각을 보존해야 한다.
-메모리 observedAt은 available/total 중 오래된 시각이어야 한다. 중복 시리즈나
+현재 7쿼리 계약에서 메모리 observedAt은 available의 원본 시각이다. total의 독립 시각은 미수집이며 별도 증명할 수 없다. 중복 시리즈나
 쿼리 오류를 임의의 첫 값으로 축약하지 말고 null로 전달한다.
 
 CPU는 clamp 후 정수 permille 반올림, reserve는 정수 percent 곱의 내림,
@@ -99,3 +99,25 @@ Demo의 합성 비율 fallback은 Live의 원본 메트릭 계약과 구분한�
 Kubernetes Quantity도 오류로 표시하며 반올림 손실을 숨기지 않는다.
 
 Go b4fb78d 기준 계약 벡터 및 재생성 방법: [contracts/README.md](../contracts/README.md).
+
+## 현재 BFF 구현 범위 및 보안
+
+- Namespace/Policy는 서버 시작 flag로 고정합니다(기본 `opsloop-demo/demo-api`). URL query로 Kubernetes 객체나 다른 URL을 지정할 수 없습니다.
+- Kubernetes: Policy/target Deployment GET, Nodes LIST, 전체 namespace Pods LIST, 해당 namespace Incidents LIST. Deployment 조회는 이름/namespace에 더해 Policy·Workload **UID**로 Incident를 연결합니다. Policy가 가리키는 실제 active UID만 `activeIncident`이며 최근 20개만 `recentIncidents`로 제공합니다.
+- Pod의 UID·이름·namespace·Ready·phase·재시작만 출력하며 환경 변수·volume·Secret·내부 IP·annotations는 출력하지 않습니다. CRD 자유형 오류 메시지·trigger evidence·probe 오류·candidate details도 제거합니다. upstream 오류 본문은 외부로 노출하지 않습니다.
+- 로컬 owner kubeconfig 사용 시 GET 전용 transport가 방어선입니다. 운영 배포에서는 별도 read-only RBAC(Secrets 권한 없음)도 강제해야 합니다. localhost 바인딩이며 인증 없는 외부 공개는 허용하지 않습니다. 브라우저에 cluster credentials를 전달하지 않습니다.
+- 현재 known testbed 3개 Node의 site/amd64·arm64만 지원합니다. 알 수 없는 site/architecture는 503이며 임의 추정하지 않습니다. Pod 요청 합계는 Controller의 `PodRequests`와 같고 native sidecar/overhead 한계가 있습니다.
+- Prometheus 전송은 `/api/v1/query`만 허용하며 form POST도 전송 전에 GET으로 변환합니다. admin/write endpoint는 거절합니다.
+- 7개 쿼리는 Controller와 같은 `candidates.QueryMetrics`, CPU window=`2×maxSampleAge`입니다. 메모리 시각은 기존 7쿼리 계약의 `timestamp(MemAvailable)`이며 MemTotal의 독립 원본 시각은 이 계약으로 증명하지 못합니다. `up`의 raw 시각도 별도 수집하지 않습니다. 쿼리 오류·중복·비유한 값은 0으로 치환하지 않습니다.
+- `workload.platforms=[]`: registry index를 조회하지 않습니다. 정책의 requiredPlatforms를 실제 manifest라고 간주하지 않으며 현재 후보 미리보기는 ARCH_MISMATCH로 fail-closed할 수 있습니다. **저장된 Go Decision은 그대로 보존**합니다.
+- `http.probes=[]`, Driver fault time 미수집. `T_recover`와 자동 복구 성공을 만들어 내지 않습니다.
+- `policyHash`는 실제 Go `PolicyHash`입니다. status conditions/circuits는 원본 enum/시각을 보존하며, `OBSERVED`는 terminal/attempts=0입니다. `IMAGE_PULL`·`NODE_NOT_READY`를 Pod 이름 유무로 재분류하지 않습니다.
+- 전체 수집 timeout은 3초이며 Kubernetes 실패/계약 오류는 503. Prometheus 실패 시 null metrics와 diagnostics warnings로 부분 관측을 명시합니다. snapshot은 여러 GET의 조합이며 객체 간 원자적 snapshot을 보장하지 않습니다.
+- `VITE_OPSLOOP_API_BASE=/`는 same-origin을 명시적으로 선택합니다. 변수 미설정은 `unconfigured`이며 Demo로 대체하지 않습니다. 오래된 마지막 관측은 화면 경고와 함께 표시합니다.
+
+Go `TestSnapshotWireContract`가 생성한 `contracts/bff-snapshot.json`을 TypeScript adapter가 읽습니다. Go/TS 직렬화 차이는 Go 테스트에서 fixture 불일치로 실패합니다. 명시적 갱신 명령:
+
+```bash
+OPSLOOP_BFF_FIXTURE_OUT="$PWD/frontend/dashboard/contracts/bff-snapshot.json" \
+  go test ./internal/dashboardbff -run '^TestSnapshotWireContract$' -count=1
+```

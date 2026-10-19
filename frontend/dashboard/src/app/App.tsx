@@ -13,6 +13,7 @@ import { useIdle, usePresenterKeys, useTheme, useWakeLock, type Theme } from './
 import { Narration } from './Narration';
 import { PlaybackBar } from './PlaybackBar';
 import { RealityDialog } from './RealityDialog';
+import { SourceNotice } from './SourceNotice';
 import { RegionBoundary } from './RegionBoundary';
 import styles from './app.module.css';
 
@@ -50,6 +51,7 @@ export function App({ source, kiosk }: { source: DashboardDataSource; kiosk: boo
         onOpenReality={() => setRealityOpen(true)}
       />
 
+      <SourceNotice kind={source.kind} snapshot={snapshot} status={status} />
       {snapshot ? (
         <main className={styles.stage}>
           <div className={styles.hero}>
@@ -58,7 +60,7 @@ export function App({ source, kiosk }: { source: DashboardDataSource; kiosk: boo
             </RegionBoundary>
           </div>
           <div className={styles.story}>
-            <Narration narration={snapshot.narration} scenario={scenario} />
+            <Narration source={source.kind} narration={snapshot.narration} scenario={scenario} />
             <RegionBoundary name="복구 단계" resetKey={resetKey}>
               <PipelineLadder snapshot={snapshot} emphasized={focus === 'pipeline'} />
             </RegionBoundary>
@@ -71,7 +73,7 @@ export function App({ source, kiosk }: { source: DashboardDataSource; kiosk: boo
           <div className={styles.detail}>
             <DetailTabs
               focus={focus}
-              scenarioKey={playback?.scenarioId ?? 'live'}
+              scenarioKey={playback?.scenarioId ?? snapshot.replay?.experimentId ?? 'live'}
               panels={{
                 incident: (
                   <RegionBoundary name="Incident" resetKey={resetKey}>
@@ -112,8 +114,7 @@ function LiveUnavailable({ status }: { status: SourceStatus }) {
       <h2>Live 데이터에 연결하지 못했습니다</h2>
       <p>{message}</p>
       <p>
-        Live 모드는 RecoveryPolicy·RecoveryIncident CRD를 읽는 읽기 전용 BFF가 필요합니다. 아직 저장소에 없으므로,
-        시연에는 Demo Mode를 사용하세요.
+        읽기 전용 BFF 실행 상태와 VITE_OPSLOOP_API_BASE 설정을 확인하세요. Demo와 Replay는 명시적으로 선택할 수 있습니다.
       </p>
       <a className={styles.toolButton} href="?source=demo">
         Demo Mode로 보기

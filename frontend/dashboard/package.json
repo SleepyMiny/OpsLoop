@@ -2,7 +2,7 @@
   "name": "opsloop-exhibition-dashboard",
   "private": true,
   "version": "0.1.0",
-  "description": "OpsLoop exhibition dashboard. Runs in Demo Mode by default; the live adapter is a stub until the Controller exposes read-only data.",
+  "description": "OpsLoop exhibition dashboard. Explicit Demo, read-only Live BFF, and historical ObserveOnly Evidence Replay.",
   "type": "module",
   "engines": {
     "node": "^22.12.0 || >=24.0.0"

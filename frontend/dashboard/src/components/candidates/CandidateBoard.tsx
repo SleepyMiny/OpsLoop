@@ -34,7 +34,7 @@ export function CandidateBoard({ snapshot, emphasized }: RegionProps) {
         {model.waiting ? <WaitingBand waiting={model.waiting} id={stripId} /> : <Strip model={model} id={stripId} />}
         {model.rows.length === 0 ? (
           <p className={styles.empty}>
-            평가할 노드가 없습니다. {snapshot.policy.spec.candidateSelector} 라벨이 붙은 노드가 있어야 복구 후보가 됩니다.
+            {snapshot.source === 'replay' ? '이 시점에는 저장된 후보 평가가 없습니다.' : `평가할 노드가 없습니다. ${snapshot.policy.spec.candidateSelector} 라벨을 확인하세요.`}
           </p>
         ) : (
           <CandidateTable model={model} idBase={uid} describedBy={stripId} />

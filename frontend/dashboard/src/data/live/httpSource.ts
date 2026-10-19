@@ -3,16 +3,8 @@ import type { DriverReport } from './crd';
 import { incidentFromCrd, isCrdIncident, isCrdPolicy, policyFromCrd } from './fromCrd';
 import type { DashboardDataSource, SourceStatus } from '../source';
 
-/**
- * Live adapter for a future read-only BFF (see docs/live-data-contract.md).
- *
- * Nothing in the repository serves this endpoint yet: the Controller exposes only
- * /metrics, /healthz and /readyz, and its state lives in RecoveryPolicy /
- * RecoveryIncident CRD status. The browser must not hold a kubeconfig, so a small
- * BFF that reads those CRDs plus Prometheus is the expected producer. Until it
- * exists this source reports `unconfigured` or `error` honestly instead of falling
- * back to demo data.
- */
+/** Read-only BFF adapter. Missing configuration or failures remain explicit;
+ * never substitutes Demo data. Credentials stay on the BFF server. */
 export interface HttpSourceOptions {
   baseUrl: string | undefined;
   pollMs?: number;
@@ -45,20 +37,20 @@ export class HttpDataSource implements DashboardDataSource {
   private readonly now: () => number;
 
   constructor(options: HttpSourceOptions) {
-    this.baseUrl = options.baseUrl?.replace(/\/+$/, '') || undefined;
+    this.baseUrl = options.baseUrl === '/' ? '' : options.baseUrl?.replace(/\/+$/, '') || undefined;
     this.pollMs = options.pollMs ?? 5000;
     this.timeoutMs = options.timeoutMs ?? 4000;
     this.fetchImpl = options.fetchImpl ?? ((...args) => fetch(...args));
     this.staleAfterMs = options.staleAfterMs ?? this.pollMs * 3;
     this.now = options.now ?? (() => Date.now());
-    this.label = this.baseUrl ? `Live · ${this.baseUrl}` : 'Live · 연결 안 됨';
-    this.status = this.baseUrl
+    this.label = this.baseUrl !== undefined ? `Live · ${this.baseUrl || 'same origin'}` : 'Live · 연결 안 됨';
+    this.status = this.baseUrl !== undefined
       ? { state: 'connecting' }
       : { state: 'unconfigured', message: 'VITE_OPSLOOP_API_BASE가 설정되지 않았습니다.' };
   }
 
   start(): void {
-    if (this.running || !this.baseUrl) return;
+    if (this.running || this.baseUrl === undefined) return;
     this.running = true;
     this.generation += 1;
     void this.poll(this.generation);

@@ -1,3 +1,4 @@
+import { displayIncident } from '../../domain/displayIncident';
 import { compareNodeNames, evaluateCandidates, failuresFromAttempts, type EvaluationInput } from '../../domain/evaluate';
 import { REJECT_REASON_LABEL, RUNTIME_PHASE_LABEL, actionTypeLabel } from '../../domain/labels';
 import type {
@@ -498,6 +499,7 @@ export interface MetaModel {
 }
 
 export interface BoardModel {
+  historical?: boolean;
   kind: BoardKind;
   stage: RevealStage;
   phase: RuntimePhase | null;
@@ -517,11 +519,11 @@ export interface BoardModel {
 
 /** Current-state preview only. Persisted Controller decisions use decisionModel unchanged. */
 export function evaluateNow(snapshot: DashboardSnapshot) {
-  const incident = snapshot.activeIncident;
+  const incident = displayIncident(snapshot);
   const trigger = incident?.spec.trigger;
   const input: EvaluationInput = {
     nodes: snapshot.cluster.nodes,
-    requireRawMetrics: snapshot.source === 'live',
+    requireRawMetrics: snapshot.source !== 'demo',
     workload: snapshot.workload,
     policy: snapshot.policy.spec,
     now: snapshot.observedAt,
@@ -614,7 +616,7 @@ function previewModel(snapshot: DashboardSnapshot, kind: Extract<BoardKind, `pre
     leaderNodeUid: result.selected?.nodeUid ?? null,
   });
   const base = baseModel(snapshot);
-  const incident = snapshot.activeIncident;
+  const incident = displayIncident(snapshot);
   return {
     kind,
     stage: 'score',
@@ -689,9 +691,9 @@ function decisionModel(
     columns: base.columns,
     rows,
     counts: countRows(rows),
-    attempt: { no: attemptNumber(rt, decision), max: rt.budget.max },
+    attempt: rt.phase === 'OBSERVED' && rt.attempts.length === 0 ? null : { no: attemptNumber(rt, decision), max: rt.budget.max },
     attemptResult: attempt?.result ?? null,
-    winner: winnerRow ? { name: winnerRow.displayName, actionLabel: actionTypeLabel(decision.actionType) } : null,
+    winner: winnerRow ? { name: winnerRow.displayName, actionLabel: rt.phase === 'OBSERVED' ? 'ObserveOnly 선택 기록 · 배치 변경 없음' : actionTypeLabel(decision.actionType) } : null,
     leaderName: null,
     waiting: waitingModel(rt, hasEligible, stage),
     meta: {
@@ -705,7 +707,10 @@ function decisionModel(
 }
 
 export function buildBoardModel(snapshot: DashboardSnapshot): BoardModel {
-  const incident = snapshot.activeIncident;
+  return {...boardModel(snapshot), historical: snapshot.source === 'replay'};
+}
+function boardModel(snapshot: DashboardSnapshot): BoardModel {
+  const incident = displayIncident(snapshot);
   if (!incident) return previewModel(snapshot, 'preview-idle');
 
   const rt = incident.status.runtime;
@@ -735,6 +740,7 @@ export interface StripText {
 }
 
 export function describeStrip(model: BoardModel): StripText {
+  if (model.historical && model.kind.startsWith('preview-')) return {lead: '해당 보존 시점에 후보 Decision 없음', rest: '과거에 없는 관측값으로 미리보기를 만들지 않습니다.', side: 'Evidence Replay'};
   const attempt = model.attempt ? `attempt ${model.attempt.no}/${model.attempt.max}` : '';
   switch (model.kind) {
     case 'preview-idle':

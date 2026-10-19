@@ -158,6 +158,8 @@ export function policyFromCrd(
       activeIncidentRef: crd.status?.activeIncident?.name ?? null,
       incidentSequence: crd.status?.incidentSequence ?? 0,
       cooldowns,
+      conditions: (crd.status?.conditions ?? []).map((c) => ({...c, lastTransitionTime: parseTime(c.lastTransitionTime, 'policy.status.conditions.lastTransitionTime')})),
+      circuits: (crd.status?.circuits ?? []).map((c) => ({...c, openedAt: parseTime(c.openedAt, 'policy.status.circuits.openedAt')})),
       recentFailures: failures.map((f, i) => ({
         nodeName: f.nodeName,
         at: parseTime(f.at, `policy.status.recentFailures[${i}].at`),
@@ -327,9 +329,13 @@ export function incidentFromCrd(crd: CrdRecoveryIncident, driver?: DriverReport)
   const faultInjectedAt =
     driver && driver.incident === crd.metadata.name ? optionalTime(driver.faultInjectedAt, 'driver.faultInjectedAt') : undefined;
 
-  const trigger: IncidentTrigger = t.podName
-    ? { type: 'RepeatedRestart', podName: t.podName, observedAt: triggeredAt }
-    : { type: 'NodeNotReady', nodeName: t.nodeName ?? '', observedAt: triggeredAt };
+  const trigger: IncidentTrigger = t.reason === 'NODE_NOT_READY'
+    ? { type: 'NodeNotReady', nodeName: t.nodeName ?? '', observedAt: triggeredAt }
+    : t.reason === 'IMAGE_PULL'
+      ? { type: 'ImagePull', podName: t.podName ?? '', observedAt: triggeredAt }
+      : t.reason === 'REPEATED_EXIT' || t.reason === 'REPEATED_RESTART' || t.reason === 'RESTART_THRESHOLD'
+        ? { type: 'RepeatedRestart', podName: t.podName ?? '', observedAt: triggeredAt }
+        : { type: 'FailureSignal', reason: t.reason, subject: t.podName ?? t.nodeName ?? '', observedAt: triggeredAt };
   const waitingReason =
     phase === 'WAITING'
       ? rt.decision?.decisionReason === 'METRICS_UNAVAILABLE'
@@ -343,7 +349,7 @@ export function incidentFromCrd(crd: CrdRecoveryIncident, driver?: DriverReport)
     createdAt: optionalTime(crd.metadata.creationTimestamp, 'metadata.creationTimestamp') ?? triggeredAt,
     spec: {
       workloadUid: crd.spec.workload.uid,
-      trigger,
+      trigger: {...trigger, reason: t.reason},
       policyRef: crd.spec.policyRef.name,
       policyHash: crd.spec.policyHash,
     },
@@ -360,7 +366,7 @@ export function incidentFromCrd(crd: CrdRecoveryIncident, driver?: DriverReport)
           ...(faultInjectedAt !== undefined ? { faultInjectedAt } : {}),
           triggeredAt,
           detectedAt: parseTime(crd.spec.detectedAt, 'spec.detectedAt'),
-          ...(first?.decision?.decidedAt ? { decidedAt: parseTime(first.decision.decidedAt, 'status.runtime.attempts[0].decision.decidedAt') } : {}),
+          ...(rt.decision?.decidedAt ? { decidedAt: parseTime(rt.decision.decidedAt, 'status.runtime.decision.decidedAt') } : first?.decision?.decidedAt ? { decidedAt: parseTime(first.decision.decidedAt, 'status.runtime.attempts[0].decision.decidedAt') } : {}),
           ...(first?.podReadyAt ? { placedAt: parseTime(first.podReadyAt, 'status.runtime.attempts[0].podReadyAt') } : {}),
           ...(recoveredAt !== undefined ? { recoveredAt } : {}),
         },

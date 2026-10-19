@@ -1,3 +1,4 @@
+import { displayIncident } from '../../domain/displayIncident';
 import { memo } from 'react';
 import { FAILURE_CLASS_LABEL, RUNTIME_PHASE_LABEL } from '../../domain/labels';
 import type {
@@ -31,7 +32,8 @@ import { httpProgress, ladderStatus } from './ladderModel';
 import styles from './IncidentPanel.module.css';
 
 export function IncidentPanel({ snapshot, emphasized }: RegionProps) {
-  const { activeIncident: incident, policy, recentIncidents } = snapshot;
+  const { policy, recentIncidents } = snapshot;
+  const incident = displayIncident(snapshot);
   return (
     <Instrument title="RecoveryIncident" emphasized={emphasized ?? false}>
       <div className={styles.frame}>
@@ -53,7 +55,7 @@ function Record({
 }: {
   incident: RecoveryIncident;
   policy: RecoveryPolicy;
-  source: 'demo' | 'live';
+  source: 'demo' | 'live' | 'replay';
 }) {
   const { runtime, conditions, events } = incident.status;
   const { spec } = incident;
