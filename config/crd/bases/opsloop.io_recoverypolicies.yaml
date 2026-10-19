@@ -413,6 +413,10 @@ spec:
                     - ruleVersion
                     - signature
                     type: object
+                  workloadUID:
+                    description: Deployment UID observed when this reservation was
+                      made. Empty legacy pending reservations are discarded.
+                    type: string
                 required:
                 - baseline
                 - name

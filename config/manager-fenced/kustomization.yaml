@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# opt-in replacement for config/manager; never include both in one owner overlay.
+# Grant config/rbac/enforce separately, only after the writer transition gate.
+resources:
+  - ../manager
+patches:
+  - path: writer_identity.yaml

@@ -177,46 +177,14 @@ func evaluateNode(in Input, n *corev1.Node, failures []v1alpha1.NodeFailure, new
 	}
 	promOK := !promMissing && !promStale
 
-	if !condTrue(n, corev1.NodeReady) {
-		reject(RejectNodeNotReady)
-	}
-	if n.Spec.Unschedulable {
-		reject(RejectUnschedulable)
-	}
-	tols := in.Deployment.Spec.Template.Spec.Tolerations
-	for i := range n.Spec.Taints {
-		t := &n.Spec.Taints[i]
-		if t.Effect != corev1.TaintEffectNoSchedule && t.Effect != corev1.TaintEffectNoExecute {
-			continue
-		}
-		tolerated := false
-		for j := range tols {
-			if tols[j].ToleratesTaint(logr.Discard(), t, false) {
-				tolerated = true
-				break
-			}
-		}
-		if !tolerated {
-			reject(RejectUntoleratedTaint, "untolerated taint "+t.Key+":"+string(t.Effect))
-		}
-	}
-	if condTrue(n, corev1.NodeMemoryPressure) {
-		reject(RejectMemoryPressure, "MemoryPressure condition")
+	for _, reason := range StructuralRejectReasons(n, in.Spec, in.Deployment.Spec.Template.Spec.Tolerations) {
+		reject(reason)
 	}
 	if promOK && (*meas.MemTotalBytes-*meas.MemAvailableBytes)*100 > int64(in.Spec.Filter.MaxMemoryUtilizationPercent)**meas.MemTotalBytes {
 		reject(RejectMemoryPressure, "prometheus memory utilization above limit")
 	}
-	if condTrue(n, corev1.NodeDiskPressure) {
-		reject(RejectDiskPressure)
-	}
-	if condTrue(n, corev1.NodePIDPressure) {
-		reject(RejectPIDPressure)
-	}
 	if promOK && *meas.CPUUtilizationPermille > in.Spec.Filter.MaxCPUUtilizationPercent*10 {
 		reject(RejectCPUPressure)
-	}
-	if !slices.Contains(in.Spec.RequiredPlatforms, c.Platform) {
-		reject(RejectArchMismatch)
 	}
 
 	meas.AllocatableCPUMilli = n.Status.Allocatable.Cpu().MilliValue()
@@ -387,4 +355,48 @@ func condTrue(n *corev1.Node, t corev1.NodeConditionType) bool {
 		}
 	}
 	return false
+}
+
+// StructuralRejectReasons is shared by preflight and the post-write safety guard.
+// Resource and metrics eligibility belongs only to preflight.
+func StructuralRejectReasons(n *corev1.Node, spec v1alpha1.RecoveryPolicySpec, tolerations []corev1.Toleration) []string {
+	var reasons []string
+	reject := func(reason string, _ ...string) { reasons = append(reasons, reason) }
+	if !condTrue(n, corev1.NodeReady) {
+		reject(RejectNodeNotReady)
+	}
+	if n.Spec.Unschedulable {
+		reject(RejectUnschedulable)
+	}
+	tols := tolerations
+	for i := range n.Spec.Taints {
+		t := &n.Spec.Taints[i]
+		if t.Effect != corev1.TaintEffectNoSchedule && t.Effect != corev1.TaintEffectNoExecute {
+			continue
+		}
+		tolerated := false
+		for j := range tols {
+			if tols[j].ToleratesTaint(logr.Discard(), t, false) {
+				tolerated = true
+				break
+			}
+		}
+		if !tolerated {
+			reject(RejectUntoleratedTaint, "untolerated taint "+t.Key+":"+string(t.Effect))
+		}
+	}
+	if condTrue(n, corev1.NodeMemoryPressure) {
+		reject(RejectMemoryPressure, "MemoryPressure condition")
+	}
+	if condTrue(n, corev1.NodeDiskPressure) {
+		reject(RejectDiskPressure)
+	}
+	if condTrue(n, corev1.NodePIDPressure) {
+		reject(RejectPIDPressure)
+	}
+	if !slices.Contains(spec.RequiredPlatforms, n.Labels[osLabel]+"/"+n.Labels[archLabel]) {
+		reject(RejectArchMismatch)
+	}
+
+	return reasons
 }

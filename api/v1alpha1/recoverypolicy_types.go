@@ -218,7 +218,9 @@ type ActiveIncidentRef struct {
 	Name     string `json:"name"`
 	Sequence int64  `json:"sequence"`
 	// Set after creation is confirmed, so a crash before creation is distinguishable from a later deletion.
-	IncidentUID string      `json:"incidentUID,omitempty"`
+	IncidentUID string `json:"incidentUID,omitempty"`
+	// Deployment UID observed when this reservation was made. Empty legacy pending reservations are discarded.
+	WorkloadUID string      `json:"workloadUID,omitempty"`
 	ReservedAt  metav1.Time `json:"reservedAt"`
 	// Reservation intent used to recreate the same Incident after a restart.
 	Trigger  Trigger  `json:"trigger"`

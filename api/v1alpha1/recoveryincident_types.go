@@ -88,6 +88,17 @@ type RecoveryIncidentStatus struct {
 }
 
 type RuntimeStatus struct {
+	// WorkloadDispatchActionID is write-ahead evidence for the same Incident UID
+	// and reserved action. It must persist before dispatch; it grants no authority.
+	// An unconfirmed dispatch resumes through a hold, never by replaying the write.
+	// +kubebuilder:validation:MaxLength=128
+	WorkloadDispatchActionID string `json:"workloadDispatchActionID,omitempty"`
+
+	// SafetyHaltReason persists an unfinished hold/settlement. It grants no write
+	// permission; only the live Deployment fence is execution authority.
+	// +kubebuilder:validation:MaxLength=256
+	SafetyHaltReason string `json:"safetyHaltReason,omitempty"`
+
 	// Empty means DETECTED.
 	// +kubebuilder:validation:Enum=WAITING;EXECUTING;VERIFYING;RECOVERED;FAILED;ABORTED;SUPERSEDED;UNSUPPORTED_WORKLOAD;MANUAL_REQUIRED;OBSERVED
 	Phase  string `json:"phase,omitempty"`

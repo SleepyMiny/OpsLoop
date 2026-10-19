@@ -267,6 +267,38 @@ reset_step() {
   fi
   return "$code"
 }
+# Every Policy mutation is fenced to the object captured by preflight and the
+# exact snapshot just read. JSON Patch tests are atomic with the field change.
+# Never fall back to a name-only merge patch after replacement or a conflict.
+reset_patch_policy() {
+  local action=$1 state uid rv enabled active deleting patch subresource=()
+  [[ "${POLICY_IDENTITY_LOST:-0}" == 0 ]] || return 1
+  state="$(k -n "$NS" get recoverypolicy "$POLICY" -o jsonpath='{.metadata.uid}|{.metadata.resourceVersion}|{.spec.enabled}|{.status.activeIncident.name}|{.metadata.deletionTimestamp}')" || return 1
+  IFS='|' read -r uid rv enabled active deleting <<<"$state"
+  if [[ -z "$P_UID" || "$uid" != "$P_UID" || -n "$deleting" ]]; then
+    POLICY_IDENTITY_LOST=1
+    log "reset: Policy identity changed or is deleting; refusing Policy mutations"
+    return 1
+  fi
+  [[ "$uid" =~ ^[a-zA-Z0-9_-]+$ && "$rv" =~ ^[0-9]+$ ]] || return 1
+  [[ "$enabled" == true || "$enabled" == false ]] || return 1
+  patch="[{\"op\":\"test\",\"path\":\"/metadata/uid\",\"value\":\"$P_UID\"},{\"op\":\"test\",\"path\":\"/metadata/resourceVersion\",\"value\":\"$rv\"}"
+  case "$action" in
+    disable) patch+=',{ "op":"replace","path":"/spec/enabled","value":false}]' ;;
+    enable|ledger)
+      [[ "$enabled" == false && -z "$active" ]] || return 1
+      patch+=',{"op":"test","path":"/spec/enabled","value":false}'
+      if [[ "$action" == enable ]]; then
+        patch+=',{"op":"replace","path":"/spec/enabled","value":true}]'
+      else
+        subresource=(--subresource=status)
+        patch+=',{"op":"add","path":"/status/circuits","value":[]},{"op":"add","path":"/status/recentFailures","value":[]}]'
+      fi ;;
+    *) return 1 ;;
+  esac
+  k -n "$NS" patch recoverypolicy "$POLICY" "${subresource[@]}" --type=json -p "$patch"
+}
+
 reset_policy_disabled() {
   local state
   state="$(k -n "$NS" get recoverypolicy "$POLICY" -o jsonpath='{.metadata.uid}|{.spec.enabled}')" || return 1
@@ -297,7 +329,7 @@ reset_primary_pod_ready() {
 }
 reset_enable_verified() {
   local state
-  k -n "$NS" patch recoverypolicy "$POLICY" --type=merge -p '{"spec":{"enabled":true}}' || return 1
+  reset_patch_policy enable || return 1
   state="$(k -n "$NS" get recoverypolicy "$POLICY" -o jsonpath='{.metadata.uid}|{.spec.enabled}')" || return 1
   [[ "$state" == "$P_UID|true" ]]
 }
@@ -313,7 +345,7 @@ reset_all() {
 
   # These safety measures are independent, including each individual load Pod.
   # Disable before waiting for Ready so a failed Primary cannot prolong Enforce.
-  reset_step disable_policy k -n "$NS" patch recoverypolicy "$POLICY" --type=merge -p '{"spec":{"enabled":false}}' || true
+  reset_step disable_policy reset_patch_policy disable || true
   reset_step policy_disabled reset_policy_disabled || true
   for pod in "${LOAD_PODS[@]}"; do
     reset_step "delete_$pod" k -n "$NS" delete pod "$pod" --ignore-not-found --grace-period=1 --timeout=60s || true
@@ -332,8 +364,7 @@ reset_all() {
     reset_step primary_pod_ready reset_primary_pod_ready || true
   fi
   if ((RESET_FAILED == 0)); then
-    reset_step clear_ledger k -n "$NS" patch recoverypolicy "$POLICY" --subresource=status --type=merge \
-      -p '{"status":{"circuits":null,"recentFailures":null}}' || true
+    reset_step clear_ledger reset_patch_policy ledger || true
   fi
   if ((RESET_FAILED == 0)); then
     # Recheck conditions after potentially slow apply/rollout/ledger operations.
@@ -349,7 +380,7 @@ reset_all() {
   if ((RESET_FAILED != 0)); then
     # An enable request can succeed remotely but return an error locally.
     # Always try disabling again; never claim it succeeded without a readback.
-    reset_step fallback_disable k -n "$NS" patch recoverypolicy "$POLICY" --type=merge -p '{"spec":{"enabled":false}}' || true
+    reset_step fallback_disable reset_patch_policy disable || true
     reset_step fallback_disabled reset_policy_disabled || true
     log "RESET FAILED: inspect reset.tsv; Policy disablement and Primary recovery must be confirmed before the next run."
     reset_record cleanup_exit 1
@@ -359,7 +390,7 @@ reset_all() {
     reset_record cleanup_exit 0
     # The final evidence write may fail too; never return success without it.
     if ((RESET_FAILED != 0)); then
-      reset_step fallback_disable k -n "$NS" patch recoverypolicy "$POLICY" --type=merge -p '{"spec":{"enabled":false}}' || true
+      reset_step fallback_disable reset_patch_policy disable || true
       reset_step fallback_disabled reset_policy_disabled || true
       ((rc != 0)) || rc=1
     else

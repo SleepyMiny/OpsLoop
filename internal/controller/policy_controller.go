@@ -72,27 +72,28 @@ const (
 	PhaseObserved            = "OBSERVED"
 	PhaseIncidentLost        = "INCIDENT_LOST"
 
-	ReasonPolicyDeleted        = "POLICY_DELETED"
-	ReasonDuplicatePolicy      = "DUPLICATE_POLICY"
-	ReasonPolicyDisabled       = "POLICY_DISABLED"
-	ReasonModeChanged          = "MODE_CHANGED"
-	ReasonPolicyChanged        = "POLICY_CHANGED"
-	ReasonWorkloadDeleted      = "WORKLOAD_DELETED"
-	ReasonWorkloadReplaced     = "WORKLOAD_REPLACED"
-	ReasonSpecChanged          = "SPEC_CHANGED_EXTERNALLY"
-	ReasonTemplateChanged      = "TEMPLATE_CHANGED_EXTERNALLY"
-	ReasonDeadlineExceeded     = "DEADLINE_EXCEEDED"
-	ReasonUnsupportedWorkload  = "UNSUPPORTED_WORKLOAD"
-	ReasonClassNotAutomated    = "CLASS_NOT_AUTOMATED"
-	ReasonInsufficientEvidence = "INSUFFICIENT_EVIDENCE"
-	ReasonTriggerCleared       = "TRIGGER_CLEARED"
-	attemptFailed              = "Failed"
+	ReasonPolicyDeleted         = "POLICY_DELETED"
+	ReasonDuplicatePolicy       = "DUPLICATE_POLICY"
+	ReasonPolicyDisabled        = "POLICY_DISABLED"
+	ReasonModeChanged           = "MODE_CHANGED"
+	ReasonPolicyChanged         = "POLICY_CHANGED"
+	ReasonWorkloadDeleted       = "WORKLOAD_DELETED"
+	ReasonWorkloadReplaced      = "WORKLOAD_REPLACED"
+	ReasonSpecChanged           = "SPEC_CHANGED_EXTERNALLY"
+	ReasonTemplateChanged       = "TEMPLATE_CHANGED_EXTERNALLY"
+	ReasonDeadlineExceeded      = "DEADLINE_EXCEEDED"
+	ReasonUnsupportedWorkload   = "UNSUPPORTED_WORKLOAD"
+	ReasonClassNotAutomated     = "CLASS_NOT_AUTOMATED"
+	ReasonInsufficientEvidence  = "INSUFFICIENT_EVIDENCE"
+	ReasonTriggerCleared        = "TRIGGER_CLEARED"
+	ReasonReservationUIDMissing = "RESERVATION_WORKLOAD_UID_MISSING"
+	attemptFailed               = "Failed"
 )
 
 // PolicyReconciler is the only reconciler; MaxConcurrentReconciles=1 plus leader election serializes every action.
 type PolicyReconciler struct {
 	client.Client
-	// APIReader reads Policy, Incident and Deployment live so a stale cache never drives a decision.
+	// APIReader reads Policy, Incident, Deployment and final execution inputs live.
 	APIReader client.Reader
 	Now       func() time.Time
 	Prom      promv1.API
@@ -162,10 +163,21 @@ func (r *PolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			return ctrl.Result{}, err
 		}
 	}
+	if stopped(p) {
+		return r.reconcileStop(ctx, p)
+	}
+	if setQuiesced(p, metav1.ConditionFalse, "ExecutionEnabled", "enabled Enforce generation", metav1.NewTime(now)) {
+		if err := r.writePolicy(ctx, p); err != nil {
+			return requeueOnConflict(err)
+		}
+	}
 	if p.Status.ActiveIncident != nil {
 		return r.reconcileActive(ctx, p, now)
 	}
+	return r.reconcileMonitoring(ctx, p, now)
+}
 
+func (r *PolicyReconciler) reconcileMonitoring(ctx context.Context, p *v1alpha1.RecoveryPolicy, now time.Time) (ctrl.Result, error) {
 	dup, err := r.duplicated(ctx, p)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -182,6 +194,23 @@ func (r *PolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			return r.block(ctx, p, CondTargetNotFound, "", now)
 		}
 		return ctrl.Result{}, err
+	}
+	if p.Spec.Mode == v1alpha1.PolicyModeEnforce {
+		// Live authority, never cached status, blocks every generation/new Incident.
+		live, err := r.liveDeployment(ctx, p)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if live == nil {
+			return r.block(ctx, p, CondTargetNotFound, "", now)
+		}
+		f, err := readFence(live)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if f != nil && f.SafetyHold != nil {
+			return r.block(ctx, p, "SafetyHalted", "Deployment has a persistent safety hold; manual inspection required", now)
+		}
 	}
 	// arch §7:215 forbids automatic circuit removal, so a full list blocks every new Incident until reset.
 	if len(p.Status.Circuits) >= v1alpha1.MaxCircuits {
@@ -209,7 +238,7 @@ func (r *PolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			return r.block(ctx, p, CondCircuitOpen, "circuit open for signature "+c.Signature, now)
 		}
 	}
-	return r.reserve(ctx, p, res.Trigger, digest, now)
+	return r.reserve(ctx, p, d, res.Trigger, digest, now)
 }
 
 // monitor collects the 6.1 inputs from the cache and classifies them.
@@ -226,7 +255,14 @@ func (r *PolicyReconciler) monitor(ctx context.Context, p *v1alpha1.RecoveryPoli
 	if err := r.List(ctx, &pods, client.InNamespace(p.Namespace)); err != nil {
 		return classification.Result{}, "", err
 	}
-	monitored := classification.MonitoredPods(d, rss.Items, pods.Items)
+	// Deployment revision metadata can lag a new template. An old ReplicaSet
+	// must not make its Pods' failures evidence about that new template.
+	current := slices.DeleteFunc(rss.Items, func(rs appsv1.ReplicaSet) bool {
+		template := rs.Spec.Template.DeepCopy()
+		delete(template.Labels, appsv1.DefaultDeploymentUniqueLabelKey)
+		return !equality.Semantic.DeepEqual(*template, d.Spec.Template)
+	})
+	monitored := classification.MonitoredPods(d, current, pods.Items)
 	key := types.NamespacedName{Namespace: p.Namespace, Name: p.Name}
 	digest := imageDigest(d, monitored)
 	return classification.Classify(classification.Input{
@@ -275,7 +311,7 @@ func (r *PolicyReconciler) observeRestarts(key types.NamespacedName, pods []core
 }
 
 // reserve persists the Incident intent on the Policy before any Incident exists (6.5 ①).
-func (r *PolicyReconciler) reserve(ctx context.Context, p *v1alpha1.RecoveryPolicy, t v1alpha1.Trigger, digest string, now time.Time) (ctrl.Result, error) {
+func (r *PolicyReconciler) reserve(ctx context.Context, p *v1alpha1.RecoveryPolicy, observed *appsv1.Deployment, t v1alpha1.Trigger, digest string, now time.Time) (ctrl.Result, error) {
 	live, err := r.liveDeployment(ctx, p)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -283,7 +319,27 @@ func (r *PolicyReconciler) reserve(ctx context.Context, p *v1alpha1.RecoveryPoli
 	if live == nil {
 		return r.block(ctx, p, CondTargetNotFound, "", now)
 	}
+	// The trigger and digest describe the Deployment passed to monitor. Never
+	// attach that observation to another UID or a changed desired workload.
+	// ResourceVersion/status/metadata changes alone do not invalidate it.
+	if live.UID != observed.UID || v1alpha1.TemplateHash(live.Spec.Template) != v1alpha1.TemplateHash(observed.Spec.Template) || v1alpha1.SpecHash(live.Spec) != v1alpha1.SpecHash(observed.Spec) {
+		return ctrl.Result{RequeueAfter: conflictRequeue}, nil
+	}
+	if p.Spec.Mode == v1alpha1.PolicyModeEnforce {
+		f, err := readFence(live)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if f != nil && f.SafetyHold != nil {
+			return r.block(ctx, p, "SafetyHalted", "Deployment has a persistent safety hold", now)
+		}
+	}
 	reservation(p, live, t, digest, now)
+	// A new observation reservation invalidates completion atomically with its
+	// activeIncident pointer, including ObserveOnly generations after a stop.
+	if stopped(p) {
+		setQuiesced(p, metav1.ConditionFalse, "ReservationPending", "active incident cleanup is pending", metav1.NewTime(now))
+	}
 	setCondition(p, CondIncidentActive, p.Status.ActiveIncident.Name, now)
 	if err := r.writePolicy(ctx, p); err != nil {
 		return requeueOnConflict(err)
@@ -311,11 +367,12 @@ func reservation(p *v1alpha1.RecoveryPolicy, live *appsv1.Deployment, t v1alpha1
 	p.Status.IncidentSequence = seq
 	p.Status.ActiveIncident = &v1alpha1.ActiveIncidentRef{
 		// The Policy UID prefix keeps a recreated Policy from colliding with Incidents left by its predecessor.
-		Name:       fmt.Sprintf("%s-%s-%05d", p.Name, string(p.UID)[:8], seq),
-		Sequence:   seq,
-		ReservedAt: metav1.NewTime(now),
-		Trigger:    t,
-		Baseline:   base,
+		Name:        fmt.Sprintf("%s-%s-%05d", p.Name, string(p.UID)[:8], seq),
+		Sequence:    seq,
+		WorkloadUID: string(live.UID),
+		ReservedAt:  metav1.NewTime(now),
+		Trigger:     t,
+		Baseline:    base,
 	}
 }
 
@@ -346,16 +403,13 @@ func incidentFor(p *v1alpha1.RecoveryPolicy, live *appsv1.Deployment) *v1alpha1.
 			PolicyGeneration: p.Generation,
 			PolicyHash:       v1alpha1.PolicyHash(p.Spec),
 			Policy:           p.Spec,
-			Workload:         v1alpha1.WorkloadRef{Name: p.Spec.TargetRef.Name},
+			Workload:         v1alpha1.WorkloadRef{Name: p.Spec.TargetRef.Name, UID: a.WorkloadUID},
 			Trigger:          a.Trigger,
 			Baseline:         a.Baseline,
 			DetectedAt:       a.ReservedAt,
 			// The API server stores whole seconds; a fractional deadline would never compare equal after Create.
 			Deadline: metav1.NewTime(a.ReservedAt.Add(p.Spec.Budget.IncidentDeadline.Duration).Truncate(time.Second)),
 		},
-	}
-	if live != nil {
-		inc.Spec.Workload.UID = string(live.UID)
 	}
 	return inc
 }
@@ -365,7 +419,10 @@ func (r *PolicyReconciler) confirmAndProgress(ctx context.Context, p *v1alpha1.R
 	a := p.Status.ActiveIncident
 	// An Incident created by someone else must not supply the snapshot Enforce acts on; a differing Workload UID only supersedes.
 	want := incidentFor(p, live).Spec
-	want.Workload.UID = inc.Spec.Workload.UID
+	if a.WorkloadUID == "" && a.IncidentUID != "" {
+		// Already-confirmed legacy Incidents retain their immutable workload UID.
+		want.Workload.UID = inc.Spec.Workload.UID
+	}
 	// A spec edit between Create and the UID write leaves an older snapshot that cannot be verified, so only the reservation is matched and the Incident is aborted below.
 	stale := inc.Spec.PolicyGeneration != p.Generation
 	if stale {
@@ -399,6 +456,27 @@ func (r *PolicyReconciler) confirmAndProgress(ctx context.Context, p *v1alpha1.R
 // reconcileActive reads the active Incident live once and resumes it after any restart (6.5 ③).
 func (r *PolicyReconciler) reconcileActive(ctx context.Context, p *v1alpha1.RecoveryPolicy, now time.Time) (ctrl.Result, error) {
 	a := p.Status.ActiveIncident
+	if a.WorkloadUID == "" && a.IncidentUID == "" {
+		// Old pending records cannot prove which Deployment supplied the trigger.
+		// Discard the intent rather than seed an identity from a new live object.
+		// A stopped Policy can then finish cleanup; enabled monitoring must make
+		// a new observation on a later reconcile before reserving anything.
+		msg := "discarded pending reservation without observed Deployment UID"
+		existing := &v1alpha1.RecoveryIncident{}
+		err := r.APIReader.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: a.Name}, existing)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+		if err == nil {
+			msg += "; existing Incident unchanged, cleanup blocked pending UID verification"
+		}
+		p.Status.ActiveIncident = nil
+		setCondition(p, ReasonReservationUIDMissing, msg, now)
+		if err := r.writePolicy(ctx, p); err != nil {
+			return requeueOnConflict(err)
+		}
+		return ctrl.Result{RequeueAfter: monitorPeriod}, nil
+	}
 	live, err := r.liveDeployment(ctx, p)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -426,11 +504,33 @@ func (r *PolicyReconciler) reconcileActive(ctx context.Context, p *v1alpha1.Reco
 
 // progress applies the global checks and then the phase step (6.6).
 func (r *PolicyReconciler) progress(ctx context.Context, p *v1alpha1.RecoveryPolicy, inc *v1alpha1.RecoveryIncident, live *appsv1.Deployment, now time.Time) (ctrl.Result, error) {
+	if marker := inc.Status.Runtime.WorkloadDispatchActionID; marker != "" {
+		at := inc.Status.Runtime.Attempts
+		if len(at) == 0 || at[len(at)-1].ActionID != marker {
+			return ctrl.Result{}, fmt.Errorf("dispatch marker/action mismatch; manual inspection required")
+		}
+		return r.haltAndSettle(ctx, p, inc, "WORKLOAD_DISPATCH_UNCONFIRMED")
+	}
+	if inc.Status.Runtime.SafetyHaltReason != "" {
+		return r.haltAndSettle(ctx, p, inc, inc.Status.Runtime.SafetyHaltReason)
+	}
+	if live != nil && string(live.UID) == inc.Spec.Workload.UID {
+		f, err := readFence(live)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if f != nil && f.SafetyHold != nil {
+			return r.haltAndSettle(ctx, p, inc, f.SafetyHold.Reason)
+		}
+	}
 	phase, reason, err := r.globalCheck(ctx, p, inc, live, now)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	if phase != "" {
+		if len(inc.Status.Runtime.Attempts) > 0 && reason == ReasonDeadlineExceeded {
+			return r.haltAndSettle(ctx, p, inc, reason)
+		}
 		settleReserved(inc, live, now)
 		return r.finish(ctx, p, inc, phase, reason, "", now)
 	}
@@ -495,7 +595,7 @@ func expectedTemplateHash(inc *v1alpha1.RecoveryIncident) string {
 
 // evaluate records one fresh decision (DETECTED and WAITING) and starts an attempt on an Enforce selection.
 func (r *PolicyReconciler) evaluate(ctx context.Context, p *v1alpha1.RecoveryPolicy, inc *v1alpha1.RecoveryIncident, live *appsv1.Deployment, now time.Time) (ctrl.Result, error) {
-	dec, cleared, err := r.decide(ctx, p, inc, live, now, nextActionID(inc))
+	dec, inputs, cleared, err := r.decide(ctx, p, inc, live, now, nextActionID(inc))
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -507,7 +607,7 @@ func (r *PolicyReconciler) evaluate(ctx context.Context, p *v1alpha1.RecoveryPol
 		if inc.Spec.Policy.Mode == v1alpha1.PolicyModeObserveOnly {
 			return r.finish(ctx, p, inc, PhaseObserved, dec.DecisionReason, "", now)
 		}
-		return r.startAttempt(ctx, p, inc, live, dec, now)
+		return r.startAttempt(ctx, p, inc, live, dec, inputs, now)
 	}
 	setPhase(inc, PhaseWaiting, dec.DecisionReason, "", now)
 	if err := r.Status().Update(ctx, inc); err != nil {
@@ -517,18 +617,18 @@ func (r *PolicyReconciler) evaluate(ctx context.Context, p *v1alpha1.RecoveryPol
 }
 
 // decide re-collects Nodes, Pods and metrics and evaluates every candidate; cleared means the trigger is gone.
-func (r *PolicyReconciler) decide(ctx context.Context, p *v1alpha1.RecoveryPolicy, inc *v1alpha1.RecoveryIncident, live *appsv1.Deployment, now time.Time, actionID string) (v1alpha1.RecoveryDecision, bool, error) {
+func (r *PolicyReconciler) decide(ctx context.Context, p *v1alpha1.RecoveryPolicy, inc *v1alpha1.RecoveryIncident, live *appsv1.Deployment, now time.Time, actionID string) (v1alpha1.RecoveryDecision, candidates.Input, bool, error) {
 	nodes, err := r.nodes(ctx)
 	if err != nil {
-		return v1alpha1.RecoveryDecision{}, false, err
+		return v1alpha1.RecoveryDecision{}, candidates.Input{}, false, err
 	}
 	if !classification.TriggerPersists(inc.Spec.Trigger, nodes) {
-		return v1alpha1.RecoveryDecision{}, true, nil
+		return v1alpha1.RecoveryDecision{}, candidates.Input{}, true, nil
 	}
 	spec := inc.Spec.Policy
 	sel, err := metav1.LabelSelectorAsSelector(&spec.CandidateSelector)
 	if err != nil {
-		return v1alpha1.RecoveryDecision{}, false, err
+		return v1alpha1.RecoveryDecision{}, candidates.Input{}, false, err
 	}
 	var cands []corev1.Node
 	podsByNode := map[string][]corev1.Pod{}
@@ -538,13 +638,13 @@ func (r *PolicyReconciler) decide(ctx context.Context, p *v1alpha1.RecoveryPolic
 		}
 		var pods corev1.PodList
 		if err := r.List(ctx, &pods, client.MatchingFields{podNodeNameField: n.Name}); err != nil {
-			return v1alpha1.RecoveryDecision{}, false, err
+			return v1alpha1.RecoveryDecision{}, candidates.Input{}, false, err
 		}
 		cands = append(cands, *n)
 		podsByNode[n.Name] = pods.Items
 	}
 	metrics, merr := candidates.QueryMetrics(ctx, r.Prom, now, 2*spec.Filter.MaxSampleAge.Duration)
-	return candidates.Evaluate(candidates.Input{
+	inputs := candidates.Input{
 		// Collection can take several Prometheus timeouts. Evaluate against the
 		// clock after collection, not the time captured at reconcile entry.
 		Now:                  r.Now(),
@@ -562,7 +662,8 @@ func (r *PolicyReconciler) decide(ctx context.Context, p *v1alpha1.RecoveryPolic
 		MetricsErr:           merr,
 		ImageDigest:          inc.Spec.Baseline.ImageDigest,
 		BaselineTemplateHash: inc.Spec.Baseline.TemplateHash,
-	}), false, nil
+	}
+	return candidates.Evaluate(inputs), inputs, false, nil
 }
 
 // finish writes a terminal phase and releases the Policy in the same reconcile.
@@ -607,6 +708,14 @@ func (r *PolicyReconciler) release(ctx context.Context, p *v1alpha1.RecoveryPoli
 		failures = failures[len(failures)-v1alpha1.MaxRecentFailures:]
 	}
 	p.Status.RecentFailures = failures
+	if inc.Status.Runtime.SafetyHaltReason != "" {
+		p.Status.ActiveIncident = nil
+		setCondition(p, "SafetyHalted", inc.Status.Runtime.SafetyHaltReason, now)
+		if err := r.writePolicy(ctx, p); err != nil {
+			return requeueOnConflict(err)
+		}
+		return ctrl.Result{RequeueAfter: monitorPeriod}, nil
+	}
 	return r.writeRelease(ctx, p, now)
 }
 
@@ -643,13 +752,10 @@ func (r *PolicyReconciler) abortOrphans(ctx context.Context, key types.Namespace
 		if isTerminal(inc.Status.Runtime.Phase) || (keep != "" && inc.Spec.PolicyRef.UID == string(keep)) {
 			continue
 		}
-		if lastReserved(inc) != nil {
-			live, err := r.getDeployment(ctx, types.NamespacedName{Namespace: inc.Namespace, Name: inc.Spec.Workload.Name})
-			if err != nil {
-				errs = append(errs, err)
-				continue
-			}
-			settleReserved(inc, live, now)
+		if inc.Status.Runtime.WorkloadDispatchActionID != "" || inc.Status.Runtime.SafetyHaltReason != "" || lastReserved(inc) != nil {
+			_, err := r.haltAndSettle(ctx, nil, inc, ReasonPolicyDeleted)
+			errs = append(errs, err)
+			continue
 		}
 		setPhase(inc, PhaseAborted, ReasonPolicyDeleted, "", now)
 		errs = append(errs, r.Status().Update(ctx, inc))

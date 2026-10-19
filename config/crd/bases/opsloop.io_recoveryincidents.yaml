@@ -1005,6 +1005,19 @@ spec:
                     type: string
                   reason:
                     type: string
+                  safetyHaltReason:
+                    description: |-
+                      SafetyHaltReason persists an unfinished hold/settlement. It grants no write
+                      permission; only the live Deployment fence is execution authority.
+                    maxLength: 256
+                    type: string
+                  workloadDispatchActionID:
+                    description: |-
+                      WorkloadDispatchActionID is write-ahead evidence for the same Incident UID
+                      and reserved action. It must persist before dispatch; it grants no authority.
+                      An unconfirmed dispatch resumes through a hold, never by replaying the write.
+                    maxLength: 128
+                    type: string
                 type: object
             type: object
         required:

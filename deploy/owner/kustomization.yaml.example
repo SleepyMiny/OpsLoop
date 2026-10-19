@@ -2,7 +2,17 @@
 resources:
   - ../demo-api
   - ../../config/default          # after P3-c
-  # - ../../config/rbac/enforce   # only after P4 Enforce approval
+  # Enforce requires the approved writer transition, not just uncommenting RBAC.
+  # See docs/runbooks/controller-writer-transition.md. For its reviewed successor
+  # image, replace ../../config/default with the following base resources:
+  # - ../../config/crd
+  # - ../../config/rbac
+  # - ../../config/manager-fenced
+  # Then, separately after the legacy-writer gate and explicit Enforce approval:
+  # - ../../config/rbac/enforce
+  # Also replace the opsloop-controller image key below with
+  # opsloop-controller-fenced-v1 and pin its newly reviewed successor digest.
+  # The previously published 9e7f91b image does NOT contain this protocol.
 images:
   - name: demo-api
     newName: REPLACE_ACR_LOGIN_SERVER/opsloop/demo-api
