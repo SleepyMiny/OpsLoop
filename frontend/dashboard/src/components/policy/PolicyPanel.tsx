@@ -70,6 +70,8 @@ function Status({ policy, cooldowns }: { policy: RecoveryPolicy; cooldowns: Acti
   const cooldownSeconds = policy.spec.budget.cooldownSeconds;
   return (
     <dl className={styles.status}>
+      <div><dt>Controller 상태</dt><dd>{policy.status.conditions?.map((c) => `${c.type}=${c.status} / ${c.reason}`).join(' · ') || '기록 없음'}</dd></div>
+      <div><dt>Circuit 기록</dt><dd>{policy.status.circuits?.map((c) => `${c.phase} / ${c.class}`).join(' · ') || '없음'}</dd></div>
       <div>
         <dt>활성 Incident</dt>
         <dd>

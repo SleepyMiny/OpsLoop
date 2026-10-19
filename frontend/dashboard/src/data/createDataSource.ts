@@ -1,5 +1,6 @@
 import { DemoDataSource } from './demo/demoSource';
 import { HttpDataSource } from './live/httpSource';
+import { ReplayDataSource } from './replay/replaySource';
 import type { DashboardDataSource } from './source';
 
 /**
@@ -17,6 +18,8 @@ export function createDataSource({ search, env }: DataSourceRequest): DashboardD
   const params = new URLSearchParams(search);
   const requested = params.get('source') ?? env.VITE_OPSLOOP_SOURCE ?? 'demo';
   if (requested === 'live') return new HttpDataSource({ baseUrl: env.VITE_OPSLOOP_API_BASE });
+  if (requested === 'replay') return new ReplayDataSource();
+  if (requested !== 'demo') throw new Error('알 수 없는 데이터 모드. demo, live, replay 중 선택하세요.');
   const scenario = params.get('scenario') ?? undefined;
   const source = new DemoDataSource({
     ...(scenario ? { initialScenarioId: scenario } : {}),

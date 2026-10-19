@@ -20,6 +20,7 @@ export interface DashboardDataSource {
   readonly label: string;
   /** Present only for Demo Mode; live sources have no playback controls. */
   readonly demo?: DemoController;
+  readonly replay?: ReplayController;
   start(): void;
   stop(): void;
   /** useSyncExternalStore-compatible: listener fires on snapshot, status or playback change. */
@@ -27,6 +28,13 @@ export interface DashboardDataSource {
   /** Must return the same object until something changes. */
   getSnapshot(): DashboardSnapshot | null;
   getStatus(): SourceStatus;
+}
+
+export interface ReplayController {
+  listExperiments(): Array<{id: string; title: string}>;
+  getState(): { experimentId: string; frameIndex: number; frameLabels: string[] };
+  select(id: string): void;
+  setFrame(index: number): void;
 }
 
 export type ScenarioTag = 'demo-a' | 'demo-b' | 'negative';

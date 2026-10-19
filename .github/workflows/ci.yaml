@@ -39,6 +39,7 @@ jobs:
         run: |
           bash -n demos/node-failure/run.sh
           python3 -B -m unittest discover -s tests -p test_demo_reset.py -v
+          python3 -B -m unittest discover -s tests -p test_dashboard_replay.py -v
 
   image:
     runs-on: ubuntu-24.04

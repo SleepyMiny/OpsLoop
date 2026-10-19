@@ -364,3 +364,17 @@ describe('parseSnapshot with CRD objects from a BFF', () => {
     }
   });
 });
+
+describe('Actual failure reason precedence', () => {
+  it('keeps NODE_NOT_READY when Controller also records podName', () => {
+    const crd = crdIncident('OBSERVED');
+    crd.spec.trigger.reason = 'NODE_NOT_READY'; crd.spec.trigger.podName = 'failed-pod';
+    expect(incidentFromCrd(crd).spec.trigger).toMatchObject({type:'NodeNotReady',nodeName:crd.spec.trigger.nodeName});
+  });
+  it('distinguishes IMAGE_PULL and REPEATED_EXIT; unknown signals stay explicit', () => {
+    for (const [reason, type] of [['IMAGE_PULL','ImagePull'],['REPEATED_EXIT','RepeatedRestart'],['OOM_KILLED','FailureSignal']]) {
+      const crd = crdIncident('MANUAL_REQUIRED'); crd.spec.trigger.reason = reason!;
+      expect(incidentFromCrd(crd).spec.trigger.type).toBe(type);
+    }
+  });
+});

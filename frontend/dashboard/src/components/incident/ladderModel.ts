@@ -21,7 +21,7 @@ export type LaneId =
   | 'ENGINEERING_HANDOFF'
   | 'FAILED';
 /** Phases that stop the incident without being part of the drawn lane. */
-export type StopPhase = 'ABORTED' | 'SUPERSEDED' | 'UNSUPPORTED_WORKLOAD' | 'MANUAL_REQUIRED';
+export type StopPhase = 'ABORTED' | 'SUPERSEDED' | 'UNSUPPORTED_WORKLOAD' | 'MANUAL_REQUIRED' | 'OBSERVED';
 export type LaneState = 'off' | 'visited' | 'current';
 
 export const LANE_ORDER: readonly LaneId[] = [
@@ -45,9 +45,10 @@ export const LANE_TONE: Record<LaneId | StopPhase, LampState> = {
   SUPERSEDED: 'caution',
   UNSUPPORTED_WORKLOAD: 'caution',
   MANUAL_REQUIRED: 'caution',
+  OBSERVED: 'caution',
 };
 
-const STOP_PHASES: readonly RuntimePhase[] = ['ABORTED', 'SUPERSEDED', 'UNSUPPORTED_WORKLOAD', 'MANUAL_REQUIRED'];
+const STOP_PHASES: readonly RuntimePhase[] = ['ABORTED', 'SUPERSEDED', 'UNSUPPORTED_WORKLOAD', 'MANUAL_REQUIRED', 'OBSERVED'];
 const EXIT_CHAIN: readonly LaneId[] = ['RUNTIME_RECOVERY_EXHAUSTED', 'EVIDENCE_FINALIZING', 'ENGINEERING_HANDOFF'];
 
 const IDX = {
@@ -254,6 +255,9 @@ export function ladderStatus(rt: IncidentRuntimeStatus, spec: RecoveryPolicySpec
       break;
     case 'VERIFYING':
       detail = last ? httpProgress(last.httpSuccesses, spec.verification).text : null;
+      break;
+    case 'OBSERVED':
+      detail = 'ObserveOnly 관측 종료 · 실제 재배치/복구 조치 없음';
       break;
     case 'RECOVERED':
       detail = 'HTTP 검증과 안정화 통과';

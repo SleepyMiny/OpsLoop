@@ -49,12 +49,13 @@ export function WorkloadStrip({
         className={styles.image}
         title={`이미지 index ${workload.imageIndexDigest}`}
         role="group"
-        aria-label="이미지 index 하나에 두 플랫폼 manifest"
+        aria-label={workload.platforms.length ? "확인된 이미지 platform manifest" : "이미지 digest · platform index 미조회"}
       >
         <span className={styles.imageIndex}>
           <span className={styles.fieldLabel}>이미지 index</span>
           <EnumCode>{shortHash(workload.imageIndexDigest, 8)}</EnumCode>
         </span>
+        {workload.platforms.length === 0 ? <span className={styles.fieldNote}>platform index 미조회</span> : null}
         {workload.platforms.map((p) => {
           const arch = p.platform.slice('linux/'.length) as Arch;
           const serving = arch === servingArch;

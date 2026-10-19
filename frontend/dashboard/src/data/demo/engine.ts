@@ -469,7 +469,7 @@ export class DemoSimulation {
         const what =
           trigger.type === 'NodeNotReady'
             ? `${trigger.nodeName} NotReady 지속 → Incident ${name} 예약`
-            : `${trigger.podName} 재시작 ${trigger.restarts}회 → Incident ${name} 예약`;
+            : trigger.type === 'RepeatedRestart' ? `${trigger.podName} 재시작 ${trigger.restarts}회 → Incident ${name} 예약` : `장애 신호 → Incident ${name} 예약`;
         self.pushEvent('trigger', 'DETECTED', what);
         self.cached = null;
       },

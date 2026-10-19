@@ -1,3 +1,4 @@
+import { displayIncident } from '../../domain/displayIncident';
 import { useMemo } from 'react';
 import { ENGINEERING_PHASE_LABEL, STAGE_LABEL } from '../../domain/labels';
 import type { IncidentCondition, IncidentEngineeringStatus, StageResult } from '../../domain/types';
@@ -36,7 +37,7 @@ const OUTCOME_WORD: Record<IterationGroup['outcome'], string> = {
 };
 
 export function EngineeringTrack({ snapshot, emphasized }: RegionProps) {
-  const incident = snapshot.activeIncident;
+  const incident = displayIncident(snapshot);
   const eng = incident?.status.engineering;
   const block = incident ? engineeringBlock(incident.status.conditions) : null;
   const runtime = runtimeAlongside(snapshot);
@@ -50,6 +51,8 @@ export function EngineeringTrack({ snapshot, emphasized }: RegionProps) {
         <Boundary runtime={runtime} />
         {eng ? (
           <Run eng={eng} track={track} />
+        ) : snapshot.source !== 'demo' ? (
+          <p className={styles.explain}>Engineering Runner·자동 수정·PR 생성은 미구현입니다. 이 관측 기록에서 Engineering 작업을 실행하지 않았습니다.</p>
         ) : (
           <NotStarted track={track} block={block} />
         )}

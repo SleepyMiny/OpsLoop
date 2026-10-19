@@ -48,6 +48,8 @@ export function Header({
           <strong>Demo Mode</strong>
           <span>시뮬레이션 데이터</span>
         </p>
+      ) : source.kind === 'replay' ? (
+        <p className={styles.modeBadge} data-mode="replay"><strong>Evidence Replay</strong><span>과거 실환경 기록 · 현재 상태 아님</span></p>
       ) : (
         <p className={styles.modeBadge} data-mode="live" data-state={status.state}>
           <strong>Live</strong>
@@ -75,10 +77,15 @@ export function Header({
           ))}
         </nav>
       ) : (
-        <div className={styles.scenarios} />
+        <div className={styles.scenarios}>
+          {source.replay ? <ReplayControls replay={source.replay} /> : null}
+        </div>
       )}
 
       <div className={styles.headerTools}>
+        <nav aria-label="데이터 모드" className={styles.modeLinks}>
+          {(['demo', 'live', 'replay'] as const).map((mode) => <a key={mode} href={`?source=${mode}`} aria-current={source.kind === mode ? 'page' : undefined}>{mode === 'demo' ? 'Demo' : mode === 'live' ? 'Live' : 'Replay'}</a>)}
+        </nav>
         {playback ? (
           <span className={styles.simClock} title="시나리오 시작부터의 시뮬레이션 시간">
             {relClock(playback.simElapsedMs)}
@@ -107,4 +114,12 @@ export function Header({
       </div>
     </header>
   );
+}
+
+function ReplayControls({replay}: {replay: NonNullable<DashboardDataSource['replay']>}) {
+  const state = replay.getState();
+  return <div className={styles.replayControls}>
+    <label>실증 기록 <select value={state.experimentId} onChange={(e) => replay.select(e.target.value)}>{replay.listExperiments().map((e) => <option value={e.id} key={e.id}>{e.title}</option>)}</select></label>
+    <label>보존 시점 <select value={state.frameIndex} onChange={(e) => replay.setFrame(Number(e.target.value))}>{state.frameLabels.map((label, i) => <option value={i} key={i}>{label}</option>)}</select></label>
+  </div>;
 }

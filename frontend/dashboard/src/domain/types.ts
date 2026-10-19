@@ -4,8 +4,7 @@
  * Field names follow docs/architecture/architecture-v0.1.md (§5 RecoveryDecision,
  * §7 Runtime state machine, §8 RecoveryPolicy, §9 CRDs, §13 Engineering state
  * machine) using Kubernetes-style camelCase JSON keys. The Go types in
- * api/v1alpha1 are not committed yet; when they are, their json tags win and this
- * file is aligned to them (see docs/live-data-contract.md).
+ * api/v1alpha1 are authoritative; see docs/live-data-contract.md for conversion.
  *
  * All timestamps are epoch milliseconds. Ratios are 0..1. Bytes and millicores are
  * raw integers so the UI decides formatting.
@@ -229,6 +228,8 @@ export interface CooldownEntry {
 }
 
 export interface RecoveryPolicyStatus {
+  conditions?: Array<{type: string; status: 'True' | 'False' | 'Unknown'; reason: string; lastTransitionTime: number}>;
+  circuits?: Array<{signature: string; class: string; incident: string; phase: string; openedAt: number}>;
   observedGeneration: number;
   activeIncidentRef: string | null;
   incidentSequence: number;
@@ -499,10 +500,12 @@ export interface IncidentEvent {
   message: string;
 }
 
-export type IncidentTrigger =
+export type IncidentTrigger = (
   | { type: 'NodeNotReady'; nodeName: string; observedAt: number }
+  | { type: 'ImagePull'; podName: string; observedAt: number }
+  | { type: 'FailureSignal'; reason: string; subject: string; observedAt: number }
   /** restarts is absent when the source records only that the threshold was reached. */
-  | { type: 'RepeatedRestart'; podName: string; restarts?: number; observedAt: number };
+  | { type: 'RepeatedRestart'; podName: string; restarts?: number; observedAt: number }) & { reason?: string };
 
 export interface RecoveryIncident {
   name: string;
@@ -526,7 +529,7 @@ export interface RecoveryIncident {
 // Snapshot delivered to the UI
 // ---------------------------------------------------------------------------
 
-export type DataSourceKind = 'demo' | 'live';
+export type DataSourceKind = 'demo' | 'live' | 'replay';
 
 export interface Narration {
   /** Short headline for visitors, plain Korean. */
@@ -549,4 +552,6 @@ export interface DashboardSnapshot {
   recentIncidents: RecoveryIncident[];
   /** Demo-only storytelling. Live sources leave this undefined. */
   narration?: Narration;
+  diagnostics?: { warnings: string[]; metricsAvailable: boolean; readOnly: boolean };
+  replay?: { experimentId: string; title: string; frameLabel: string; frameIndex: number; frameCount: number; limitations: string[]; milestones: Array<{label: string; at?: number; elapsedSeconds?: number}>; provenance: Array<{file: string; sha256: string}> };
 }

@@ -1,3 +1,4 @@
+import { displayIncident } from '../../domain/displayIncident';
 import { REJECT_REASON_LABEL, SITE_LABEL } from '../../domain/labels';
 import type {
   ActionType,
@@ -262,7 +263,7 @@ export interface RouteView {
  * failed (NodeNotReady), or the node where the crashing Pod ran.
  */
 function routeOrigin(snapshot: DashboardSnapshot, decision: RecoveryDecision): ClusterNode | undefined {
-  const incident = snapshot.activeIncident;
+  const incident = displayIncident(snapshot);
   if (!incident) return undefined;
   const nodes = snapshot.cluster.nodes;
   const recorded = findNode(nodes, decision.sourceNodeName);
@@ -276,13 +277,13 @@ function routeOrigin(snapshot: DashboardSnapshot, decision: RecoveryDecision): C
 
   const trigger = incident.spec.trigger;
   if (trigger.type === 'NodeNotReady') return findNode(nodes, trigger.nodeName);
-  const byPod = nodes.find((n) => n.pods.some((p) => p.name === trigger.podName));
+  const byPod = nodes.find((n) => n.pods.some((p) => 'podName' in trigger && p.name === trigger.podName));
   if (byPod) return byPod;
   return nodes.find((n) => n.pods.some((p) => p.role === 'demo-api' && p.attemptId !== currentActionId));
 }
 
 export function deriveRoute(snapshot: DashboardSnapshot): RouteView | null {
-  const incident = snapshot.activeIncident;
+  const incident = displayIncident(snapshot);
   const runtime = incident?.status.runtime;
   if (!incident || !runtime) return null;
   const stage = ROUTE_STAGE[runtime.phase];
@@ -380,7 +381,7 @@ export interface QuarantineView {
 }
 
 export function quarantineView(snapshot: DashboardSnapshot): QuarantineView | null {
-  const state = snapshot.activeIncident?.status.runtime.quarantine;
+  const state = displayIncident(snapshot)?.status.runtime.quarantine;
   if (!state) return null;
   const replicas = `replicas=${snapshot.workload.replicas}`;
   switch (state) {
@@ -470,7 +471,7 @@ export const PROBE_SLOTS = 45;
 export function buildClusterView(snapshot: DashboardSnapshot): ClusterView {
   const now = snapshot.observedAt;
   const { filter } = snapshot.policy.spec;
-  const oldPodsOutstanding = snapshot.activeIncident?.status.runtime.oldPodsOutstanding ?? false;
+  const oldPodsOutstanding = displayIncident(snapshot)?.status.runtime.oldPodsOutstanding ?? false;
   const route = deriveRoute(snapshot);
 
   const stations = orderNodes(snapshot.cluster.nodes).map((node): StationView => {

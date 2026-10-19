@@ -1,0 +1,60 @@
+# Prepared only; do not apply without deployment approval.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opsloop-dashboard-readonly
+  namespace: opsloop-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: opsloop-dashboard-readonly
+rules:
+  - apiGroups: ['']
+    resources: [nodes, pods]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: opsloop-dashboard-readonly
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: opsloop-dashboard-readonly
+subjects:
+  - kind: ServiceAccount
+    name: opsloop-dashboard-readonly
+    namespace: opsloop-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: opsloop-dashboard-readonly
+  namespace: opsloop-demo
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [demo-api]
+    verbs: [get]
+  - apiGroups: [opsloop.io]
+    resources: [recoverypolicies]
+    resourceNames: [demo-api]
+    verbs: [get]
+  - apiGroups: [opsloop.io]
+    resources: [recoveryincidents]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: opsloop-dashboard-readonly
+  namespace: opsloop-demo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: opsloop-dashboard-readonly
+subjects:
+  - kind: ServiceAccount
+    name: opsloop-dashboard-readonly
+    namespace: opsloop-system

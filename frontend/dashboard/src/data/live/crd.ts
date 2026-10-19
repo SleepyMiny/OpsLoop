@@ -1,6 +1,5 @@
 /**
- * Wire types for the Go CRDs `opsloop.io/v1alpha1` (api/v1alpha1 at commit
- * f47c7d1 on the backend branch). Only the fields the dashboard reads are listed;
+ * Wire types for the Go CRDs `opsloop.io/v1alpha1` (current merged Fence v2 backend). Only the fields the dashboard reads are listed;
  * json tags are copied verbatim. Times are RFC 3339 strings (metav1.Time),
  * durations are Go duration strings (metav1.Duration), memory is a
  * resource.Quantity string in the policy and int64 bytes in measurements, ratios
@@ -71,6 +70,7 @@ export interface CrdRecoveryPolicy {
   spec: CrdRecoveryPolicySpec;
   status?: {
     observedGeneration?: number;
+    conditions?: Array<{type: string; status: 'True' | 'False' | 'Unknown'; reason: string; lastTransitionTime: string}>;
     incidentSequence?: number;
     activeIncident?: { name: string; sequence: number };
     recentFailures?: CrdNodeFailure[];

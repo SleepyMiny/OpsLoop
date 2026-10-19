@@ -48,7 +48,7 @@ export function ClusterMimic({ snapshot, emphasized }: RegionProps) {
                 <MeshBand stations={view.stations} route={view.route} routeLabel={routeLabel} />
               </>
             ) : (
-              <p className={styles.empty}>노드 정보가 아직 없습니다. 데이터 연결 상태를 확인하세요.</p>
+              <p className={styles.empty}>{snapshot.source === 'replay' ? '이 보존 시점에는 전체 노드 스냅샷이 없습니다. 현재 노드 상태를 끼워 넣지 않습니다.' : '노드 정보가 아직 없습니다. 데이터 연결 상태를 확인하세요.'}</p>
             )}
             {view.route && view.routeText ? (
               <p className={styles.routeLine} data-verified={view.route.stage === 'verified' || undefined}>
