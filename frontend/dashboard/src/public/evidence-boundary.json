@@ -1,0 +1,14 @@
+{
+  "input": "src/data/replay/evidence.json",
+  "approvedInputSHA256": "65676e1d951575400a1a5595d6d6ccec82a2a7de6b69a207d28fe6e7be558051",
+  "output": "src/public/evidence.public.json",
+  "aliases": {
+    "opsloop-control": "control-amd64",
+    "opsloop-azure-worker": "worker-arm64",
+    "sarmubuntuserver": "primary-amd64"
+  },
+  "droppedExperimentKeys": [
+    "verification"
+  ],
+  "contract": "Only the reviewed PR4 sanitized input is accepted. Preserve all numeric decisions, classifications, timestamps, attempts, manual restoration and provenance; rename node identities consistently."
+}

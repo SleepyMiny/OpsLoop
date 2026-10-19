@@ -13,7 +13,9 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:public": "node scripts/build-public.mjs",
+    "test:public-build": "node scripts/public-build.test.mjs"
   },
   "dependencies": {
     "@fontsource/barlow": "^5.3.0",

@@ -1,0 +1,8 @@
+{
+  "name": "opsloop-public-dashboard",
+  "compatibility_date": "2026-10-20",
+  "assets": {
+    "directory": "./dist-public",
+    "not_found_handling": "none"
+  }
+}

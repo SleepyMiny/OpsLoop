@@ -104,6 +104,19 @@ jobs:
       - name: Dashboard production build
         working-directory: frontend/dashboard
         run: npm run build
+      - name: Public build boundary regression
+        working-directory: frontend/dashboard
+        run: npm run test:public-build
+      - name: Public Dashboard production build
+        working-directory: frontend/dashboard
+        run: npm run build:public
+      - name: Public artifact boundary and SHA256 manifest
+        working-directory: frontend/dashboard
+        run: |
+          node scripts/audit-public.mjs
+          echo 'PUBLIC_ASSET_MANIFEST_BEGIN'
+          cat public-artifact-manifest.json
+          echo 'PUBLIC_ASSET_MANIFEST_END'
       - name: Pinned Go contract fixtures remain identical
         run: |
           git cat-file -e b4fb78d0707afdbc93867d087fea5d1511203208^{commit}

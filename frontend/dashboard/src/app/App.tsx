@@ -19,7 +19,7 @@ import styles from './app.module.css';
 
 const NEXT_THEME: Record<Theme, Theme> = { auto: 'dark', dark: 'light', light: 'auto' };
 
-export function App({ source, kiosk }: { source: DashboardDataSource; kiosk: boolean }) {
+export function App({ source, kiosk, publicView = false }: { source: DashboardDataSource; kiosk: boolean; publicView?: boolean }) {
   const { snapshot, status, playback } = useDashboard(source);
   const [theme, setTheme] = useTheme();
   const [realityOpen, setRealityOpen] = useState(false);
@@ -43,6 +43,7 @@ export function App({ source, kiosk }: { source: DashboardDataSource; kiosk: boo
   return (
     <div className={styles.app} data-kiosk={kiosk || undefined} data-idle={idle || undefined}>
       <Header
+        publicView={publicView}
         source={source}
         status={status}
         playback={playback}
@@ -51,7 +52,7 @@ export function App({ source, kiosk }: { source: DashboardDataSource; kiosk: boo
         onOpenReality={() => setRealityOpen(true)}
       />
 
-      <SourceNotice kind={source.kind} snapshot={snapshot} status={status} />
+      <SourceNotice publicView={publicView} kind={source.kind} snapshot={snapshot} status={status} />
       {snapshot ? (
         <main className={styles.stage}>
           <div className={styles.hero}>

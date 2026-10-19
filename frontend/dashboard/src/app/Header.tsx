@@ -14,6 +14,7 @@ const LIVE_STATUS_LABEL: Record<SourceStatus['state'], string> = {
 };
 
 export function Header({
+  publicView = false,
   source,
   status,
   playback,
@@ -21,6 +22,7 @@ export function Header({
   onCycleTheme,
   onOpenReality,
 }: {
+  publicView?: boolean;
   source: DashboardDataSource;
   status: SourceStatus;
   playback: PlaybackState | null;
@@ -84,7 +86,7 @@ export function Header({
 
       <div className={styles.headerTools}>
         <nav aria-label="데이터 모드" className={styles.modeLinks}>
-          {(['demo', 'live', 'replay'] as const).map((mode) => <a key={mode} href={`?source=${mode}`} aria-current={source.kind === mode ? 'page' : undefined}>{mode === 'demo' ? 'Demo' : mode === 'live' ? 'Live' : 'Replay'}</a>)}
+          {(publicView ? ['demo', 'replay'] as const : ['demo', 'live', 'replay'] as const).map((mode) => <a key={mode} href={`?source=${mode}`} aria-current={source.kind === mode ? 'page' : undefined}>{mode === 'demo' ? 'Demo' : mode === 'live' ? 'Live' : 'Replay'}</a>)}
         </nav>
         {playback ? (
           <span className={styles.simClock} title="시나리오 시작부터의 시뮬레이션 시간">

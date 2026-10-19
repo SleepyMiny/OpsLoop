@@ -122,3 +122,7 @@ OPSLOOP_LIVE_BFF_URL=http://127.0.0.1:8090 \
 - 노트북이 잠들었다 깨어나도 한 번에 250 ms 이상 앞으로 건너뛰지 않는다.
 - 영역별 오류 경계: 한 패널이 실패해도 나머지는 계속 보이고 다음 갱신에서 다시 그린다.
 - 가로 화면은 관제판 배치를 사용하고 긴 기록은 패널 내부에서 스크롤한다. 상세 출처는 접어서 표시한다. 태블릿·휴대폰에서는 세로로 쌓인다.
+
+## 공개 정적 전시
+
+`npm run build:public` → `dist-public/`: Demo/과거 ObserveOnly Replay만 제공하며 Live는 거절합니다. 기존 로컬 Live 빌드는 유지합니다. [공개 profile·데이터 경계·Workers Static Assets 설정](docs/public-static.md)을 확인하세요. 실제 게시에는 별도 승인이 필요합니다.
