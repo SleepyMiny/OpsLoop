@@ -3,7 +3,8 @@ import type { SourceStatus } from '../data/source';
 import styles from './app.module.css';
 
 /** The source and its evidence limits stay visible beside every panel. */
-export function SourceNotice({kind, snapshot, status}: {
+export function SourceNotice({kind, snapshot, status, publicView = false}: {
+  publicView?: boolean;
   kind: DataSourceKind;
   snapshot: DashboardSnapshot | null;
   status: SourceStatus;
@@ -12,6 +13,7 @@ export function SourceNotice({kind, snapshot, status}: {
   const warnings = snapshot?.diagnostics?.warnings ?? [];
   return (
     <section className={styles.sourceNotice} aria-label="데이터 출처" data-source={kind}>
+      {publicView ? <p><b>공개 전시</b> · Demo는 시뮬레이션, Replay는 과거 ObserveOnly 실증입니다. 현재 Live 연결과 Enforce 실행은 제공하지 않습니다.</p> : null}
       <strong>
         {kind === 'demo'
           ? '시뮬레이션 · 자동 복구 장면은 실측 결과가 아닙니다.'

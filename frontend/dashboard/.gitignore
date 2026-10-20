@@ -1,3 +1,6 @@
 node_modules/
 dist/
 *.tsbuildinfo
+dist-public/
+.public-build-audit.json
+public-artifact-manifest.json
