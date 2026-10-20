@@ -56,7 +56,7 @@ npm run build
 기존 Pages 조사는 보존한다. Cloudflare 공식 신규 프로젝트 권고에 따라 이번 배포 대상만
 Workers Static Assets로 조정했다. [공식 권고](https://developers.cloudflare.com/workers/best-practices/workers-best-practices/#use-workers-static-assets-for-new-projects).
 
-`wrangler.public.json`은 name/date/assets.directory만 갖는 순수 정적 설정이다.
+`wrangler.public.json`은 name/date/assets.directory만 갖는 순수 정적 설정이다. 프로젝트 이름은 사용자가 확정한 `opsloop`이다.
 `assets.directory=./dist-public`, `not_found_handling=none`; query 기반 root 화면을 사용한다.
 `main`, Worker code, ASSETS binding, API proxy, account ID/token, route/도메인 설정이 없다.
 Cloudflare 프로젝트를 생성하거나 Wrangler 설치·로그인·배포 명령을 실행하지 않았다.
