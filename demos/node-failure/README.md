@@ -148,3 +148,282 @@ ledger 초기화와 enable은 같은 snapshot에서 disabled 및 activeIncident 
 중단 및 NodePort 전제는 별도 검토·수정 대상이다. 따라서 이 수정만으로 현재
 ClusterIP 환경의 IMAGE_PULL 또는 Enforce 실험에 이 스크립트를 사용할 수 있다고
 판정하지 않는다. 실제 실험·배포·권한 변경은 별도 승인 대상이다.
+
+## Runtime v1 offline acceptance (`demo-a-summary/v2`)
+
+`report` without `-acceptance` retains the legacy v1 verdict and timing meanings.
+Runtime acceptance is explicitly selected with the following CLI; all paths below
+are local evidence files, and this command makes no HTTP or Kubernetes requests:
+
+```bash
+demo-driver report -acceptance runtime-v1 -evidence evidence.json \
+  -probe probe.jsonl -incident incident.json -pods pods.json -env env.json \
+  -inject-at 2026-10-13T00:00:00Z -mode Enforce -scenario offline-example \
+  -expect-node fixture-node -expect-version fixture-version \
+  -platform-digests sha256:platform-digest -out summary.json
+demo-driver summarize ./results
+```
+
+Use actual identities from the supplied run, rather than the placeholders above.
+The typed contract is `RuntimeEvidence` in `cmd/demo-driver/acceptance.go`; a
+reproducible synthetic positive control is `acceptanceFixture` in its tests.
+There is no evidence collector in this change. Existing `run.sh` does not produce
+this envelope and **is not approved for execution** by this offline workflow.
+Its historical reset ordering and raw disabled checks do not establish v2 stop
+acknowledgement or cleanup. Do not use its v1 PASS as Runtime acceptance.
+
+The envelope version is `demo-a-evidence/v1`, independently of the result version
+`demo-a-summary/v2`. Required evidence includes:
+
+- `evidenceKind` (`synthetic` or `observed`), `runID`, and Policy UID/generation/hash,
+  Incident UID/sequence, action ID, Deployment UID, selected Node UID, attempt Pod
+  UID in `identity`. Incident snapshot must be enabled Enforce with action budget
+  1; its hash is recomputed. The successful attempt, decision, candidate, pinned
+  image and imageID are cross checked with the existing incident/pods/env inputs.
+  The unique raw Pod selected by attempt UID must explicitly supply name,
+  namespace, spec.nodeName and exactly one controller=true ReplicaSet owner
+  (apps/v1). Name is compared with attempt.PodName; namespace with Incident and
+  approved Service; Node with attempt.PodNodeName/NodeName and selected Node;
+  owner UID with attempt.ReplicaSetUID. Missing identity is UNPROVEN, supplied
+  contradictions and ambiguous controllers are FAIL. No values are filled from
+  declarations. This checks Pod-to-ReplicaSet identity only, not a longer owner
+  chain or live API state.
+- `service` namespace/name/UID/pathID/URL, repeated as `runtimeService` in env.json.
+  Each probe line adds `pathID` and `url`; all samples must use this approved route.
+  HTTP redirects are returned as failures without following the destination.
+- `sources`: four `{role, ref, sha256}` entries for `probe`, `incident`, `pods`,
+  `env`. SHA-256 binds the exact local input bytes. Other refs identify supplied
+  observations; the checker does not fetch them, certify their truth, or build
+  an evidence repository.
+- `faultRequested`, `decision`, `patched`, `apply.observed`, `readySource`,
+  `readyObserved`, plus a `probe` timing entry for each probe line in file order.
+  Apply proof includes Deployment UID, opaque pre/post RV, pre/target template
+  hash, attempt annotation, hostname, source (`update-response` or `fresh-get`)
+  and ref. Snapshot consistency is an apply observation, not a new CAS proof;
+  conditional write behavior relies on the existing recovery/controller tests.
+- `coverage`: explicit complete windows and refs for `watchdog`, `admin`,
+  `cleanup`, `desired-state`; `interventions` must be an explicit array, even
+  when empty. An intervention records actor, restore/desired-state kind, target
+  UID, request stamp, optional confirmation stamp and ref. Request time censors
+  attribution; a later confirmation does not move that boundary. Coverage must
+  span fault request through stable recovery. Cleanup restoration must follow
+  stop acknowledgement and stable recovery.
+- `stop`: same Policy UID, newer stopped generation, explicit enabled/mode,
+  deleting and active-incident absence, Quiesced=True/FenceClosed at that
+  generation, matching acknowledged/live v2 fence with Policy UID/name,
+  Deployment UID and closedThroughGeneration >= stopped generation, request/ack
+  stamps and ref. `stopped:true` alone is insufficient. `cleanup` additionally
+  requires succeeded status, workload/old-Pod/Service checks, completion and ref.
+  Explicit activeIncidentAbsent=false or Quiesced=False linked to the current
+  Policy UID and stopped/observed generation is cleanup FAIL. Missing/Unknown
+  values, missing acknowledgement or unknown order are UNPROVEN; stale state
+  is not attached as a current counterexample. Explicit generation/fence
+  contradictions remain FAIL, which additional UNPROVEN reasons cannot erase.
+  Neither observation proves actual process termination.
+
+A stamp is `{recorder, segment, sequence, elapsedMs, at}`. Elapsed milliseconds
+are explicit nonnegative values scoped to a recorder/segment; sequence is
+positive and unique. `at` is UTC. No sample is silently sorted or deduplicated.
+Wall/elapsed discontinuities require a new segment. Request start is linked to
+probe `t`, completion to `t + latencyMs`. A request starting before
+apply.observed (including one crossing that observation) is excluded and resets
+post-apply stability; a later independent 30-second window can still pass.
+A current-Pod response completed before a comparable actual decision, patch or
+Ready source remains a causal FAIL. Missing clock evidence for required
+apply/decision/patch ordering remains UNPROVEN. Cross-clock comparisons require `clocks`
+entries `{recorder, segment, offsetMs, uncertaintyMs, ref}` for both clocks, where
+corrected UTC = recorded UTC + offset. Overlapping uncertainty intervals leave
+ordering unproven. Optional Ready source placement duration can be null with a
+reason while independent apply/Service causality passes. Ready source and the
+later Ready observation are separate events. Refs and declarations do not
+provide cryptographic authentication.
+
+Acceptance requires a normal baseline lasting at least 30 seconds (>=5 healthy
+responses, request-start gaps <=3 seconds), then two consecutive completed
+Service failures after the fault request. Recorder errors and missing records
+are not outage observations. After apply confirmation, the current attempt UID
+must serve HTTP 200 with the expected version/platform/Node for >=30 seconds,
+>=5 responses and request-start gaps <=3 seconds. Errors, redirects, different
+UIDs and long gaps reset the window. Fixtures advance recorded time; tests do
+not sleep for these windows.
+
+Results preserve `controllerOutcome`/`controllerReason` and independently emit
+`serviceRecovery`, `attribution`, `cleanup` as PASS/FAIL/UNPROVEN with reasons,
+plus `overallPass`. Missing evidence and unknown ordering cannot produce PASS.
+A cleanup failure preserves recovery details but prevents overall PASS.
+FAIL/UNPROVEN writes structured output and exits nonzero. Malformed JSON,
+duplicate fields, unsupported versions and unknown envelope fields produce a
+separate input error. Token validation precedes typed decode: after JSON escape
+unquoting, exact duplicate keys are rejected in every object. For destination
+struct fields, duplicates also include encoding/json aliases (ASCII case and
+Unicode simple fold, such as status/ſtatus), regardless of order. The validator
+uses the destination field names, embedded fields and tagged-field dominance;
+final decode uses that same encoding/json contract. A single alias remains
+accepted as encoding/json would decode it. Free maps (labels, annotations,
+nodeTimeSync) and unknown additional objects retain case-sensitive keys:
+App/app are distinct, but App/\u0041pp are duplicates. Kubernetes JSON may
+retain additional fields. The shared legacy probe and summary readers use
+these input rules without changing legacy recovery verdicts. Limits are
+16 MiB per file, 64 KiB per probe line, 10,000 probe records and JSON depth 64.
+An envelope also limits clocks to 64, coverage/source entries to 16 each,
+interventions to 1,000 and per-probe latency to 60,000 ms.
+
+Synthetic PASS verifies the checker only. This offline program always emits
+`liveProof:false`, including for observed input: `observed` declares provenance
+and does not authenticate it. Summarize keeps legacy v1 and Runtime v2 separate,
+and splits v2 synthetic/observed counts. Its observed input PASS count is not an
+independently proven live recovery count; the latter remains zero.
+
+INDEPENDENT_REVIEW_PENDING · LIVE_RUNTIME_NOT_PROVEN · REMOTE_CI_NOT_RUN ·
+DEPLOYMENT_NOT_APPROVED · ENFORCE_BLOCKED
+
+### P2-C read-only observer (local integration verified; live collection not run)
+
+`demo-driver observe -config observer.json` collects the explicitly named targets,
+creates runtime-v1 inputs, and calls the existing `report` implementation. The
+configuration shape is in `observer.example.json`; its `.invalid` hosts and image
+placeholders are deliberately unusable. This command does **not** inject faults,
+change policies, stop controllers, restore nodes, or execute cleanup. `Enforce`
+in the report arguments describes the incident being judged, not execution
+permission. Do not use the existing `run.sh` to test this adapter.
+
+The API origin must be HTTPS (no URL path), with normal hostname/CA validation.
+An empty CA path uses system trust; an optional bearer is read only from the
+explicit file. There is no kubeconfig support, HOME/KUBECONFIG/in-cluster lookup,
+exec/auth-provider, client key lookup, proxy, TLS bypass, discovery, or shell
+execution. The Service has a separate client, CA setting and exact approved URL;
+it receives no API Authorization. Both clients reject redirects before following
+them. The approved Service path must actually route through the intended Service;
+the adapter does not substitute PodIP or port-forward access or certify ingress
+routing merely from a user-supplied URL.
+
+The transport permits GET only, exact approved origin/path/query, no caller
+headers/body/Host override, URLs up to 4096 bytes, response headers up to 16 KiB,
+API bodies up to 1 MiB and Service bodies up to 64 KiB. Per-request timeout is
+1–60000ms; the real context deadline is at most one hour. At most 1000 serial
+polls are allowed. Serial polling and Service measurement can take longer than
+the configured minimum interval; actual gaps remain in the evidence. Stored
+files have a 16 MiB individual / 64 MiB total recorder budget. No Secret, logs,
+exec, proxy, tokenRequest, unscoped LIST or mutation API is exposed.
+
+| Read/input | Retained projection and runtime-v1 mapping |
+| --- | --- |
+| Named Policy GET | name/namespace/UID/RV/generation, policy spec/hash and status; fixes initial policy identity; later Quiesced/fence state supplies stop ack observations |
+| Named Deployment GET | metadata identity, computed `TemplateHash`/`SpecHash`, attempt annotation, hostname selector, parsed execution fence; bounded exact precondition read history and a subsequent target fresh GET supply `apply` |
+| Named Incident GET | identity, policy snapshot, baseline, decisions and attempt status; supplies UID/generation/hash/action links and original Controller/Ready timestamps |
+| Attempt-named Pod GET | original name/namespace/UID/node/controller owner, container images/imageIDs, Ready condition time; supplies `pods.json`, `readyObserved`, Ready source link |
+| Attempt-named ReplicaSet GET | metadata/controller owner; verifies Pod → ReplicaSet → pinned Deployment |
+| Configured expected Node GET | UID, hostname label, Ready boolean; verifies attempt's selected Node (no Node LIST) |
+| EndpointSlice LIST | namespace + exact `kubernetes.io/service-name` selector and `limit=100`; retains slice metadata/Service owner, endpoint targetRef and conditions, not addresses; rejects truncation/unrelated results |
+| Named Service GET | metadata identity; fixes Service UID and links the configured `pathID`/URL |
+| Exact Service GET | start/completion stamps, HTTP status or classified failure, Pod/node/version/architecture identity; supplies `probe.jsonl` and `evidence.probe` |
+| Explicit external receipt file | fault request, actor coverage/intervention, source clock witnesses, stop request, cleanup receipt; no API objects, apply proof, probes or acceptance verdict can be supplied here |
+
+Policy, Deployment, Service and the explicitly named Incident are pinned on their
+first successful read. Attempt Pod/ReplicaSet/Node and selected EndpointSlices
+are pinned when first encountered; these are separate acquisition events, not a
+claim that all identities were known at startup. Every later read checks the UID.
+A UID replacement ends the run incomplete, without a summary or COMPLETE marker.
+Every GET has its own observation stamp. These reads are never an atomic snapshot,
+and `apply.observed` is a fresh GET observation, not a server commit timestamp.
+The initial Policy generation/hash must match the incident snapshot. The initial
+Deployment baseline remains separate from the bounded history (128 fresh GETs).
+The observer selects an actually read, exact opaque `PreResourceVersion`, with
+matching UID, pre-template/spec hash, baseline attempt and hostname, observed
+before patch and before the target fresh GET. Metadata/status/fence-only RV
+updates are allowed. Unread or evicted RVs are not inferred. This polling history
+does not prove unobserved executions between reads; execution receipts are outside
+this adapter's contract.
+
+`raw-NNNN.json` is a **retained projection**, not a complete wire-body dump. Pod
+env, volumes, PodIP, logs, arbitrary annotations, managedFields and free-form API
+error/diagnostic messages are excluded. Deployment template hashing uses the
+complete typed template transiently in memory, then discards its sensitive fields;
+the reduced projection cannot independently reconstruct the full template hash.
+Manifest SHA-256 values attest the actual saved projection bytes, not the omitted
+wire body. Policy spec and incident decision fields are retained for the existing
+hash and acceptance contracts. These files can still contain workload identities
+and therefore are private: run directory 0700, files 0600. API response bodies,
+Authorization and credential paths are not included in error messages. Reflection
+of the configured bearer into an output is blocked before writing that file.
+
+Each process creates a random recorder/segment and sequence. UTC and elapsed
+milliseconds are recorded during collection. The recorder waits for the next
+observable millisecond when needed for the existing millisecond report schema;
+it does not invent elapsed offsets or restamp old events at conversion time.
+Controller and kubelet stamps remain unbounded unless an explicit receipt witness
+matches their exact source timestamps and supplies clock evidence. No default
+zero uncertainty is assumed. Recorder/serialization failures, invalid responses,
+redirects and API gaps are not converted into Service outage samples. A completed
+Service timeout/transport failure is classified as a measurement-path failure;
+it cannot diagnose Node failure or a code defect by itself.
+
+External receipts use `opsloop-observer-receipts/v1` and are read once, at the end
+of collection. A separate actor may publish that file while observation runs;
+this adapter has no write/command interface to that actor. The file has `runID`,
+`evidenceKind`, `provider`, `faultRequested`, `decision`, `patched`, `readySource`,
+`clocks`, optional `collectorClock`, `coverage`, `interventions`, optional
+`stopRequested`, and optional `cleanup`. Stamp/ClockBound/Coverage/Intervention/
+Cleanup shapes reuse `acceptance.go`. `collectorClock` attests the observer host's
+UTC offset/uncertainty; only its lane key is bound to the generated recorder and
+segment. Original receipts are saved byte-for-byte, with receipt-backed references
+linked to that file. Receipt identity is checked but provider authenticity is
+**not** cryptographically established. No external receipt, source clock or
+coverage is inferred from an absence of events. Cleanup and each coverage completion must be provably before the captured
+collection horizon, the final Service probe completion Stamp. Receipt reading and
+serialization cannot extend that boundary. Same recorder/segment comparisons use
+elapsed time and sequence; other lanes require explicit offset and uncertainty.
+Missing bounds, overlapping uncertainty, and definite future completions exclude
+only the affected receipt. Original receipt bytes/times remain unchanged. A disabled Policy does not create a stop request; an actual
+Quiesced/fence observation is linked only if a stop request receipt exists.
+Pod absence never proves physical process termination.
+
+Output uses `<outputRoot>/<runID>` and refuses any existing run directory. Raw
+observations are written exclusively and synced as they arrive. Final probe,
+incident, pods and env files are closed before their hashes enter evidence, then
+`report` generates summary. A manifest and atomic COMPLETE publication finish the
+capture. COMPLETE means files were finalized, **not** acceptance PASS. Missing
+receipts or API/projection gaps are recorded separately from acceptance and cannot
+silently reuse an old apply proof. The diagnostic ledger retains target, capture
+Stamp, raw reference, class and affected proof. Initial unacquired-object 404 and
+first endpoint preparation are pending; actual later identity/precondition/apply/
+owner/endpoint reads may establish proof. Gaps during the fault-to-selected-stable
+interval and endpoint loss after readiness invalidate dependent apply evidence.
+Early gaps require actual subsequent evidence; a last good GET alone is insufficient.
+Every fresh Deployment read is checked for desired-state changes (including changes
+that revert), separately from metadata/status RV changes. Contradictions before
+the selected Service stable end conservatively remove apply confirmation; raw
+history remains. Changes after stabilization, including receipt-declared cleanup,
+are outside that attribution interval and are still retained.
+
+Stop history records individual Policy/Deployment GET stamps and references and
+a separate aggregate ack stamp. Both GETs must follow the supplied stop request
+and precede cleanup. Stale candidates may be followed by a valid ack. After a
+valid ack, reactivation, active incident, Quiesced/generation/fence contradiction,
+or a required observation gap prevents reuse of that episode, even if a later
+snapshot returns to normal. A real later request followed by new ack and cleanup
+can establish a new episode. Expressible counterexamples use real StopProof fields;
+otherwise cleanup remains UNPROVEN with reasons in raw/manifest. These observations
+do not certify physical termination or continuous stopping between polls. `collector=complete[-with-gaps]` plus
+`acceptance=FAIL/UNPROVEN` is valid; the CLI still returns nonzero for non-PASS.
+Fatal interruption/write/UID errors preserve raw/partial files without COMPLETE.
+`started.json` means incomplete unless a valid final manifest and COMPLETE exist.
+Restart requires a new run ID and segment; there is no distributed resume engine.
+
+The tests in `cmd/demo-driver/observer*_test.go` start only local TLS API/HTTP
+Service servers and use synthetic credentials. The PASS scene serves API objects,
+Service baseline/outage/new-Pod samples and explicit actor test-double receipts;
+the actual collector creates evidence and invokes report. It never copies a
+finished evidence or summary fixture. Clock injection is test-only, so the
+30-second windows do not impose wall-clock waits. Negative scenes cover absent
+outage, old/other Pod identities, HTTP 503/redirects, API timeout/403/404, UID
+replacement, owner gaps, sample gaps, segment changes, unbounded source clocks,
+external intervention, coverage/stop/cleanup gaps, credential reflection,
+interruption and storage failure. Transport tests additionally enforce origin,
+path, method, TLS, sizes and cancellation. `P2C_CLI=/path/to/built/demo-driver`
+enables a separate production-executable smoke test against the local servers;
+that short real-time run correctly remains UNPROVEN. The child-process synthetic
+PASS test invokes the same CLI dispatcher with an injected test clock.
+
+Status: INDEPENDENT_REVIEW_PENDING; LIVE_COLLECTION_NOT_RUN;
+LIVE_RUNTIME_NOT_PROVEN; REMOTE_CI_NOT_RUN; DEPLOYMENT_NOT_APPROVED; ENFORCE_BLOCKED.

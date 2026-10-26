@@ -1,0 +1,11 @@
+{
+  "apiServer": "https://KUBERNETES_API_APPROVAL_REQUIRED.invalid:6443",
+  "caFile": "/private/collector/cluster-ca.pem",
+  "tokenFile": "/private/collector/read-only-token",
+  "prometheusURL": "http://PROMETHEUS_PRIVATE_APPROVAL_REQUIRED.invalid:9090",
+  "nodes": {"control":"APPROVED_CONTROL_NODE", "physical":"APPROVED_PHYSICAL_NODE", "cloud":"APPROVED_CLOUD_NODE"},
+  "origin": "https://opsloop.sleepyminy44.workers.dev",
+  "keyId": "REPLACE_AFTER_APPROVAL",
+  "keyFile": "/private/collector/ingest-key",
+  "sequenceDir": "/private/collector/state"
+}

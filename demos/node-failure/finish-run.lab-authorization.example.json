@@ -1,0 +1,9 @@
+{
+  "version": "opsloop-finish-authorization/v1",
+  "configHash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "approvalReference": "INACTIVE-EXAMPLE-NOT-AUTHORIZATION",
+  "operator": "UNVERIFIED-PLACEHOLDER",
+  "scope": "normal-finish-policy-stop-query-resume",
+  "notBefore": "2000-01-01T00:00:00Z",
+  "expires": "2000-01-01T00:01:00Z"
+}

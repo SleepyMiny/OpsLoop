@@ -44,6 +44,11 @@ func (x deploymentExecution) nodeGuard(ctx context.Context, inc *v1alpha1.Recove
 	if string(trigger.UID) != inc.Spec.Trigger.NodeUID || !classification.TriggerPersists(inc.Spec.Trigger, map[string]*corev1.Node{trigger.Name: trigger}) {
 		return nodeSafety{nodeTriggerCleared, ReasonTriggerCleared}
 	}
+	if persists, err := x.r.readinessTrigger(ctx, inc, true); err != nil {
+		return unknown(err)
+	} else if !persists {
+		return nodeSafety{nodeTriggerCleared, ReasonTriggerCleared}
+	}
 	node := &corev1.Node{}
 	if err := x.r.APIReader.Get(ctx, client.ObjectKey{Name: a.NodeName}, node); err != nil {
 		if apierrors.IsNotFound(err) {

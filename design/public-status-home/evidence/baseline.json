@@ -1,0 +1,26 @@
+{
+  "baseSHA": "1c2740b9e337bf85c32dba849be36291d2ad3e39",
+  "branch": "design/public-status-home-20261020",
+  "productionURL": "https://opsloop.sleepyminy44.workers.dev/",
+  "publicProbe": {
+    "root": {
+      "status": 403,
+      "body": "error code: 1010"
+    },
+    "api/status": {
+      "status": 403,
+      "body": "error code: 1010"
+    },
+    "scope": "This client denied; actual deployed Worker version/bindings/headers NOT VERIFIED. No bypass attempted."
+  },
+  "localConfig": {
+    "name": "opsloop",
+    "compatibility_date": "2026-10-20",
+    "assets": {
+      "directory": "./dist-public",
+      "not_found_handling": "none"
+    }
+  },
+  "remoteChanges": false,
+  "serverInventory": "Reused 2026-10-20 private server-inventory.md; no SSH repeated."
+}

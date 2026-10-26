@@ -1,0 +1,11 @@
+{
+  "generatedSchemaMatchesModel": true,
+  "syntheticExampleValidated": true,
+  "exampleConfigNameRetainsURLProject": true,
+  "apiOnlyRunWorkerFirst": true,
+  "databaseIDIsUnresolvedPlaceholder": true,
+  "JSONAndPythonParse": "PASS",
+  "whitespace": "PASS",
+  "trackedProductChanges": 0,
+  "cloudflareDeployment": "NOT RUN"
+}

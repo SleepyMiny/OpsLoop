@@ -73,6 +73,11 @@ type TargetRef struct {
 }
 
 type DetectionSpec struct {
+	// PodUnreadyFor opts into relocating a previously healthy, running Pod whose
+	// readiness failed while its Node remains Ready. Nil preserves legacy rules.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('15s') && duration(self) <= duration('5m')"
+	PodUnreadyFor *metav1.Duration `json:"podUnreadyFor,omitempty"`
 	// +optional
 	// +kubebuilder:default="20s"
 	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('1s')"

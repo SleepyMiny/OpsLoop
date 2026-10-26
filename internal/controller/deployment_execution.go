@@ -101,6 +101,13 @@ func (x deploymentExecution) AdvanceAttempt(ctx context.Context, p *v1alpha1.Rec
 		out.HaltReason = "RESERVED_NODE_INVALID: " + why
 		return out, nil
 	}
+	// Node/API I/O may consume the remaining authority window. This fresh live
+	// Policy read checks the process grant again immediately before dispatch.
+	current, reason, err = x.executionPolicy(ctx, current, inc)
+	out.Policy, out.Unauthorized = current, reason
+	if err != nil || reason != "" {
+		return out, err
+	}
 	now := x.r.Now()
 	if !now.Before(inc.Spec.Deadline.Time) {
 		out.HaltReason = ReasonDeadlineExceeded
@@ -254,6 +261,9 @@ func (x deploymentExecution) executionNodes(ctx context.Context, inc *v1alpha1.R
 	if string(trigger.UID) != inc.Spec.Trigger.NodeUID || !classification.TriggerPersists(inc.Spec.Trigger, map[string]*corev1.Node{trigger.Name: trigger}) {
 		return false, true, "", nil
 	}
+	if persists, err := x.r.readinessTrigger(ctx, inc, false); err != nil || !persists {
+		return false, !persists && err == nil, "", err
+	}
 	var pods corev1.PodList
 	if err := x.r.APIReader.List(ctx, &pods, client.MatchingFields{podNodeNameField: a.NodeName}); err != nil {
 		return false, false, "", err
@@ -304,6 +314,9 @@ func (x deploymentExecution) executionPolicy(ctx context.Context, p *v1alpha1.Re
 	case current.Generation != inc.Spec.PolicyGeneration || v1alpha1.PolicyHash(current.Spec) != inc.Spec.PolicyHash ||
 		v1alpha1.PolicyHash(inc.Spec.Policy) != inc.Spec.PolicyHash || !executionReservationMatches(current, inc):
 		return current, ReasonPolicyChanged, nil
+	}
+	if err := x.r.authorizeExecution(current, inc); err != nil {
+		return current, ReasonExecutionAuthority, nil
 	}
 	return current, "", nil
 }

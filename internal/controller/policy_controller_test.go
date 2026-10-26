@@ -63,7 +63,7 @@ func newFixture(t *testing.T, metricsIP string) *fixture {
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "ctl-"}}
 	f.must(c.Create(f.ctx, ns))
 	f.ns = ns.Name
-	f.r = &PolicyReconciler{Client: c, APIReader: c, Now: func() time.Time { return f.now }, Prom: fakeProm(f, metricsIP)}
+	f.r = &PolicyReconciler{Client: c, APIReader: c, Now: func() time.Time { return f.now }, Authority: fixtureExecutionAuthority{}, Prom: fakeProm(f, metricsIP)}
 
 	primary := f.node("primary", corev1.ConditionFalse, "")
 
@@ -721,4 +721,11 @@ func TestImageDigest(t *testing.T) {
 			t.Errorf("%s: imageDigest = %q, want %q", tc.name, got, tc.want)
 		}
 	}
+}
+
+// Legacy scenario fixtures isolate their existing contracts; production has no bypass flag.
+type fixtureExecutionAuthority struct{}
+
+func (fixtureExecutionAuthority) Authorize(*v1alpha1.RecoveryPolicy, *v1alpha1.RecoveryIncident) error {
+	return nil
 }
