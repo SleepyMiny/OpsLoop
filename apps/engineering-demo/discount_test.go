@@ -17,3 +17,15 @@ func TestQuoteRejectsInvalidItems(t *testing.T) {
 		}
 	}
 }
+
+func TestQuoteEmptyOrder(t *testing.T) {
+	q, err := CalculateQuote(nil)
+	if err != nil || q.Total != 0 || q.Average != 0 {
+		t.Fatalf("empty quote = %+v, %v", q, err)
+	}
+
+	q, err = CalculateQuote([]Item{})
+	if err != nil || q.Total != 0 || q.Average != 0 {
+		t.Fatalf("empty slice quote = %+v, %v", q, err)
+	}
+}
