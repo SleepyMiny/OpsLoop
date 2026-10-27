@@ -5,6 +5,7 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions: {}
 
@@ -24,7 +25,17 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: 1.27.2
+          go-version: 1.27.3
+      - name: Install pinned security scanner (isolated tool cache)
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-tools/home" "$RUNNER_TEMP/security-tools/bin"
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/security-tools/home" \
+            GOENV=off GOTOOLCHAIN=local GOTELEMETRY=off GOEXPERIMENT= \
+            GOPATH="$RUNNER_TEMP/security-tools/gopath" \
+            GOMODCACHE="$RUNNER_TEMP/security-tools/modules" \
+            GOCACHE="$RUNNER_TEMP/security-tools/cache" \
+            GOBIN="$RUNNER_TEMP/security-tools/bin" \
+            go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
       - name: go vet
         run: go vet ./...
       - name: generated files up to date
@@ -34,12 +45,37 @@ jobs:
         run: |
           KUBEBUILDER_ASSETS="$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.2 use 1.35.0 --bin-dir "$RUNNER_TEMP/envtest" -p path)"
           export KUBEBUILDER_ASSETS
-          OPSLOOP_REQUIRE_ENVTEST=1 go test ./...
+          cli="$RUNNER_TEMP/demo-driver"
+          go build -o "$cli" ./cmd/demo-driver
+          export P2C_CLI="$cli" P2D_CLI="$cli" P2E_CLI="$cli" P2F_CLI="$cli"
+          export P3B_CLI="$cli" WORKLOAD_SAFETY_CLI="$cli"
+          OPSLOOP_REQUIRE_ENVTEST=1 go test -timeout=45m ./...
       - name: Demo A reset safety (mock only)
         run: |
           bash -n demos/node-failure/run.sh
           python3 -B -m unittest discover -s tests -p test_demo_reset.py -v
           python3 -B -m unittest discover -s tests -p test_dashboard_replay.py -v
+      - name: Public Collector race regression (synthetic only)
+        run: go test -race ./internal/publicstatus ./cmd/status-collector
+
+      - name: Online security gate and Python regressions
+        run: |
+          python3 -B scripts/run-security.py \
+            --go "$(command -v go)" \
+            --scanner "$RUNNER_TEMP/security-tools/bin/govulncheck" \
+            --gomodcache "$(go env GOMODCACHE)" --gocache "$(go env GOCACHE)" \
+            --output "$RUNNER_TEMP/security-evidence"
+      - name: Retain security diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: security-evidence
+          path: |
+            ${{ runner.temp }}/security-evidence/**/*.json
+            ${{ runner.temp }}/security-evidence/**/*.stdout
+            ${{ runner.temp }}/security-evidence/**/*.stderr
+          if-no-files-found: warn
+          retention-days: 7
 
   image:
     runs-on: ubuntu-24.04
@@ -86,7 +122,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: 1.27.2
+          go-version: 1.27.3
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.14.1'
@@ -117,6 +153,26 @@ jobs:
           echo 'PUBLIC_ASSET_MANIFEST_BEGIN'
           cat public-artifact-manifest.json
           echo 'PUBLIC_ASSET_MANIFEST_END'
+      - name: install locked local Worker test tools
+        working-directory: worker
+        run: npm ci
+      - name: Public Status types, boundary and production build
+        working-directory: frontend/dashboard
+        run: |
+          npm run typecheck:status-worker
+          npm run test:status-build
+          npm run build:status
+      - name: Local Worker and D1 integration (synthetic only)
+        working-directory: worker
+        run: |
+          npm run build
+          npm test
+      - name: Install pinned Playwright Chromium for local browser tests
+        working-directory: worker
+        run: node node_modules/playwright-core/cli.js install --with-deps chromium
+      - name: Public Status desktop/mobile and CSP regression
+        working-directory: worker
+        run: npm run test:browser
       - name: Pinned Go contract fixtures remain identical
         run: |
           git cat-file -e b4fb78d0707afdbc93867d087fea5d1511203208^{commit}
@@ -136,7 +192,7 @@ jobs:
           cmp frontend/dashboard/src/domain/__fixtures__/go-quantities.json "$contract_tmp/current-quantities.json"
 
   publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     needs: [verify, image, dashboard]
     environment: acr-publish

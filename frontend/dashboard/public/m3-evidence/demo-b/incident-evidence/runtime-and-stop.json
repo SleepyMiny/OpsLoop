@@ -1,0 +1,102 @@
+{
+  "sourceArtifactSHA256": "eaf075347d2d383b903f49c335b59f435646572b382ca99a1f4572d1f8e75c87",
+  "schema": "opsloop-demo-b-runtime-result/v1",
+  "startedAt": "2026-10-26T21:05:17.967841Z",
+  "state": "ACTUAL_RUNTIME_EXHAUSTED_STRONG_STOP_CONFIRMED",
+  "planSHA256": "ed0b1641227b58aa708cd3d118c1f9383b8e60017849b43fc419ed384d1bb1d2",
+  "runtimeV1GlobalActorsClock": "UNPROVEN",
+  "incidentUID": "219f6a02-b8b0-4c47-b685-db1884d0dbb7",
+  "initialFailureObserved": {
+    "podUID": "a67fad9f-1557-4839-905a-897751d067b5",
+    "at": "2026-10-26T21:05:54.67751918Z"
+  },
+  "finishAttempt": {
+    "exit_code": 1,
+    "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSHA256": "1cc5146338820f6a46be668cf6a3ecaf431c12e73e5ee7d31f6623e32de7eba1"
+  },
+  "stopReceipt": {
+    "schema": "opsloop-workload-safety-receipt/v1",
+    "runID": "demo-b-empty-order-1",
+    "evidenceKind": "observed",
+    "state": {
+      "binding": "1995c409d7ce7cab3ac3e1b37891c529d6095b675e1e1c471b75d62d7315ce61",
+      "phase": "STOP_CONFIRMED",
+      "armWall": "2026-10-26T21:05:18.899190696Z",
+      "boot": "d66c417b-bb5a-401b-ba13-3e74280db837",
+      "armTick": 195849233463857,
+      "hardTick": 196449165606161,
+      "expiryTick": 196509165606161,
+      "heartbeatTick": 195963328768895,
+      "heartbeatSequence": 42,
+      "watchTick": 195964023108117,
+      "reason": "FINISH_REQUEST",
+      "stopDispatched": true,
+      "stopDispatchCount": 1,
+      "knownRejected": false,
+      "stopResponseConfirmed": true,
+      "stopGeneration": 4,
+      "stopMode": "Enforce",
+      "proof": {
+        "policyUID": "1681e8da-f79a-4c9e-a352-90c6dc598c06",
+        "generation": 4,
+        "enabled": false,
+        "mode": "Enforce",
+        "deleting": false,
+        "activeIncidentAbsent": true,
+        "quiescedStatus": "True",
+        "quiescedReason": "FenceClosed",
+        "observedGeneration": 4,
+        "acknowledgedFence": {
+          "version": 2,
+          "policyUID": "1681e8da-f79a-4c9e-a352-90c6dc598c06",
+          "policyName": "engineering-demo",
+          "deploymentUID": "ee1fee32-691b-410f-b632-4221c07c7bf5",
+          "closedThroughGeneration": 4
+        },
+        "liveFence": {
+          "version": 2,
+          "policyUID": "1681e8da-f79a-4c9e-a352-90c6dc598c06",
+          "policyName": "engineering-demo",
+          "deploymentUID": "ee1fee32-691b-410f-b632-4221c07c7bf5",
+          "closedThroughGeneration": 4
+        },
+        "requested": {
+          "recorder": "",
+          "segment": "",
+          "sequence": 0,
+          "elapsedMs": null,
+          "at": "0001-01-01T00:00:00Z"
+        },
+        "acknowledged": {
+          "recorder": "",
+          "segment": "",
+          "sequence": 0,
+          "elapsedMs": null,
+          "at": "0001-01-01T00:00:00Z"
+        },
+        "ref": ""
+      }
+    },
+    "safetyPermitOnlyNotAuthorization": false,
+    "serviceChecked": false,
+    "cleanupChecked": false,
+    "overallPass": false,
+    "liveProof": false
+  },
+  "demoABefore": {
+    "policyUID": "c556fd15-e1f4-4660-a6ac-dc5edf82d50f",
+    "generation": 8,
+    "enabled": false,
+    "deploymentUID": "66a708e2-dfd4-44de-8e4e-498c9f764e66",
+    "specSHA256": "8151a7e076b9eec57295fd8b8a00232cf01beaba40907775456b3bd851281910"
+  },
+  "demoAAfter": {
+    "policyUID": "c556fd15-e1f4-4660-a6ac-dc5edf82d50f",
+    "generation": 8,
+    "enabled": false,
+    "deploymentUID": "66a708e2-dfd4-44de-8e4e-498c9f764e66",
+    "specSHA256": "8151a7e076b9eec57295fd8b8a00232cf01beaba40907775456b3bd851281910"
+  },
+  "redaction": "execution grant, host owner state and request journals omitted; original private artifact preserved"
+}

@@ -52,6 +52,9 @@ type Input struct {
 	Pods        []corev1.Pod
 	Nodes       map[string]*corev1.Node
 	Restarts    []RestartObservation
+	// HealthyPods is observed history, not an assertion from a Pod annotation.
+	// Missing history after a controller restart conservatively disables this rule.
+	HealthyPods map[types.UID]bool
 }
 
 // Result.RecheckAfter is the time until a NotReady Node reaches nodeUnreadyFor; zero when nothing is pending.
@@ -178,6 +181,20 @@ func Classify(in Input) Result {
 		if !nodeReady || podMatched {
 			continue
 		}
+		if since, ok := PodUnreadySince(p); ok && PodReadinessEnabled(in.Detection) && in.HealthyPods[p.UID] {
+			remaining := in.Detection.PodUnreadyFor.Duration - in.Now.Sub(since)
+			if remaining > 0 {
+				if recheck == 0 || remaining < recheck {
+					recheck = remaining
+				}
+			} else {
+				// Every legacy failure (including repeated exit and insufficient
+				// evidence on another Pod) takes precedence over this opt-in rule.
+				add(6, p, node, ClassApplication, ReasonPodNotReady,
+					fmt.Sprintf("%s podUID=%s previouslyReadyObserved=true containerIdentitySHA256=%s", ReasonPodNotReady, p.UID, ReadinessContainerHash(p)),
+					ClassApplication, ReasonPodNotReady, wuid, digest, string(p.UID), ReadinessContainerHash(p))
+			}
+		}
 		// shortcut: exit code and terminated reason only, stack frame normalization lands in P5
 		for _, cs := range statuses {
 			var obs []RestartObservation
@@ -208,6 +225,9 @@ func Classify(in Input) Result {
 
 	if bestRank == 0 {
 		return Result{RecheckAfter: recheck}
+	}
+	if IsPodReadinessTrigger(best) {
+		best.RuleVersion = ReadinessRuleVersion
 	}
 	best.Evidence = v1alpha1.CapList(evidence, v1alpha1.MaxEvidenceItems)
 	return Result{Detected: true, Trigger: best}

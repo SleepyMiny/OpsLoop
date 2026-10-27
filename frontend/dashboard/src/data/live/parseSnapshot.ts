@@ -1,6 +1,7 @@
 import type { DashboardSnapshot } from '../../domain/types';
 import type { DriverReport } from './crd';
 import { incidentFromCrd, isCrdIncident, isCrdPolicy, policyFromCrd } from './fromCrd';
+import { engineeringJoin } from './engineeringJoin';
 
 /**
  * Structural validation of the fields the dashboard computes with: timestamps
@@ -29,9 +30,10 @@ export function parseSnapshot(input: unknown): DashboardSnapshot {
   // BFF-only join fields are consumed by the conversion above.
   delete body.driverReports;
   delete body.policyHash;
+  delete body.engineeringRuns;
   const snapshot = body as unknown as DashboardSnapshot;
   // Live data never carries demo narration, and is always labeled live.
-  const { narration: _ignored, ...rest } = snapshot;
+  const { narration: _ignored, replay: _replay, ...rest } = snapshot;
   return {
     ...rest,
     source: 'live',
@@ -49,7 +51,18 @@ export function parseSnapshot(input: unknown): DashboardSnapshot {
 function normalizeCrdObjects(body: Record<string, unknown>, workload: Record<string, unknown>): void {
   const reports = Array.isArray(body.driverReports) ? (body.driverReports as DriverReport[]) : [];
   const report = (name: string) => reports.find((r) => r.incident === name);
-  const convert = (x: unknown) => (isCrdIncident(x) ? incidentFromCrd(x, report(x.metadata.name)) : x);
+  const convert = (x: unknown) => {
+    if (!isCrdIncident(x)) {
+      // Normalized legacy snapshots cannot bypass the verified projection join.
+      if (!isRecord(x) || !isRecord(x.status)) return x;
+      const { engineering: _untrusted, ...status } = x.status;
+      return { ...x, status };
+    }
+    const incident = incidentFromCrd(x, report(x.metadata.name));
+    const engineering = engineeringJoin(x, workload, body.engineeringRuns);
+    if (engineering) incident.status.engineering = engineering;
+    return incident;
+  };
   body.activeIncident = convert(body.activeIncident ?? null);
   if (Array.isArray(body.recentIncidents)) body.recentIncidents = body.recentIncidents.map(convert);
   if (isCrdPolicy(body.policy)) {

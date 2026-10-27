@@ -63,6 +63,7 @@ kube-config.*
 /tmp/
 /artifacts/
 /evidence/
+/reports/
 
 # Build/test outputs and local tooling caches.
 /bin/

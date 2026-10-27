@@ -1,0 +1,421 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "source": {
+      "const": "observed"
+    },
+    "collectedAt": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "sources": {
+      "type": "object",
+      "properties": {
+        "kubernetes": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "enum": [
+                "ok",
+                "partial",
+                "unavailable"
+              ]
+            },
+            "observedAt": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "errorCode": {
+              "enum": [
+                null,
+                "TIMEOUT",
+                "UNAUTHORIZED",
+                "UNREACHABLE",
+                "MISSING",
+                "AMBIGUOUS",
+                "INVALID"
+              ]
+            }
+          },
+          "required": [
+            "state",
+            "observedAt",
+            "errorCode"
+          ],
+          "additionalProperties": false
+        },
+        "prometheus": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "enum": [
+                "ok",
+                "partial",
+                "unavailable"
+              ]
+            },
+            "observedAt": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "errorCode": {
+              "enum": [
+                null,
+                "TIMEOUT",
+                "UNAUTHORIZED",
+                "UNREACHABLE",
+                "MISSING",
+                "AMBIGUOUS",
+                "INVALID"
+              ]
+            }
+          },
+          "required": [
+            "state",
+            "observedAt",
+            "errorCode"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "kubernetes",
+        "prometheus"
+      ],
+      "additionalProperties": false
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "enum": [
+              "control",
+              "physical",
+              "cloud"
+            ]
+          },
+          "site": {
+            "enum": [
+              "laptop-vm",
+              "physical-server",
+              "azure-vm"
+            ]
+          },
+          "os": {
+            "enum": [
+              null,
+              "linux"
+            ]
+          },
+          "arch": {
+            "enum": [
+              null,
+              "amd64",
+              "arm64"
+            ]
+          },
+          "readiness": {
+            "enum": [
+              null,
+              "Ready",
+              "NotReady",
+              "Unknown"
+            ]
+          },
+          "readyObservedAt": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cpu": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "observedAt": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "observedAt"
+            ],
+            "additionalProperties": false
+          },
+          "memory": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "observedAt": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "observedAt"
+            ],
+            "additionalProperties": false
+          },
+          "exporter": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "enum": [
+                  null,
+                  0,
+                  1
+                ]
+              },
+              "observedAt": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "observedAt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "site",
+          "os",
+          "arch",
+          "readiness",
+          "readyObservedAt",
+          "cpu",
+          "memory",
+          "exporter"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "workloads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "enum": [
+              "controller",
+              "demo-api"
+            ]
+          },
+          "desired": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ready": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observedAt": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "desired",
+          "ready",
+          "observedAt"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "enum": [
+            null,
+            "ObserveOnly",
+            "Enforce"
+          ]
+        },
+        "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "monitoring": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "incidentCount": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "activeIncidentCount": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observedAt": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "mode",
+        "enabled",
+        "monitoring",
+        "incidentCount",
+        "activeIncidentCount",
+        "observedAt"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "source",
+    "collectedAt",
+    "sources",
+    "nodes",
+    "workloads",
+    "policy"
+  ],
+  "additionalProperties": false
+}

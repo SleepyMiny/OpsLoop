@@ -1,0 +1,262 @@
+{
+  "schema": "opsloop-demo-a-final-verification/v1",
+  "result": "PASS",
+  "resultScope": "FIRST_ACTUAL_FUNCTIONAL_RUNTIME_SELF_HEALING_ONLY",
+  "runID": "hybrid-readiness-trial-3",
+  "epoch": "hybrid-readiness-epoch-3",
+  "actualFunctionalE2EVerified": true,
+  "actualFaultExecs": 1,
+  "ControllerAttempts": 1,
+  "automaticRetrial": false,
+  "source": {
+    "name": "demo-api-7c8699898b-gl8qw",
+    "uid": "283cf097-712d-4bf5-9056-3285b57c2e54"
+  },
+  "newPod": {
+    "name": "demo-api-67f9f645cd-gcd88",
+    "uid": "00bb7fa5-5e0c-431a-9eb7-de99a10c9266",
+    "node": "opsloop-azure-worker",
+    "imageID": "opsloopp1b43a5cde9729.azurecr.io/opsloop/demo-a/demo-api@sha256:4fe58ce81fdbaf04c9f53b44f6fea6b41dd8360860fa85bc5b96319abfb26fab",
+    "runtimeImageConfig": "sha256:ff86f850e6e0e403e64af64dae0eb6b7473e37cd4f81d0c9501dac8024af4460",
+    "platformManifest": "sha256:9143c9c472d3d813151c40d728c146b71ae6c114250a42f5889326d68ac91389"
+  },
+  "replicaSet": {
+    "name": "demo-api-67f9f645cd",
+    "uid": "fdd3b312-6778-4ae8-803b-3e46a0689af1"
+  },
+  "incidentUID": "e939e078-76e6-418c-92a4-f941818315fb",
+  "classification": {
+    "class": "APPLICATION_FAILURE",
+    "reason": "POD_NOT_READY",
+    "signature": "959082c40ff45309351ce8ecd99470522ad592852312de66192783775d9722a8",
+    "ruleVersion": "classify-readiness-v1",
+    "nodeName": "sarmubuntuserver",
+    "nodeUID": "5ac929e3-17fa-43da-8c8c-d16a47de6559",
+    "podName": "demo-api-7c8699898b-gl8qw",
+    "podUID": "283cf097-712d-4bf5-9056-3285b57c2e54",
+    "observedAt": "2026-10-26T17:48:22Z",
+    "evidence": [
+      "POD_NOT_READY podUID=283cf097-712d-4bf5-9056-3285b57c2e54 previouslyReadyObserved=true containerIdentitySHA256=f8d10b5d74abe1493e0e3665f67df1a9befc87bee680cb844fadb166c4dccf73"
+    ]
+  },
+  "controllerActionID": "demo-api-c556fd15-00001-a1",
+  "candidateDecision": {
+    "incidentID": "demo-api-c556fd15-00001",
+    "actionID": "demo-api-c556fd15-00001-a1",
+    "policyGeneration": 7,
+    "policyHash": "068620dd2c9a7ec2408dba5393102f630887e3340a8ef93ce08d91c57f1a5f90",
+    "workloadUID": "66a708e2-dfd4-44de-8e4e-498c9f764e66",
+    "baselineTemplateHash": "8011891e6bdabe8ed25360f00ef5d35374671f6fa318718c0c82b4a3fdde2f53",
+    "imageIndexDigest": "sha256:4fe58ce81fdbaf04c9f53b44f6fea6b41dd8360860fa85bc5b96319abfb26fab",
+    "queryVersion": "node-exporter-v1",
+    "snapshotObservedAt": "2026-10-26T17:48:22Z",
+    "snapshotExpiresAt": "2026-10-26T17:49:23Z",
+    "candidates": [
+      {
+        "nodeName": "opsloop-azure-worker",
+        "nodeUID": "96f91dd4-b96b-4927-90d3-e63b4f319ef1",
+        "hostname": "opsloop-azure-worker",
+        "platform": "linux/arm64",
+        "eligible": true,
+        "measurements": {
+          "cpuUtilizationPermille": 8,
+          "cpuSampleCount": 6,
+          "cpuSampleTime": "2026-10-26T17:47:53Z",
+          "memAvailableBytes": 3372441600,
+          "memTotalBytes": 4089188352,
+          "memSampleTime": "2026-10-26T17:47:53Z",
+          "allocatableCPUMilli": 2000,
+          "allocatableMemoryBytes": 4089188352,
+          "requestedCPUMilli": 10,
+          "requestedMemoryBytes": 25165824,
+          "newPodCPUMilli": 50,
+          "newPodMemoryBytes": 67108864,
+          "reserveCPUMilli": 200,
+          "reserveMemoryBytes": 408918835
+        },
+        "score": {
+          "cpuHeadroomPermille": 992,
+          "memoryHeadroomPermille": 825,
+          "requestedHeadroomPermille": 870,
+          "recentFailures": 0,
+          "penaltyMilli": 0,
+          "scoreMilli": 89085
+        }
+      },
+      {
+        "nodeName": "opsloop-control",
+        "nodeUID": "2c6064f1-5f66-4da7-ae87-0cf71cc2bfaf",
+        "hostname": "opsloop-control",
+        "platform": "linux/amd64",
+        "eligible": true,
+        "measurements": {
+          "cpuUtilizationPermille": 66,
+          "cpuSampleCount": 6,
+          "cpuSampleTime": "2026-10-26T17:48:05Z",
+          "memAvailableBytes": 6177730560,
+          "memTotalBytes": 8322285568,
+          "memSampleTime": "2026-10-26T17:48:05Z",
+          "allocatableCPUMilli": 4000,
+          "allocatableMemoryBytes": 8322285568,
+          "requestedCPUMilli": 560,
+          "requestedMemoryBytes": 1312817152,
+          "newPodCPUMilli": 50,
+          "newPodMemoryBytes": 67108864,
+          "reserveCPUMilli": 400,
+          "reserveMemoryBytes": 832228556
+        },
+        "score": {
+          "cpuHeadroomPermille": 934,
+          "memoryHeadroomPermille": 742,
+          "requestedHeadroomPermille": 734,
+          "recentFailures": 0,
+          "penaltyMilli": 0,
+          "scoreMilli": 79680
+        }
+      }
+    ],
+    "selectedNodeUID": "96f91dd4-b96b-4927-90d3-e63b4f319ef1",
+    "selectedNodeName": "opsloop-azure-worker",
+    "selectedHostname": "opsloop-azure-worker",
+    "actionType": "Relocation",
+    "decisionReason": "SELECTED_HIGHEST_SCORE",
+    "decidedAt": "2026-10-26T17:48:22Z"
+  },
+  "schedulerEvents": [
+    {
+      "observed": {
+        "recorder": "observer-02db0b88c5b962fa",
+        "segment": "6c0f56b535231891",
+        "sequence": 242,
+        "elapsedMs": 41147,
+        "at": "2026-10-26T17:48:23.224Z"
+      },
+      "metadata": {
+        "name": "demo-api-67f9f645cd-gcd88.18e225900523ec75",
+        "namespace": "opsloop-demo-a",
+        "uid": "473252d2-190e-498b-9439-4aadc9ecd6a3",
+        "resourceVersion": "611092"
+      },
+      "podName": "demo-api-67f9f645cd-gcd88",
+      "podUID": "00bb7fa5-5e0c-431a-9eb7-de99a10c9266",
+      "scheduler": "default-scheduler",
+      "reason": "Scheduled",
+      "message": "Successfully assigned opsloop-demo-a/demo-api-67f9f645cd-gcd88 to opsloop-azure-worker",
+      "node": "opsloop-azure-worker"
+    }
+  ],
+  "mutationProof": {
+    "afterSpecHash": "4ec818436adab7e8ba8d38f9475c57ca2591e2834d3d16bceb5b6fcec1ebffca",
+    "afterTemplateHash": "bb7a53daf556ba67983e02203e7d526fe32ea62716accb4af88a713673bdbc08",
+    "beforeSpecHash": "4ec818436adab7e8ba8d38f9475c57ca2591e2834d3d16bceb5b6fcec1ebffca",
+    "beforeTemplateHash": "8011891e6bdabe8ed25360f00ef5d35374671f6fa318718c0c82b4a3fdde2f53",
+    "incidentPolicyHash": "068620dd2c9a7ec2408dba5393102f630887e3340a8ef93ce08d91c57f1a5f90",
+    "legalMutationOnly": true,
+    "outsideTemplateUnchanged": true,
+    "policyHash": "068620dd2c9a7ec2408dba5393102f630887e3340a8ef93ce08d91c57f1a5f90",
+    "sourceContainerHash": "f8d10b5d74abe1493e0e3665f67df1a9befc87bee680cb844fadb166c4dccf73",
+    "triggerContainerHash": "f8d10b5d74abe1493e0e3665f67df1a9befc87bee680cb844fadb166c4dccf73"
+  },
+  "ServiceStability": {
+    "readyForFinish": true,
+    "outageCorroborated": true,
+    "actionID": "demo-api-c556fd15-00001-a1",
+    "podUID": "00bb7fa5-5e0c-431a-9eb7-de99a10c9266",
+    "nodeUID": "96f91dd4-b96b-4927-90d3-e63b4f319ef1",
+    "node": "opsloop-azure-worker",
+    "architecture": "arm64",
+    "stableSamples": 13,
+    "stableElapsedMS": 32420,
+    "firstStableArrivalTick": 184038859323829,
+    "stableArrivalTick": 184071278954398,
+    "hostBeforeEarliestTTL": true
+  },
+  "lastServiceObservation": {
+    "at": {
+      "recorder": "observer-02db0b88c5b962fa",
+      "segment": "6c0f56b535231891",
+      "sequence": 2704,
+      "elapsedMs": 418615,
+      "at": "2026-10-26T17:54:40.691Z"
+    },
+    "sourcePresent": false,
+    "sourceReady": false,
+    "endpointReadyPodUIDs": [
+      "00bb7fa5-5e0c-431a-9eb7-de99a10c9266"
+    ],
+    "service": {
+      "pathID": "direct-service",
+      "t": "2026-10-26T17:54:40.498Z",
+      "ok": true,
+      "status": 200,
+      "latencyMs": 181,
+      "node": "opsloop-azure-worker",
+      "pod": "demo-api-67f9f645cd-gcd88",
+      "podUID": "00bb7fa5-5e0c-431a-9eb7-de99a10c9266",
+      "arch": "arm64",
+      "version": "demo-a-hybrid-3d0761bd4ef0",
+      "error": ""
+    },
+    "directEndpoint": {
+      "pathID": "direct-endpoint",
+      "t": "2026-10-26T17:54:40.804Z",
+      "ok": true,
+      "status": 200,
+      "latencyMs": 236,
+      "node": "opsloop-azure-worker",
+      "pod": "demo-api-67f9f645cd-gcd88",
+      "podUID": "00bb7fa5-5e0c-431a-9eb7-de99a10c9266",
+      "arch": "arm64",
+      "version": "demo-a-hybrid-3d0761bd4ef0",
+      "error": ""
+    }
+  },
+  "postStopContinuousTailSamples": 123,
+  "postStopContinuousTailElapsedMS": 337458,
+  "hostArrivalTimingSeconds": {
+    "faultDispatchToFirstStableArrival": 39.588826397,
+    "faultDispatchToStableWindowArrival": 72.008456966
+  },
+  "timingMeaning": "Host receipt upper bounds, not source occurrence timestamps or formal cross-host latency",
+  "PolicyFinal": {
+    "uid": "c556fd15-e1f4-4660-a6ac-dc5edf82d50f",
+    "mode": "Enforce",
+    "enabled": false,
+    "generation": 8,
+    "closedThroughGeneration": 8
+  },
+  "safetyStop": "PASS_FINISH_SINGLE_STOP_AND_FRESH_STRONG_FENCES",
+  "ObserverCleanup": "PASS_OWN_JOB_CONFIGMAP_AND_POD_ABSENT",
+  "nodesReadyAtPostFinish": 3,
+  "PrometheusTargetsUpAtD3": 22,
+  "legacyRuntimeV1Acceptance": "UNPROVEN_NOT_RUN",
+  "liveProof": false,
+  "actualPowerCutOrRebootTest": "UNPROVEN_NOT_RUN",
+  "originalCollector": {
+    "originalCollector": "complete-with-gaps",
+    "preservedIssues": [
+      "recoveryincidents:http-404",
+      "service-endpoint-link-incomplete",
+      "pods:http-404"
+    ],
+    "limits": []
+  },
+  "localVerification": {
+    "latestD3BindingMethods": 33,
+    "priorTrial3Methods": 36,
+    "localAPIScopeRaceTests": 2,
+    "historicalControllerRace": 351,
+    "historicalAuthorityClockRace": 19,
+    "historicalVet": "PASS",
+    "localOrSyntheticNotLiveRecovery": true
+  },
+  "retainedEnvironment": "Dedicated Namespace/RBAC/Policy/Service/app + new scope2 Controller; no placement rollback",
+  "evidenceReplayedLocally": true,
+  "_exportProvenance": {
+    "archive": "demo-a",
+    "path": "verification.json",
+    "originalSHA256": "eb3a3e4571685da6adfe498a51e7eabb391818c84a12c84fce404c53844656ed",
+    "transformation": "internal-endpoints-removed",
+    "originalAvailableIn": "sealed-original-archive"
+  }
+}

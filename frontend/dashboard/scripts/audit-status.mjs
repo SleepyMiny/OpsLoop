@@ -1,0 +1,22 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import {fileURLToPath} from 'node:url';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const config=JSON.parse(fs.readFileSync(path.join(root,'../../worker/wrangler.status.json')));
+if(config.name!=='opsloop'||JSON.stringify(config.assets.run_worker_first)!=='["/api/*"]'||config.assets.not_found_handling!=='none'||config.assets.directory!=='../frontend/dashboard/dist-status'||config.vars.PUBLIC_ORIGIN!=='https://opsloop.sleepyminy44.workers.dev')throw Error('Status routing/origin boundary changed');
+if(!config.d1_databases[0].database_id.startsWith('<APPROVAL_REQUIRED'))throw Error('Deployable database identity requires separate approval');
+if(Object.keys(config).sort().join()!==['name','main','compatibility_date','assets','d1_databases','vars','ratelimits'].sort().join()||Object.keys(config.vars).join()!=='PUBLIC_ORIGIN'||config.main!=='./public-status.ts'||config.compatibility_date!=='2026-08-06'||config.d1_databases.length!==1||config.d1_databases[0].binding!=='STATUS_DB')throw Error('Unexpected server configuration/bindings');
+const rates={PUBLIC_RATE:120,AUTH_RATE:60,INGEST_RATE:12};if(config.ratelimits.length!==3||config.ratelimits.some(x=>rates[x.name]!==x.simple.limit||x.simple.period!==60||!x.namespace_id.startsWith('<APPROVAL_REQUIRED')))throw Error('Rate limit configuration changed');
+const graph=JSON.parse(fs.readFileSync(path.join(root,'.status-build-audit.json')));
+if(graph.profile!=='status'||!graph.modules.includes('src/status/main.tsx')||!graph.modules.includes('src/public/evidence.public.json'))throw Error('Status graph missing');
+if(graph.modules.some(id=>/^src\/data\/(createDataSource\.ts|live\/httpSource\.ts|replay\/(replaySource\.ts|evidence\.json))$/.test(id)))throw Error('Private adapter in status output');
+if(JSON.stringify(fs.readdirSync(path.join(root,'status-static')).sort())!==JSON.stringify(['404.html','_headers']))throw Error('Unreviewed status input');
+const files=[];const walk=dir=>{for(const f of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,f.name),rel=path.relative(path.join(root,'dist-status'),p);if(f.isSymbolicLink())throw Error('Output symlink');if(f.isDirectory()){if(rel!=='assets')throw Error('Unknown directory');walk(p);continue;}
+ if(!['index.html','404.html','_headers'].includes(rel)&&!/^assets\/[A-Za-z0-9_.-]+\.(js|css|woff2?)$/.test(rel))throw Error('Unexpected public file');
+ const b=fs.readFileSync(p);if(/\.(html|css|js)$/.test(rel)&&/sarmubuntuserver|opsloop-control|opsloop-azure-worker|\.azurecr\.io|\.duckdns\.org|\b(?:100\.82\.|100\.73\.|100\.102\.|192\.168\.|10\.43\.)|\/home\/|\/tmp\/|\/api\/v1\/snapshot|\/api\/collect\/status|X-OpsLoop-Signature|INGEST_KEYS|BEGIN (?:RSA |OPENSSH )?PRIVATE KEY|client-key-data/.test(b.toString()))throw Error('Forbidden status output content: '+rel);
+ files.push({path:rel,bytes:b.length,sha256:crypto.createHash('sha256').update(b).digest('hex')});}};
+walk(path.join(root,'dist-status'));if(!['index.html','404.html','_headers'].every(p=>files.some(f=>f.path===p)))throw Error('Missing static control');
+const headers=fs.readFileSync(path.join(root,'dist-status/_headers'),'utf8');if(!headers.includes("connect-src 'self'")||headers.includes('connect-src *'))throw Error('CSP changed');
+files.sort((a,b)=>a.path.localeCompare(b.path,'en'));fs.writeFileSync(path.join(root,'status-artifact-manifest.json'),JSON.stringify({profile:'status',files,totalBytes:files.reduce((n,x)=>n+x.bytes,0)},null,2)+'\n');
+console.log('Status artifact boundary PASS:',files.length,'files; worker/credentials/private adapter excluded');

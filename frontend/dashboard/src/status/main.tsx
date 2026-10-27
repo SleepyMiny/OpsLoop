@@ -1,0 +1,13 @@
+import '@fontsource/barlow/500.css';
+import '@fontsource/barlow/600.css';
+import '@fontsource/barlow/700.css';
+import '@fontsource/ibm-plex-sans-kr/400.css';
+import '@fontsource/ibm-plex-sans-kr/500.css';
+import '@fontsource/ibm-plex-sans-kr/600.css';
+import '../styles/tokens.css';
+import '../styles/base.css';
+import {StrictMode} from 'react';
+import {createRoot} from 'react-dom/client';
+import {StatusApp} from './StatusApp';
+const root=document.getElementById('root');if(!root)throw Error('root missing');
+createRoot(root).render(<StrictMode><StatusApp/></StrictMode>);

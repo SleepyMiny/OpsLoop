@@ -1,0 +1,13 @@
+{
+ "name":"opsloop",
+ "main":"./public-status.ts",
+ "compatibility_date":"2026-08-06",
+ "assets":{"directory":"../frontend/dashboard/dist-status","binding":"ASSETS","not_found_handling":"none","run_worker_first":["/api/*"]},
+ "d1_databases":[{"binding":"STATUS_DB","database_name":"opsloop-public-status","database_id":"<APPROVAL_REQUIRED>"}],
+ "vars":{"PUBLIC_ORIGIN":"https://opsloop.sleepyminy44.workers.dev"},
+ "ratelimits":[
+  {"name":"PUBLIC_RATE","namespace_id":"<APPROVAL_REQUIRED_PUBLIC>","simple":{"limit":120,"period":60}},
+  {"name":"AUTH_RATE","namespace_id":"<APPROVAL_REQUIRED_AUTH>","simple":{"limit":60,"period":60}},
+  {"name":"INGEST_RATE","namespace_id":"<APPROVAL_REQUIRED_INGEST>","simple":{"limit":12,"period":60}}
+ ]
+}

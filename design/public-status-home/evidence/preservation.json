@@ -1,0 +1,15 @@
+{
+  "trackedSourceChanges": [],
+  "preservedProductFiles": {
+    "frontend/dashboard/wrangler.public.json": "8c4def9e7a539f098258fd25b5398c19cb87004a7b9e65a2e3a53850c44ee3ea",
+    "frontend/dashboard/src/public/evidence.public.json": "0e95138e9a27c336e6aedbfe8d1f9964b268e6a4af5c6502d2a7446d1c875323",
+    "frontend/dashboard/src/data/replay/evidence.json": "65676e1d951575400a1a5595d6d6ccec82a2a7de6b69a207d28fe6e7be558051",
+    "frontend/dashboard/src/data/demo/engine.ts": "0caeedac9201b80de4d724a2b299082e17ed15bbd60e999acdad04fa383b99de",
+    "frontend/dashboard/src/data/demo/demoSource.ts": "1fcdb8fe3293e50891cf09beea8a7c90e960d3b94c31afaa2238c5642954e21c",
+    "frontend/dashboard/public-static/_headers": "2978da81902b3d427e99d71d614fcbd4ea452bb93011ca85196cb81a1593631e"
+  },
+  "originalStatus": " M infra/terraform/p1/main.tf\n",
+  "originalHEAD": "6aa9daa973757ed30f10807bba48f6640ccde9f6",
+  "terraformSHA256": "ac7ad7c13c8108f408c7de567b6f9d7533a5523176cb9cdddd165405cf561794",
+  "baselineFileSHA256": "844a50bdbdb331bd1a7a58cedef601153751752bfd0eb0ee857ba574303d1623"
+}

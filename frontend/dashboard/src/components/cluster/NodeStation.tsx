@@ -72,7 +72,7 @@ export function NodeStation({ station, routeStage }: { station: StationView; rou
       </div>
 
       {demoPods.length > 0 ? (
-        <ul className={styles.demoPods} aria-label="Demo API Pod">
+        <ul className={styles.demoPods} aria-label="Demo 워크로드 Pod">
           {demoPods.map((pod) => (
             <DemoPodToken key={pod.uid} pod={pod} slim={demoPods.length > 1 && pod.presence !== 'solid'} />
           ))}
@@ -126,7 +126,7 @@ function DemoPodToken({ pod, slim }: { pod: PodView; slim: boolean }) {
     >
       <span className={styles.demoPodMain}>
         <Lamp state={pod.tone} label={pod.label} />
-        <span className={styles.demoPodName}>{slim ? '이전 Pod' : 'Demo API'}</span>
+        <span className={styles.demoPodName}>{slim ? '이전 Pod' : 'Demo 워크로드'}</span>
         <span className={styles.demoPodState}>{pod.label}</span>
       </span>
       {!slim && (pod.code || pod.attemptId) ? (

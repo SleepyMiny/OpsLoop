@@ -1,0 +1,81 @@
+# REVIEW TEMPLATE ONLY. Placeholders must be replaced after separate identity approval.
+# No writes, Secrets, Pods, logs, exec, proxy, watch or TokenRequest permissions.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: public-status-collector
+  namespace: opsloop-observer
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: opsloop-public-status-nodes
+rules:
+- apiGroups: [""]
+  resources: [nodes]
+  resourceNames: [APPROVED_CONTROL_NODE, APPROVED_PHYSICAL_NODE, APPROVED_CLOUD_NODE]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: opsloop-public-status-nodes
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: opsloop-public-status-nodes}
+subjects:
+- {kind: ServiceAccount, name: public-status-collector, namespace: opsloop-observer}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: opsloop-public-status-leases, namespace: kube-node-lease}
+rules:
+- apiGroups: [coordination.k8s.io]
+  resources: [leases]
+  resourceNames: [APPROVED_CONTROL_NODE, APPROVED_PHYSICAL_NODE, APPROVED_CLOUD_NODE]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: opsloop-public-status-leases, namespace: kube-node-lease}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: opsloop-public-status-leases}
+subjects:
+- {kind: ServiceAccount, name: public-status-collector, namespace: opsloop-observer}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: opsloop-public-status-controller, namespace: opsloop-system}
+rules:
+- apiGroups: [apps]
+  resources: [deployments]
+  resourceNames: [opsloop-controller]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: opsloop-public-status-controller, namespace: opsloop-system}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: opsloop-public-status-controller}
+subjects:
+- {kind: ServiceAccount, name: public-status-collector, namespace: opsloop-observer}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: opsloop-public-status-demo, namespace: opsloop-demo}
+rules:
+- apiGroups: [apps]
+  resources: [deployments]
+  resourceNames: [demo-api]
+  verbs: [get]
+- apiGroups: [opsloop.io]
+  resources: [recoverypolicies]
+  resourceNames: [demo-api]
+  verbs: [get]
+- apiGroups: [opsloop.io]
+  resources: [recoveryincidents]
+  verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: opsloop-public-status-demo, namespace: opsloop-demo}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: opsloop-public-status-demo}
+subjects:
+- {kind: ServiceAccount, name: public-status-collector, namespace: opsloop-observer}

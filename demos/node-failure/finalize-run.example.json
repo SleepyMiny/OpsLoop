@@ -1,0 +1,61 @@
+{
+  "version": "opsloop-finalize/v1",
+  "runID": "synthetic-example",
+  "evidenceKind": "synthetic",
+  "expectedGuard": {
+    "version": "opsloop-guard/v1",
+    "mode": "synthetic-local",
+    "run": "synthetic-example",
+    "epoch": "epoch-1",
+    "target": {
+      "uri": "qemu:///system",
+      "uuid": "11111111-2222-3333-4444-555555555555",
+      "executable": "/synthetic/not-executed",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "allowed": "query-resume-only",
+    "root": "/tmp/opsloop-finalize-example/guard",
+    "owner": {
+      "pid": 12345,
+      "boot": "synthetic-boot",
+      "startTicks": "100"
+    },
+    "hardDeadline": "2026-10-23T00:01:40Z",
+    "authorityExpires": "2026-10-23T00:01:50Z",
+    "maxTrialMs": 100000,
+    "heartbeatMs": 100000,
+    "timeoutMs": 50
+  },
+  "expectedGuardBinding": "6fc593a272310577f420bb066845403a6bf9c16d481e54512a0dbb13b070f92f",
+  "identity": {
+    "namespace": "opsloop-demo",
+    "policy": "demo-api",
+    "policyUID": "policy-uid",
+    "deployment": "demo-api",
+    "deploymentUID": "deployment-uid",
+    "service": {
+      "namespace": "opsloop-demo",
+      "name": "demo-api",
+      "uid": "service-uid",
+      "pathID": "approved-service",
+      "url": "http://127.0.0.1:18080/health"
+    }
+  },
+  "targetMapping": {
+    "nodeUID": "fault-node-uid",
+    "nodeName": "fault-node",
+    "guardURI": "qemu:///system",
+    "guardUUID": "11111111-2222-3333-4444-555555555555",
+    "finishURI": "test:///opsloop-p2d",
+    "finishUUID": "11111111-2222-3333-4444-555555555555",
+    "basis": "EXPLICIT_SYNTHETIC_TEST_MAPPING; registration unverified"
+  },
+  "observerDir": "/tmp/opsloop-finalize-example/observer/synthetic-example",
+  "guardFile": "/tmp/opsloop-finalize-example/guard/explicit-state.json",
+  "outputDir": "/tmp/opsloop-finalize-example/results/new-result",
+  "expectNode": "recovery-node",
+  "expectVersion": "abc123",
+  "platformDigests": [
+    "sha256:amd"
+  ]
+}

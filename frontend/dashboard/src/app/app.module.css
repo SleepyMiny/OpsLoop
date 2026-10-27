@@ -720,3 +720,40 @@
 
 .app { grid-template-rows: auto auto minmax(0, 1fr) auto; }
 .sourceNotice { max-height: 26dvh; overflow: auto; }
+
+/* The integrated shell adds an Overview above the original control-room wall.
+   It is a scrolling document: never squeeze the instruments into the remaining
+   viewport height or hide their contents beneath the Overview. */
+.app[data-integrated] {
+  display: block;
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+}
+.app[data-integrated] > section { width: 100%; }
+.app[data-integrated] > .sourceNotice { width: auto; max-height: none; }
+.app[data-integrated] .stage {
+  max-width: 1660px;
+  margin: 0 auto;
+  grid-template-rows: auto;
+  align-content: start;
+  align-items: stretch;
+}
+.app[data-integrated] .hero { min-height: 560px; }
+.app[data-integrated] .story { min-height: 420px; }
+.app[data-integrated] .decision,
+.app[data-integrated] .detail { min-height: 520px; }
+.app[data-integrated] .tabs { height: auto; }
+@media (min-width: 1200px) {
+  .app[data-integrated] .stage {
+    grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+    grid-template-rows: minmax(560px, auto) minmax(520px, auto);
+    grid-template-areas: 'hero story' 'decision detail';
+  }
+}
+@media (max-width: 767px) {
+  .app[data-integrated] .hero { min-height: 1100px; }
+  .app[data-integrated] .story,
+  .app[data-integrated] .decision,
+  .app[data-integrated] .detail { min-height: 420px; }
+}

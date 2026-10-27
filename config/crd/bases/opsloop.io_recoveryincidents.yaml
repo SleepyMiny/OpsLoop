@@ -184,6 +184,14 @@ spec:
                         type: string
                         x-kubernetes-validations:
                         - rule: duration(self) >= duration('1s')
+                      podUnreadyFor:
+                        description: |-
+                          PodUnreadyFor opts into relocating a previously healthy, running Pod whose
+                          readiness failed while its Node remains Ready. Nil preserves legacy rules.
+                        type: string
+                        x-kubernetes-validations:
+                        - rule: duration(self) >= duration('15s') && duration(self)
+                            <= duration('5m')
                       restartThreshold:
                         default: 3
                         format: int32

@@ -1,0 +1,20 @@
+{
+  "name": "opsloop-status-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild public-status.ts --bundle --format=esm --platform=browser --outfile=dist/worker.mjs",
+    "test": "node --test test/*.test.mjs",
+    "dev": "node local.mjs",
+    "test:browser": "node browser.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "miniflare": "4.20260730.0",
+    "playwright-core": "1.61.1"
+  },
+  "overrides": {
+    "undici": "7.29.1",
+    "sharp": "0.35.5"
+  }
+}

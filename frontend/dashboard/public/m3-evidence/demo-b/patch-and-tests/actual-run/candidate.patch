@@ -1,0 +1,38 @@
+--- a/apps/engineering-demo/discount.go
++++ b/apps/engineering-demo/discount.go
+@@ -13,8 +13,6 @@
+ }
+ 
+ // CalculateQuote prices an order in integer cents. Empty orders are valid.
+-// This dedicated Demo B application deliberately starts with an unfixed defect;
+-// the repair must come from the isolated Codex run, not the demo coordinator.
+ func CalculateQuote(items []Item) (Quote, error) {
+ 	var total, count int64
+ 	for _, item := range items {
+@@ -24,5 +22,8 @@
+ 		total += item.UnitPrice * item.Quantity
+ 		count += item.Quantity
+ 	}
++	if count == 0 {
++		return Quote{}, nil
++	}
+ 	return Quote{Total: total, Average: total / count}, nil
+ }
+--- a/apps/engineering-demo/discount_test.go
++++ b/apps/engineering-demo/discount_test.go
+@@ -17,3 +17,15 @@
+ 		}
+ 	}
+ }
++
++func TestQuoteEmptyOrder(t *testing.T) {
++	q, err := CalculateQuote(nil)
++	if err != nil || q.Total != 0 || q.Average != 0 {
++		t.Fatalf("empty quote = %+v, %v", q, err)
++	}
++
++	q, err = CalculateQuote([]Item{})
++	if err != nil || q.Total != 0 || q.Average != 0 {
++		t.Fatalf("empty slice quote = %+v, %v", q, err)
++	}
++}

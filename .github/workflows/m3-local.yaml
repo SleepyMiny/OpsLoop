@@ -1,0 +1,53 @@
+name: M3 local acceptance
+
+# Prepared locally. Publishing this workflow requires the user's Git approval.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  offline-checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.22.0'
+          cache: npm
+          cache-dependency-path: frontend/dashboard/package-lock.json
+      - name: Prepare locked dependencies and local envtest tools (network phase)
+        shell: bash
+        run: |
+          go mod download
+          npm --prefix frontend/dashboard ci --no-audit --no-fund
+          envtest_assets=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.2 use 1.35.0 --bin-dir "$RUNNER_TEMP/envtest" -p path)
+          printf 'M3_ENVTEST_ASSETS=%s\n' "$envtest_assets" >> "$GITHUB_ENV"
+      - name: Verify with offline dependency resolution and no production credentials
+        shell: bash
+        run: |
+          python3 -B scripts/m3-verify.py \
+            --go "$(command -v go)" --node "$(command -v node)" \
+            --gomodcache "$(go env GOMODCACHE)" --gocache "$RUNNER_TEMP/m3-gocache" \
+            --envtest-assets "$M3_ENVTEST_ASSETS" --output "$RUNNER_TEMP/m3-checks"
+      - name: Retain local check receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: m3-local-verification
+          path: |
+            ${{ runner.temp }}/m3-checks/*.json
+            ${{ runner.temp }}/m3-checks/*.log
+          if-no-files-found: warn
+          retention-days: 7
