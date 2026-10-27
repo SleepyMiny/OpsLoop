@@ -246,7 +246,7 @@ func TestFinalizeBudgetFileLimits(t *testing.T) {
 }
 
 func TestFinalizeBudgetStableCaptures(t *testing.T) {
-	for _, failCapture := range []int{1, 2, 3, 4, 5, 6, 0} {
+	for _, failCapture := range []int{1, 2, 0} {
 		t.Run(fmt.Sprint(failCapture), func(t *testing.T) {
 			c, config, total := finalBudgetFixture(t)
 			cb, _ := os.ReadFile(config)
@@ -258,10 +258,6 @@ func TestFinalizeBudgetStableCaptures(t *testing.T) {
 					budget--
 				}
 				s := captureFinalWith(c, config, budget, finalReadCount)
-				// Force revision changes before the intended capture.
-				if calls < failCapture-1 {
-					s.Metadata["revision"] = fmt.Sprint(calls)
-				}
 				return s
 			})
 			if failCapture == 0 {
@@ -277,14 +273,14 @@ func TestFinalizeBudgetStableCaptures(t *testing.T) {
 			t.Logf("budgetCapture=%d captures=%d comparisonComplete=%t readBytes=%d", failCapture, calls, stable, s.BytesRead)
 		})
 	}
-	// Six distinct captures exhaust the existing change retry bound.
+	// A changed pair must stop without a retry, even if a later pair could settle.
 	calls := 0
 	_, stable := stableFinalWith([]byte("c"), nil, func() finalSnapshot {
 		calls++
 		return finalSnapshot{Data: map[string][]byte{"config": []byte("c")}, Metadata: map[string]string{"revision": fmt.Sprint(calls)}}
 	})
-	if stable || calls != 6 {
-		t.Fatal("change retry bound lost", calls, stable)
+	if stable || calls != 2 {
+		t.Fatal("observed change retried", calls, stable)
 	}
 }
 

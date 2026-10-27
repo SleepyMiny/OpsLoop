@@ -195,7 +195,7 @@ func TestFinalizeReentryCLI(t *testing.T) {
 // from persisted explicit counterevidence. This test makes no network calls.
 func TestFinalizeQueryPrefixes(t *testing.T) {
 	for failAt := 2; failAt <= 10; failAt++ {
-		t.Run(fmt.Sprintf("save-%d", failAt), func(t *testing.T) {
+		t.Run(fmt.Sprintf("save-%d", failAt), recoveryClockTest(func(t *testing.T) {
 			c, g, s, v, n := recoverySetup(t)
 			v.state = "running"
 			injected := false
@@ -243,10 +243,10 @@ func TestFinalizeQueryPrefixes(t *testing.T) {
 			}
 			finalFixExport(t, fmt.Sprintf("prefix-%d-guard.json", failAt), b)
 			t.Logf("failedSaveSequence=%d durablePrefix=%d finalEvents=%d producer=%s loadValid=true consumer=%s", failAt, prefix, len(s.Events), s.Phase, a.Status)
-		})
+		}))
 	}
 	for _, scene := range []string{"paused-then-running", "unconfirmed-uuid-manual-save-fails", "shut-off-manual-save-fails"} {
-		t.Run(scene, func(t *testing.T) {
+		t.Run(scene, recoveryClockTest(func(t *testing.T) {
 			c, g, s, v, n := recoverySetup(t)
 			if scene != "paused-then-running" {
 				g.beforeSave = func(next *guardState) error {
@@ -291,7 +291,7 @@ func TestFinalizeQueryPrefixes(t *testing.T) {
 			}
 			finalFixExport(t, scene+"-guard.json", b)
 			t.Logf("scene=%s producer=%s loadValid=true events=%d consumer=%s", scene, s.Phase, len(s.Events), a.Status)
-		})
+		}))
 	}
 }
 

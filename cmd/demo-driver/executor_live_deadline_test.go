@@ -48,6 +48,7 @@ func finishDeadlineJournalReleased(t *testing.T, c FinishConfig) bool {
 func TestFinishLabDeadlineTargetLock(t *testing.T) {
 	for _, tc := range []struct{ id, stage, mode string }{
 		{"A-deadline-release", "restore", "deadline"}, {"A-cancel-release", "restore", "cancel"},
+		{"A-cancel-slow-publication", "restore", "cancel"},
 		{"B-deadline-release", "final", "deadline"}, {"B-cancel-release", "final", "cancel"},
 		{"C-canceled-free-final", "final", "already-canceled"}, {"C-canceled-free-restore", "restore", "already-canceled"},
 		{"D-valid-acquire", "restore", "valid"},
@@ -64,8 +65,16 @@ func TestFinishLabDeadlineTargetLock(t *testing.T) {
 				parent, cancel = context.WithDeadline(context.Background(), deadline)
 				defer cancel()
 			}
+			cancelTimes := make(chan time.Time, 1)
+			cancelAtBoundary := func() {
+				cancelTimes <- time.Now()
+				cancel()
+			}
+			if tc.mode == "deadline" {
+				context.AfterFunc(parent, func() { cancelTimes <- time.Now() })
+			}
 			var g *guardStore
-			var trigger time.Time
+			var trigger, canceledAt, cancelCallbackAt, cancellationObserved time.Time
 			var jref *finishJournal
 			var released chan struct{}
 			fired := false
@@ -73,6 +82,15 @@ func TestFinishLabDeadlineTargetLock(t *testing.T) {
 			hook := func(j *finishJournal) {
 				jref = j
 				j.before = func(kind string) error {
+					// The failed operation has returned before this durable failure
+					// record starts. Measure cancellation separately from fsync and
+					// receipt publication; neither authorizes further commands.
+					if fired && kind == "incomplete" {
+						cancellationObserved = time.Now()
+						if tc.id == "A-cancel-slow-publication" {
+							time.Sleep(600 * time.Millisecond)
+						}
+					}
 					hit := false
 					if tc.stage == "restore" && j.last("stop-confirmed") != nil && kind == "snapshot-durable" {
 						snapshots++
@@ -91,7 +109,7 @@ func TestFinishLabDeadlineTargetLock(t *testing.T) {
 						t.Fatal("expired before target boundary")
 					}
 					if tc.mode == "already-canceled" {
-						cancel()
+						cancelAtBoundary()
 						return nil
 					}
 					var e error
@@ -99,23 +117,18 @@ func TestFinishLabDeadlineTargetLock(t *testing.T) {
 					if e != nil {
 						t.Fatal(e)
 					}
-					if tc.mode == "held" {
-						time.AfterFunc(60*time.Millisecond, cancel)
-						return nil
+					t.Cleanup(g.close)
+					if tc.mode == "held" || tc.mode == "cancel" {
+						time.AfterFunc(60*time.Millisecond, cancelAtBoundary)
 					}
-					delay := 300 * time.Millisecond
-					if tc.mode == "deadline" {
-						delay = time.Until(deadline) + 250*time.Millisecond
-					}
-					if tc.mode == "cancel" {
-						time.AfterFunc(60*time.Millisecond, cancel)
-					}
+					// A canceled waiter must finish while the other actor still
+					// owns the target. Release it only after executeFinish returns,
+					// not after an independent timer that can win under load.
 					if tc.mode == "valid" {
-						delay = 50 * time.Millisecond
+						released = make(chan struct{})
+						holder := g
+						go func() { time.Sleep(50 * time.Millisecond); holder.close(); close(released) }()
 					}
-					released = make(chan struct{})
-					holder := g
-					go func() { time.Sleep(delay); holder.close(); close(released) }()
 					return nil
 				}
 			}
@@ -136,26 +149,19 @@ func TestFinishLabDeadlineTargetLock(t *testing.T) {
 				if !errors.Is(err, parent.Err()) {
 					t.Fatal("lost cancellation cause", err, parent.Err())
 				}
-				canceledAt := trigger.Add(60 * time.Millisecond)
+				cancelCallbackAt = <-cancelTimes
+				canceledAt = cancelCallbackAt
 				if tc.mode == "deadline" {
+					// Retain the actual deadline as the bound, and report callback
+					// scheduling delay separately instead of hiding it.
 					canceledAt = deadline
 				}
-				if tc.mode == "already-canceled" {
-					canceledAt = trigger
-				}
-				if end.Sub(canceledAt) > 500*time.Millisecond {
-					t.Fatalf("slow cancellation response: %s", end.Sub(canceledAt))
-				}
-				if released != nil {
-					select {
-					case <-released:
-						t.Fatal("Finish waited for holder release after cancellation")
-					default:
-					}
+				if cancellationObserved.IsZero() || cancellationObserved.Sub(canceledAt) > 500*time.Millisecond {
+					t.Errorf("slow lock cancellation response before failure publication: %s", cancellationObserved.Sub(canceledAt))
 				}
 			}
 			heldStill := false
-			if tc.mode == "held" {
+			if g != nil && tc.mode != "valid" {
 				other, e := openGuard(l.c)
 				heldStill = e == errGuardBusy
 				if other != nil {
@@ -175,9 +181,12 @@ func TestFinishLabDeadlineTargetLock(t *testing.T) {
 				if ev.Kind == "incomplete" {
 					incompleteAt = ev.At.At
 				}
-				if ev.Kind == "vm-started" && tc.mode == "deadline" && ev.At.At.After(deadline) {
+				if ev.Kind == "vm-started" && tc.mode != "valid" && !ev.At.At.Before(canceledAt) {
 					commandsAfterCancel++
 				}
+			}
+			if commandsAfterCancel != 0 {
+				t.Fatal("commands started after cancellation", commandsAfterCancel)
 			}
 			releasedJournal = finishDeadlineJournalReleased(t, l.s.c)
 			if !releasedJournal {
@@ -189,7 +198,7 @@ func TestFinishLabDeadlineTargetLock(t *testing.T) {
 			if tc.mode == "valid" && (err != nil || l.v.resumes != 1) {
 				t.Fatal("normal control failed", err)
 			}
-			if tc.mode == "held" && !heldStill {
+			if g != nil && tc.mode != "valid" && !heldStill {
 				t.Fatal("other actor lock disturbed")
 			}
 			if tc.mode != "valid" {
@@ -218,10 +227,13 @@ func TestFinishLabDeadlineTargetLock(t *testing.T) {
 				pe = parent.Err().Error()
 			}
 			cleanupMS := 0.0
-			if !incompleteAt.IsZero() {
-				cleanupMS = float64(end.Sub(incompleteAt).Microseconds()) / 1000
+			if !cancellationObserved.IsZero() {
+				cleanupMS = float64(end.Sub(cancellationObserved).Microseconds()) / 1000
 			}
-			finishDeadlineResult(t, map[string]any{"id": tc.id, "error": ep, "parentError": pe, "elapsedMS": float64(end.Sub(start).Microseconds()) / 1000, "fromLockBoundaryMS": float64(end.Sub(trigger).Microseconds()) / 1000, "cleanupStatus": r.Cleanup.Status, "cleanupConfirmed": !cleanupAt.IsZero(), "cleanupAfterDeadline": !deadline.IsZero() && !cleanupAt.IsZero() && cleanupAt.After(deadline), "commandStarts": len(l.v.calls), "resumes": l.v.resumes, "patches": l.s.patches, "commandsAfterDeadline": commandsAfterCancel, "journalReleased": releasedJournal, "holderStillLockedBeforeOwnClose": heldStill, "failureRecordingAndPublicationMS": cleanupMS, "safeCancellation": tc.mode == "valid" || parent.Err() != nil && err != nil})
+			if tc.id == "A-cancel-slow-publication" && cleanupMS < 600 {
+				t.Fatal("slow durable failure publication was not exercised")
+			}
+			finishDeadlineResult(t, map[string]any{"id": tc.id, "error": ep, "parentError": pe, "elapsedMS": float64(end.Sub(start).Microseconds()) / 1000, "fromLockBoundaryMS": float64(end.Sub(trigger).Microseconds()) / 1000, "cleanupStatus": r.Cleanup.Status, "cleanupConfirmed": !cleanupAt.IsZero(), "cleanupAfterDeadline": !deadline.IsZero() && !cleanupAt.IsZero() && cleanupAt.After(deadline), "commandStarts": len(l.v.calls), "resumes": l.v.resumes, "patches": l.s.patches, "commandsAfterDeadline": commandsAfterCancel, "journalReleased": releasedJournal, "holderStillLockedBeforeOwnClose": heldStill, "failureRecordingAndPublicationMS": cleanupMS, "cancellationObservedAt": cancellationObserved, "cancellationLatencyMS": float64(cancellationObserved.Sub(canceledAt).Microseconds()) / 1000, "cancelCallbackAt": cancelCallbackAt, "incompleteEventAt": incompleteAt, "commandsAfterCancellation": commandsAfterCancel, "safeCancellation": tc.mode == "valid" || parent.Err() != nil && err != nil})
 		})
 	}
 }
@@ -376,9 +388,12 @@ func TestFinishLabDeadlineDecision(t *testing.T) {
 	for _, scene := range []string{"after-lock", "after-fresh", "late-decision", "late-write", "late-publication"} {
 		t.Run(scene, func(t *testing.T) {
 			l := newLabFinish(t, "normal", nil)
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			// These cases test the decision/write ordering, not total setup
+			// duration. Cancel at the named seam so HTTP/fsync setup cannot
+			// consume a short deadline before that seam is exercised.
+			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			deadline, _ := ctx.Deadline()
+			var canceledAt time.Time
 			fired := false
 			var jref *finishJournal
 			var decisionAt, writeStarted time.Time
@@ -406,13 +421,10 @@ func TestFinishLabDeadlineDecision(t *testing.T) {
 					if ctx.Err() != nil {
 						t.Fatal("setup consumed deadline before boundary")
 					}
-					if scene == "after-lock" || scene == "after-fresh" {
-						cancel()
-					} else {
-						decisionAt = time.Now()
-						time.Sleep(time.Until(deadline) + 20*time.Millisecond)
-						writeStarted = time.Now()
-					}
+					decisionAt = time.Now()
+					cancel()
+					canceledAt = time.Now()
+					writeStarted = time.Now()
 					return nil
 				}
 			})
@@ -429,7 +441,7 @@ func TestFinishLabDeadlineDecision(t *testing.T) {
 			}
 			confirmed := jref.last("cleanup-confirmed")
 			if success {
-				if confirmed == nil || !confirmed.At.At.Before(deadline) || !writeStarted.After(deadline) || !decisionAt.Before(deadline) {
+				if confirmed == nil || !confirmed.At.At.Before(canceledAt) || !writeStarted.After(canceledAt) || !decisionAt.Before(canceledAt) {
 					t.Fatal("late write not distinguished from late decision")
 				}
 			} else {
@@ -441,7 +453,7 @@ func TestFinishLabDeadlineDecision(t *testing.T) {
 			if !finishDeadlineJournalReleased(t, l.s.c) {
 				t.Fatal("journal lock leak")
 			}
-			finishDeadlineResult(t, map[string]any{"id": "decision-" + scene, "success": success, "cleanup": r.Cleanup.Status, "parentExpired": ctx.Err() != nil, "resumes": l.v.resumes, "acceptedFactPreserved": success && confirmed != nil, "writeAfterDeadline": writeStarted.After(deadline)})
+			finishDeadlineResult(t, map[string]any{"id": "decision-" + scene, "success": success, "cleanup": r.Cleanup.Status, "parentExpired": ctx.Err() != nil, "resumes": l.v.resumes, "acceptedFactPreserved": success && confirmed != nil, "writeAfterCancellation": writeStarted.After(canceledAt)})
 		})
 	}
 }

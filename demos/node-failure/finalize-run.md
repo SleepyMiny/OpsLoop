@@ -56,11 +56,12 @@ and nonzero exit. Unvisited members have no successful data/reference; later
 members are marked budget-blocked, not missing or verified. It immediately stops
 subsequent file reads and captures. No completed stability comparison is claimed,
 and the reason is not replaced by INPUT_CHANGED_DURING_FINALIZATION. For other
-inputs, at most three attempts each compare two complete snapshots using bytes
-and file revision metadata. A settled revision may succeed; config bytes must
-match the initial configuration. Each capture has a fresh 64 MiB budget (at most
-six captures per call). Before these captures, CLI configuration discovery is one
-separate bounded read of at most 2 MiB + 1 detection byte. This is not charged to
+inputs, two complete snapshots are compared using bytes and file revision
+metadata. Any observed difference is sticky INPUT_CHANGED_DURING_FINALIZATION
+for that invocation: no retry may turn a later settled revision into PASS.
+Config bytes must match the initial configuration. Each capture has a fresh
+64 MiB budget (at most two captures per call). Before these captures, CLI
+configuration discovery is one separate bounded read of at most 2 MiB + 1 detection byte. This is not charged to
 a snapshot. A changing/unreadable revision cannot produce PASS.
 
 The five original probe/incident/pods/env/evidence inputs run through the

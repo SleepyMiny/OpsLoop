@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -169,9 +170,19 @@ func TestRecoveryBackendRejectsTargets(t *testing.T) {
 		t.Fatal("forbidden call")
 	}
 }
+
+// recoveryClockTest keeps real Guard files, flock and fsync, while the synthetic
+// command/state-machine clock advances only at explicit blocking boundaries.
+// A host disk stall must not accidentally select the timeout branch in tests
+// of owner identity or durable-prefix recovery. TimeoutMS remains unchanged;
+// TestRecoveryCommandBoundaryDeadline exercises its rejection separately.
+func recoveryClockTest(f func(*testing.T)) func(*testing.T) {
+	return func(t *testing.T) { synctest.Test(t, f) }
+}
+
 func TestRecoveryTimingAndRestart(t *testing.T) {
 	for _, scene := range []string{"hard-with-heartbeat", "heartbeat-lost", "expired", "boot", "clock-back", "clock-forward", "monotonic-back", "restart", "owner-reused"} {
-		t.Run(scene, func(t *testing.T) {
+		t.Run(scene, recoveryClockTest(func(t *testing.T) {
 			c, g, s, v, n := recoverySetup(t)
 			original := s.HardTick
 			switch scene {
@@ -212,7 +223,7 @@ func TestRecoveryTimingAndRestart(t *testing.T) {
 			if s.HardTick != original {
 				t.Fatal("deadline extended")
 			}
-		})
+		}))
 	}
 }
 func TestRecoveryPersistenceAndReplay(t *testing.T) {
@@ -447,5 +458,52 @@ func TestRecoveryRejectsChangedDurableDeadline(t *testing.T) {
 	}
 	if _, e := g.load(c); e == nil {
 		t.Fatal("changed hard deadline accepted")
+	}
+}
+
+// Each injected delay is inside the durable Start boundary, not in a simulated
+// command result. The real backend must reject Start after its unchanged 50ms
+// command budget, even when the disk boundary itself eventually succeeds.
+func TestRecoveryCommandBoundaryDeadline(t *testing.T) {
+	for _, scene := range []string{"query-deadline", "resume-deadline", "query-cancel", "resume-cancel"} {
+		t.Run(scene, recoveryClockTest(func(t *testing.T) {
+			c, g, s, v, n := recoverySetup(t)
+			recoveryAdvance(n, 2*time.Second)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			op := "domuuid"
+			if strings.HasPrefix(scene, "resume") {
+				op = "resume"
+			}
+			injected := false
+			g.beforeSave = func(next *guardState) error {
+				event := next.Events[len(next.Events)-1]
+				if !injected && event.Kind == "vm-start-attempt" && event.Operation == op {
+					injected = true
+					if strings.HasSuffix(scene, "cancel") {
+						cancel()
+					} else {
+						time.Sleep(time.Duration(c.TimeoutMS)*time.Millisecond + time.Nanosecond)
+					}
+				}
+				return nil
+			}
+			err := recoveryEngine(n, v).step(ctx, g, s, false)
+			if !injected || err == nil || v.resumes != 0 || s.Phase != "ABORTED_MANUAL" || s.AutomaticSuccessEligible {
+				t.Fatalf("timeout/cancel was not fail-closed: injected=%v err=%v resumes=%d phase=%s", injected, err, v.resumes, s.Phase)
+			}
+			if op == "domuuid" && len(v.calls) != 0 {
+				t.Fatal("query started after cancellation")
+			}
+			for _, call := range v.calls {
+				if call[2] == "resume" {
+					t.Fatal("resume started after cancellation")
+				}
+			}
+			if _, err := g.load(c); err != nil {
+				t.Fatal("failed command lost durable fail-closed history", err)
+			}
+			t.Logf("timeoutMS=%d injection=%s started=%d resumes=%d phase=%s", c.TimeoutMS, scene, len(v.calls), v.resumes, s.Phase)
+		}))
 	}
 }

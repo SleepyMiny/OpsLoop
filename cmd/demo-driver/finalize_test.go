@@ -372,30 +372,53 @@ func finalBoundaries(t *testing.T, base FinalizeConfig, originalConfig string) {
 		}
 	})
 	t.Run("snapshot-changes", func(t *testing.T) {
-		c := base
-		c.GuardFile = filepath.Join(t.TempDir(), "guard.json")
-		gb, _ := os.ReadFile(base.GuardFile)
-		os.WriteFile(c.GuardFile, gb, 0600)
-		config := filepath.Join(t.TempDir(), "config.json")
-		observerTestJSON(t, config, c)
-		b, _ := os.ReadFile(config)
-		s, ok := stableFinal(c, config, b, func(i int) {
-			data := append(append([]byte(nil), gb...), bytes.Repeat([]byte(" "), i+1)...)
-			os.WriteFile(c.GuardFile, data, 0600)
-		})
-		r := finalizeAssessment(c, s, ok)
-		if ok || r.OverallPass || !slices.Contains(r.Reasons, "INPUT_CHANGED_DURING_FINALIZATION") {
-			t.Fatal("unstable accepted", r)
-		}
-		// A single concurrent revision may settle; all final refs must use that revision.
-		os.WriteFile(c.GuardFile, gb, 0600)
-		s, ok = stableFinal(c, config, b, func(i int) {
-			if i == 0 {
-				os.WriteFile(c.GuardFile, append(gb, ' '), 0600)
-			}
-		})
-		if !ok || digestBytes(s.Data["guard"]) == digestBytes(gb) {
-			t.Fatal("bounded retry failed")
+		for _, scene := range []string{"changed-bytes-settle", "same-bytes-replaced"} {
+			t.Run(scene, func(t *testing.T) {
+				c := base
+				c.GuardFile = filepath.Join(t.TempDir(), "guard.json")
+				gb, e := os.ReadFile(base.GuardFile)
+				if e != nil {
+					t.Fatal(e)
+				}
+				if e = os.WriteFile(c.GuardFile, gb, 0600); e != nil {
+					t.Fatal(e)
+				}
+				config := filepath.Join(t.TempDir(), "config.json")
+				observerTestJSON(t, config, c)
+				b, e := os.ReadFile(config)
+				if e != nil {
+					t.Fatal(e)
+				}
+				changes := 0
+				s, ok := stableFinal(c, config, b, func(i int) {
+					if i != 0 {
+						t.Fatal("changed pair retried", i)
+					}
+					data := append([]byte(nil), gb...)
+					if scene == "changed-bytes-settle" {
+						data = append(data, ' ')
+					}
+					pending := c.GuardFile + ".replacement"
+					if e := os.WriteFile(pending, data, 0600); e != nil {
+						t.Fatal(e)
+					}
+					if e := os.Rename(pending, c.GuardFile); e != nil {
+						t.Fatal(e)
+					}
+					changes++ // Replacement completed between the two captures.
+				})
+				r := finalizeAssessment(c, s, ok)
+				if changes != 1 || ok || r.OverallPass || r.Status != "INPUT_ERROR" || !slices.Contains(r.Reasons, "INPUT_CHANGED_DURING_FINALIZATION") {
+					t.Fatal("observed replacement accepted", changes, r)
+				}
+				// Fresh explicit evaluation of now-stable input is allowed; the
+				// failed invocation itself was never retried or published as PASS.
+				s, ok = stableFinal(c, config, b, nil)
+				r = finalizeAssessment(c, s, ok)
+				if !ok || !r.OverallPass {
+					t.Fatal("stable control failed", r)
+				}
+			})
 		}
 	})
 	t.Run("production-cli-concurrent-input", func(t *testing.T) {
@@ -403,40 +426,57 @@ func finalBoundaries(t *testing.T, base FinalizeConfig, originalConfig string) {
 		c.OutputDir = finalTestOutput(t, "result")
 		dir := t.TempDir()
 		c.GuardFile = filepath.Join(dir, "guard.json")
-		gb, _ := os.ReadFile(base.GuardFile)
-		os.WriteFile(c.GuardFile, gb, 0600)
+		// Every visible revision is incomplete. Thus the real CLI must refuse
+		// even if its two reads happen between replacements of the same version.
+		// Exact between-capture replacement is tested synchronously above;
+		// a sleeping writer of valid whitespace variants cannot prove that seam.
+		if e := os.WriteFile(c.GuardFile, []byte("{"), 0600); e != nil {
+			t.Fatal(e)
+		}
 		config := filepath.Join(t.TempDir(), "config.json")
 		observerTestJSON(t, config, c)
 		stop := make(chan struct{})
-		done := make(chan struct{})
+		done := make(chan error, 1)
+		defer func() {
+			close(stop)
+			if e := <-done; e != nil {
+				t.Error("writer failed", e)
+			}
+		}()
 		started := make(chan struct{})
 		go func() {
-			defer close(done)
-			for i := 1; ; i++ {
+			for i := 0; ; i++ {
 				select {
 				case <-stop:
+					done <- nil
 					return
 				default:
 				}
-				b := append(append([]byte(nil), gb...), bytes.Repeat([]byte(" "), i%100000+1)...)
 				pending := filepath.Join(dir, "changing")
-				os.WriteFile(pending, b, 0600)
-				os.Rename(pending, c.GuardFile)
-				if i == 1 {
+				b := []byte("{")
+				if i%2 != 0 {
+					b = []byte("{\n")
+				}
+				e := os.WriteFile(pending, b, 0600)
+				if e == nil {
+					e = os.Rename(pending, c.GuardFile)
+				}
+				if i == 0 {
 					close(started)
 				}
-				time.Sleep(time.Millisecond)
+				if e != nil {
+					done <- e
+					return
+				}
 			}
 		}()
 		<-started
 		output, code := finalCLI(t, config)
-		close(stop)
-		<-done
 		r := finalReadResult(t, c)
-		if code == 0 || r.OverallPass || r.Status != "INPUT_ERROR" {
-			t.Fatal("concurrent mutation accepted", code, string(output), r.Reasons)
+		if code == 0 || r.OverallPass || r.LiveProof || r.Status != "INPUT_ERROR" {
+			t.Fatal("incomplete concurrent input accepted", code, string(output), r.Reasons)
 		}
-		t.Logf("production CLI concurrent input exit=%d status=%s reasons=%v", code, r.Status, r.Reasons)
+		t.Logf("production CLI concurrent incomplete input exit=%d status=%s reasons=%v", code, r.Status, r.Reasons)
 	})
 	t.Run("output-occupied", func(t *testing.T) {
 		c := base

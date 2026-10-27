@@ -262,32 +262,26 @@ func captureFinalWith(c FinalizeConfig, configPath string, budget int64, reader 
 	return s
 }
 
-// Three bounded attempts, normally with two complete reads. A confirmed budget
-// failure returns immediately without claiming a completed comparison. No mtime/latest-file run
-// selection; byte equality and manifest hashes bind the captured revision.
+// Compare two complete bounded snapshots. Any observed revision change is
+// sticky for this invocation: a later settled pair cannot erase it. A confirmed
+// budget failure returns immediately without claiming a completed comparison.
 func stableFinal(c FinalizeConfig, configPath string, config []byte, between func(int)) (finalSnapshot, bool) {
 	return stableFinalWith(config, between, func() finalSnapshot { return captureFinal(c, configPath) })
 }
 
 func stableFinalWith(config []byte, between func(int), capture func() finalSnapshot) (finalSnapshot, bool) {
-	var b finalSnapshot
-	for attempt := 0; attempt < 3; attempt++ {
-		a := capture()
-		if a.BudgetExceeded {
-			return a, false
-		}
-		if between != nil {
-			between(attempt)
-		}
-		b = capture()
-		if b.BudgetExceeded {
-			return b, false
-		}
-		if reflect.DeepEqual(a, b) && bytes.Equal(b.Data["config"], config) {
-			return b, true
-		}
+	a := capture()
+	if a.BudgetExceeded {
+		return a, false
 	}
-	return b, false
+	if between != nil {
+		between(0)
+	}
+	b := capture()
+	if b.BudgetExceeded {
+		return b, false
+	}
+	return b, reflect.DeepEqual(a, b) && bytes.Equal(b.Data["config"], config)
 }
 
 func runtimeFinal(c FinalizeConfig, s finalSnapshot) (*AcceptanceResult, error) {
