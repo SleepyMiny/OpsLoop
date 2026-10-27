@@ -5,6 +5,7 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions: {}
 
@@ -191,7 +192,7 @@ jobs:
           cmp frontend/dashboard/src/domain/__fixtures__/go-quantities.json "$contract_tmp/current-quantities.json"
 
   publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     needs: [verify, image, dashboard]
     environment: acr-publish
