@@ -15,7 +15,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build:public": "node scripts/build-public.mjs",
-    "test:public-build": "node scripts/public-build.test.mjs"
+    "test:public-build": "node scripts/public-build.test.mjs",
+    "build:status": "node scripts/build-status.mjs",
+    "typecheck:status-worker": "tsc --noEmit -p ../../worker/tsconfig.json",
+    "test:status-build": "node scripts/status-build.test.mjs"
   },
   "dependencies": {
     "@fontsource/barlow": "^5.3.0",

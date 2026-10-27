@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	v1alpha1 "github.com/SleepyMiny/OpsLoop/api/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -25,6 +25,8 @@ const (
 
 // ProbeRecord is one line of probe.jsonl.
 type ProbeRecord struct {
+	PathID    string    `json:"pathID,omitempty"`
+	URL       string    `json:"url,omitempty"`
 	T         time.Time `json:"t"`
 	OK        bool      `json:"ok"`
 	Status    int       `json:"status"`
@@ -44,6 +46,7 @@ type DeploymentState struct {
 
 // Env is the part of run.sh env.json that the report reads.
 type Env struct {
+	RuntimeService   *ServiceIdentity  `json:"runtimeService,omitempty"`
 	RunID            string            `json:"runId"`
 	InjectCmdSeconds *float64          `json:"injectCmdSeconds"`
 	ImageCache       string            `json:"imageCache"`
@@ -58,10 +61,13 @@ type Env struct {
 type PodList struct {
 	Items []struct {
 		Metadata struct {
-			Name string `json:"name"`
-			UID  string `json:"uid"`
+			Name            string                  `json:"name"`
+			UID             string                  `json:"uid"`
+			Namespace       string                  `json:"namespace"`
+			OwnerReferences []metav1.OwnerReference `json:"ownerReferences"`
 		} `json:"metadata"`
 		Spec struct {
+			NodeName   string `json:"nodeName"`
 			Containers []struct {
 				Image string `json:"image"`
 			} `json:"containers"`
@@ -115,6 +121,7 @@ type Summary struct {
 }
 
 type ReportInput struct {
+	SourceHashes    map[string]string
 	Probe           []ProbeRecord
 	Incident        v1alpha1.RecoveryIncident
 	Pods            PodList
@@ -131,19 +138,30 @@ type ReportInput struct {
 // ReadProbe parses probe.jsonl; a malformed line is an error so a broken file never yields a PASS.
 func ReadProbe(r io.Reader) ([]ProbeRecord, error) {
 	var recs []ProbeRecord
-	sc := bufio.NewScanner(r)
+	lr := &io.LimitedReader{R: r, N: maxInputBytes + 1}
+	sc := bufio.NewScanner(lr)
+	sc.Buffer(make([]byte, 4096), maxProbeLineBytes)
 	for n := 1; sc.Scan(); n++ {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
 			continue
 		}
 		var rec ProbeRecord
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+		if err := strictDecode([]byte(line), &rec, false); err != nil {
 			return nil, fmt.Errorf("probe line %d: %w", n, err)
+		}
+		if len(recs) >= maxProbeRecords {
+			return nil, fmt.Errorf("probe exceeds %d records", maxProbeRecords)
 		}
 		recs = append(recs, rec)
 	}
-	return recs, sc.Err()
+	if sc.Err() != nil {
+		return nil, fmt.Errorf("probe line exceeds 64 KiB or read failed: %w", sc.Err())
+	}
+	if lr.N <= 0 {
+		return nil, fmt.Errorf("probe input exceeds 16 MiB")
+	}
+	return recs, nil
 }
 
 func Report(in ReportInput) Summary {

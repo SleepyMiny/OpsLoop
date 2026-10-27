@@ -536,7 +536,7 @@ export function describeCluster(view: Omit<ClusterView, 'summary'>): string {
     const metrics = s.notice
       ? s.notice.text
       : s.gauges.map((g) => `${g.label} ${percent(g.value)}${g.level === 'over' ? ' 상한 초과' : ''}`).join(', ');
-    const pods = s.demoPods.map((p) => `Demo API Pod ${p.label}`).join(', ');
+    const pods = s.demoPods.map((p) => `Demo 워크로드 Pod ${p.label}`).join(', ');
     parts.push(
       `${s.node.displayName}(${s.node.arch.toUpperCase()}, ${s.roleLabel}): ${s.readiness.label}, ${metrics}${pods ? `, ${pods}` : ''}.`,
     );

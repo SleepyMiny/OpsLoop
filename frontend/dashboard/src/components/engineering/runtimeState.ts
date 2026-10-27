@@ -1,6 +1,6 @@
 import { displayIncident } from '../../domain/displayIncident';
 import { RUNTIME_PHASE_LABEL } from '../../domain/labels';
-import type { DashboardSnapshot } from '../../domain/types';
+import type { DashboardSnapshot, RecoveryIncident } from '../../domain/types';
 import type { LampState } from '../shared/primitives';
 import { isInFlight } from '../incident/ladderModel';
 
@@ -16,10 +16,19 @@ export interface RuntimeAlongside {
   fact: string;
 }
 
-export function runtimeAlongside(snapshot: Pick<DashboardSnapshot, 'activeIncident' | 'workload'> & Partial<Pick<DashboardSnapshot, 'source' | 'recentIncidents'>>): RuntimeAlongside {
+export function engineeringIncident(snapshot: DashboardSnapshot): RecoveryIncident | null {
+  const displayed = displayIncident(snapshot);
+  if (displayed?.status.engineering) return displayed;
+  return snapshot.recentIncidents.find((i) => i.namespace === snapshot.workload.namespace && i.spec.workloadUid === snapshot.workload.uid && i.status.runtime.phase === 'FAILED' && i.status.engineering?.evidence) ?? displayed;
+}
+
+export function runtimeAlongside(snapshot: Pick<DashboardSnapshot, 'activeIncident' | 'workload'> & Partial<Pick<DashboardSnapshot, 'source' | 'recentIncidents'>>, incident?: RecoveryIncident | null): RuntimeAlongside {
   const fact = `replicas=${snapshot.workload.replicas}`;
-  const runtime = displayIncident(snapshot)?.status.runtime;
-  if (!runtime) return { tone: 'ok', state: '감시 중, 열린 장애 없음', fact };
+  // Historical Engineering evidence never drives the current service lamp.
+  const runtime = (snapshot.source === 'live' ? snapshot.activeIncident : incident === undefined ? displayIncident(snapshot) : incident)?.status.runtime;
+  if (!runtime) return snapshot.source === 'live'
+    ? { tone: 'off', state: '열린 Incident 없음 · 서비스 상태는 Live 관측 별도 확인', fact }
+    : { tone: 'ok', state: '감시 중, 열린 장애 없음', fact };
 
   switch (runtime.quarantine) {
     case 'QuarantineRequested':

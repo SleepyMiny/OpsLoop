@@ -1,0 +1,30 @@
+{
+  "schema_version": "opsloop-github-pr-observation/v1",
+  "evidence_kind": "observed",
+  "observed_at": "2026-10-26T21:33:24.432Z",
+  "method": "GET",
+  "api_origin": "https://api.github.com",
+  "path": "/repos/SleepyMiny/OpsLoop/pulls/6",
+  "response": {
+    "number": 6,
+    "state": "open",
+    "draft": true,
+    "merged": false,
+    "created_at": "2026-10-26T21:28:53Z",
+    "html_url": "https://github.com/SleepyMiny/OpsLoop/pull/6",
+    "head": {
+      "sha": "7e38e2b0196b726140c157b8d51b0fd5d33896da"
+    },
+    "base": {
+      "sha": "171d8c10ed522848d7ccd4dd33b0b4b86d5341fc",
+      "ref": "demo/demo-b-baseline-20261027"
+    }
+  },
+  "_exportProvenance": {
+    "archive": "demo-b",
+    "path": "patch-and-tests/receipts/github-pr-observation.json",
+    "originalSHA256": "e38a8b07e67dce73d6e5ded26522e675bfa70bb38b9a83d4f6ab995561f274de",
+    "transformation": "allowlisted-pr-receipt",
+    "originalAvailableIn": "sealed-original-archive"
+  }
+}

@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -97,11 +98,13 @@ type PolicyReconciler struct {
 	APIReader client.Reader
 	Now       func() time.Time
 	Prom      promv1.API
+	Authority ExecutionAuthorizer
 	// Probe checks the attempt Pod directly during VERIFYING.
 	Probe func(ctx context.Context, podIP string, port int32, podUID string) error
 
 	// Accessed only from the single reconcile worker.
-	restarts map[types.NamespacedName]map[string]*restartState
+	restarts  map[types.NamespacedName]map[string]*restartState
+	readiness map[types.NamespacedName]readinessHistory
 }
 
 type restartState struct {
@@ -117,12 +120,21 @@ func (r *PolicyReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manage
 		return err
 	}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.RecoveryPolicy{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&v1alpha1.RecoveryPolicy{}, builder.WithPredicates(policyExecutionPredicate())).
 		Watches(&appsv1.Deployment{}, handler.EnqueueRequestsFromMapFunc(r.policiesFor)).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.policiesFor)).
 		Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(r.policiesFor)).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Complete(r)
+}
+
+// A heartbeat is metadata-only: generation-only filtering would sleep fifteen
+// seconds despite a ten-second grant TTL. Enqueue only our grant changes, not
+// unrelated metadata/status churn. A delayed worker still fails closed.
+func policyExecutionPredicate() predicate.Predicate {
+	return predicate.Or(predicate.GenerationChangedPredicate{}, predicate.Funcs{UpdateFunc: func(e event.UpdateEvent) bool {
+		return e.ObjectOld != nil && e.ObjectNew != nil && e.ObjectOld.GetAnnotations()[ExecutionGrantAnnotation] != e.ObjectNew.GetAnnotations()[ExecutionGrantAnnotation]
+	}})
 }
 
 // policiesFor maps a Deployment to Policies targeting it, a Pod to Policies in its namespace and a Node to every Policy.
@@ -152,6 +164,7 @@ func (r *PolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err := r.APIReader.Get(ctx, req.NamespacedName, p); err != nil {
 		if apierrors.IsNotFound(err) {
 			delete(r.restarts, req.NamespacedName)
+			delete(r.readiness, req.NamespacedName)
 			return ctrl.Result{}, r.abortOrphans(ctx, req.NamespacedName, "", now)
 		}
 		return ctrl.Result{}, err
@@ -178,6 +191,11 @@ func (r *PolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 }
 
 func (r *PolicyReconciler) reconcileMonitoring(ctx context.Context, p *v1alpha1.RecoveryPolicy, now time.Time) (ctrl.Result, error) {
+	if p.Spec.Mode == v1alpha1.PolicyModeEnforce {
+		if err := r.authorizeExecution(p, nil); err != nil {
+			return r.block(ctx, p, ReasonExecutionAuthority, err.Error(), now)
+		}
+	}
 	dup, err := r.duplicated(ctx, p)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -217,6 +235,7 @@ func (r *PolicyReconciler) reconcileMonitoring(ctx context.Context, p *v1alpha1.
 		return r.block(ctx, p, CondCircuitCapacity, "circuits full; reset status.circuits", now)
 	}
 
+	conditionsBefore := append([]metav1.Condition(nil), p.Status.Conditions...)
 	res, digest, err := r.monitor(ctx, p, d, now)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -226,7 +245,8 @@ func (r *PolicyReconciler) reconcileMonitoring(ctx context.Context, p *v1alpha1.
 		if res.RecheckAfter > 0 && res.RecheckAfter < after {
 			after = res.RecheckAfter
 		}
-		if setCondition(p, CondActive, "", now) {
+		monitoringChanged := setCondition(p, CondActive, "", now)
+		if monitoringChanged || !equality.Semantic.DeepEqual(conditionsBefore, p.Status.Conditions) {
 			if err := r.writePolicy(ctx, p); err != nil {
 				return requeueOnConflict(err)
 			}
@@ -245,14 +265,17 @@ func (r *PolicyReconciler) reconcileMonitoring(ctx context.Context, p *v1alpha1.
 func (r *PolicyReconciler) monitor(ctx context.Context, p *v1alpha1.RecoveryPolicy, d *appsv1.Deployment, now time.Time) (classification.Result, string, error) {
 	nodes, err := r.nodes(ctx)
 	if err != nil {
+		delete(r.readiness, client.ObjectKeyFromObject(p))
 		return classification.Result{}, "", err
 	}
 	var rss appsv1.ReplicaSetList
 	if err := r.List(ctx, &rss, client.InNamespace(p.Namespace)); err != nil {
+		delete(r.readiness, client.ObjectKeyFromObject(p))
 		return classification.Result{}, "", err
 	}
 	var pods corev1.PodList
 	if err := r.List(ctx, &pods, client.InNamespace(p.Namespace)); err != nil {
+		delete(r.readiness, client.ObjectKeyFromObject(p))
 		return classification.Result{}, "", err
 	}
 	// Deployment revision metadata can lag a new template. An old ReplicaSet
@@ -273,6 +296,7 @@ func (r *PolicyReconciler) monitor(ctx context.Context, p *v1alpha1.RecoveryPoli
 		Pods:        monitored,
 		Nodes:       nodes,
 		Restarts:    r.observeRestarts(key, monitored, now, p.Spec.Detection.RestartWindow.Duration),
+		HealthyPods: r.observeReadiness(p, d, monitored, nodes, now),
 	}), digest, nil
 }
 
@@ -411,6 +435,9 @@ func incidentFor(p *v1alpha1.RecoveryPolicy, live *appsv1.Deployment) *v1alpha1.
 			Deadline: metav1.NewTime(a.ReservedAt.Add(p.Spec.Budget.IncidentDeadline.Duration).Truncate(time.Second)),
 		},
 	}
+	if binding := executionGrantBinding(p); binding != "" {
+		inc.Annotations = map[string]string{ExecutionGrantBindingAnnotation: binding}
+	}
 	return inc
 }
 
@@ -544,6 +571,10 @@ func (r *PolicyReconciler) progress(ctx context.Context, p *v1alpha1.RecoveryPol
 		}
 		switch inc.Spec.Trigger.Class {
 		case classification.ClassInfrastructure:
+		case classification.ClassApplication:
+			if !classification.IsPodReadinessTrigger(inc.Spec.Trigger) || !classification.PodReadinessEnabled(inc.Spec.Policy.Detection) {
+				return r.finish(ctx, p, inc, PhaseManualRequired, ReasonClassNotAutomated, "", now)
+			}
 		case classification.ClassUnknown:
 			return r.finish(ctx, p, inc, PhaseManualRequired, ReasonInsufficientEvidence, "", now)
 		default:
@@ -624,6 +655,9 @@ func (r *PolicyReconciler) decide(ctx context.Context, p *v1alpha1.RecoveryPolic
 	}
 	if !classification.TriggerPersists(inc.Spec.Trigger, nodes) {
 		return v1alpha1.RecoveryDecision{}, candidates.Input{}, true, nil
+	}
+	if persists, err := r.readinessTrigger(ctx, inc, false); err != nil || !persists {
+		return v1alpha1.RecoveryDecision{}, candidates.Input{}, !persists && err == nil, err
 	}
 	spec := inc.Spec.Policy
 	sel, err := metav1.LabelSelectorAsSelector(&spec.CandidateSelector)

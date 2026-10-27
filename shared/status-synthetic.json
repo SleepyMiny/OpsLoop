@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "source": "observed",
+  "collectedAt": 1800000000000,
+  "sources": {
+    "kubernetes": {
+      "state": "ok",
+      "observedAt": 1800000000000,
+      "errorCode": null
+    },
+    "prometheus": {
+      "state": "ok",
+      "observedAt": 1800000000000,
+      "errorCode": null
+    }
+  },
+  "nodes": [
+    {
+      "id": "control",
+      "site": "laptop-vm",
+      "os": "linux",
+      "arch": "amd64",
+      "readiness": "Ready",
+      "readyObservedAt": 1799999999000,
+      "cpu": {
+        "value": 0.25,
+        "observedAt": 1799999998000
+      },
+      "memory": {
+        "value": 0.5,
+        "observedAt": 1799999998000
+      },
+      "exporter": {
+        "value": 1,
+        "observedAt": 1799999998000
+      }
+    },
+    {
+      "id": "physical",
+      "site": "physical-server",
+      "os": "linux",
+      "arch": "amd64",
+      "readiness": "Ready",
+      "readyObservedAt": 1799999999000,
+      "cpu": {
+        "value": 0.25,
+        "observedAt": 1799999998000
+      },
+      "memory": {
+        "value": 0.5,
+        "observedAt": 1799999998000
+      },
+      "exporter": {
+        "value": 1,
+        "observedAt": 1799999998000
+      }
+    },
+    {
+      "id": "cloud",
+      "site": "azure-vm",
+      "os": "linux",
+      "arch": "arm64",
+      "readiness": "Ready",
+      "readyObservedAt": 1799999999000,
+      "cpu": {
+        "value": 0.25,
+        "observedAt": 1799999998000
+      },
+      "memory": {
+        "value": 0.5,
+        "observedAt": 1799999998000
+      },
+      "exporter": {
+        "value": 1,
+        "observedAt": 1799999998000
+      }
+    }
+  ],
+  "workloads": [
+    {
+      "id": "controller",
+      "desired": 1,
+      "ready": 1,
+      "observedAt": 1800000000000
+    },
+    {
+      "id": "demo-api",
+      "desired": 1,
+      "ready": 1,
+      "observedAt": 1800000000000
+    }
+  ],
+  "policy": {
+    "mode": "ObserveOnly",
+    "enabled": true,
+    "monitoring": true,
+    "incidentCount": 0,
+    "activeIncidentCount": 0,
+    "observedAt": 1800000000000
+  }
+}

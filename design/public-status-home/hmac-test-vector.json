@@ -1,0 +1,11 @@
+{
+  "testOnly": true,
+  "testOnlyKeyText": "non-secret-offline-test-key",
+  "collector": "home-v1",
+  "keyId": "test-key",
+  "seq": 1,
+  "sentAt": 1800000000000,
+  "rawBodyUtf8": "{\"schemaVersion\":1,\"source\":\"observed\",\"collectedAt\":1800000000000,\"sources\":{\"kubernetes\":{\"state\":\"ok\",\"observedAt\":1800000000000,\"errorCode\":null},\"prometheus\":{\"state\":\"ok\",\"observedAt\":1800000000000,\"errorCode\":null}},\"nodes\":[{\"id\":\"control\",\"site\":\"laptop-vm\",\"os\":\"linux\",\"arch\":\"amd64\",\"readiness\":\"Ready\",\"readyObservedAt\":1799999999000,\"cpu\":{\"value\":0.25,\"observedAt\":1799999998000},\"memory\":{\"value\":0.5,\"observedAt\":1799999998000},\"exporter\":{\"value\":1,\"observedAt\":1799999998000}},{\"id\":\"physical\",\"site\":\"physical-server\",\"os\":\"linux\",\"arch\":\"amd64\",\"readiness\":\"Ready\",\"readyObservedAt\":1799999999000,\"cpu\":{\"value\":0.25,\"observedAt\":1799999998000},\"memory\":{\"value\":0.5,\"observedAt\":1799999998000},\"exporter\":{\"value\":1,\"observedAt\":1799999998000}},{\"id\":\"cloud\",\"site\":\"azure-vm\",\"os\":\"linux\",\"arch\":\"arm64\",\"readiness\":\"Ready\",\"readyObservedAt\":1799999999000,\"cpu\":{\"value\":0.25,\"observedAt\":1799999998000},\"memory\":{\"value\":0.5,\"observedAt\":1799999998000},\"exporter\":{\"value\":1,\"observedAt\":1799999998000}}],\"workloads\":[{\"id\":\"controller\",\"desired\":1,\"ready\":1,\"observedAt\":1800000000000},{\"id\":\"demo-api\",\"desired\":1,\"ready\":1,\"observedAt\":1800000000000}],\"policy\":{\"mode\":\"ObserveOnly\",\"enabled\":true,\"monitoring\":true,\"incidentCount\":0,\"activeIncidentCount\":0,\"observedAt\":1800000000000}}",
+  "canonicalUtf8": "OPSLOOP-STATUS-V1\nhttps://opsloop.sleepyminy44.workers.dev\nPOST\n/api/collect/status\nhome-v1\ntest-key\n1\n1800000000000\n2d777e8ff7274dcda91ec89df03ffd3983153452af5bae01e353f538b871f2c8",
+  "signatureHex": "3564c610063df46db95a724a48ac5c57855e238ef275d3c94c7b18da87be7ed1"
+}

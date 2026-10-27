@@ -1,0 +1,20 @@
+{
+  "version": "opsloop-guard/v1",
+  "mode": "live-libvirt",
+  "run": "<RUN_ID>",
+  "epoch": "<NEW_ATTEMPT_EPOCH>",
+  "target": {
+    "uri": "<EXPLICIT_LOCAL_QEMU_URI>",
+    "uuid": "<DEDICATED_TEST_VM_UUID>",
+    "executable": "<ABSOLUTE_PINNED_VIRSH_PATH>",
+    "sha256": "<PINNED_VIRSH_SHA256>"
+  },
+  "allowed": "query-resume-only",
+  "root": "<PRIVATE_EXISTING_ABSOLUTE_GUARD_ROOT>",
+  "owner": {"pid": 0, "boot": "<HOST_BOOT_ID>", "startTicks": "<EXECUTOR_START_TICKS>"},
+  "hardDeadline": "<EXPLICIT_UTC_HARD_DEADLINE>",
+  "authorityExpires": "<EXPLICIT_UTC_RESTORE_AUTHORITY_EXPIRY>",
+  "maxTrialMs": 60000,
+  "heartbeatMs": 1000,
+  "timeoutMs": 500
+}

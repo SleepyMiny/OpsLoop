@@ -18,6 +18,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -206,8 +207,6 @@ func podSummary(p corev1.Pod) Object {
 		role = "observability"
 	case p.Namespace == "opsloop-system":
 		role = "opsloop"
-	case p.Labels["app.kubernetes.io/name"] == "demo-api":
-		role = "demo-api"
 	}
 	ready := false
 	for _, c := range p.Status.Conditions {
@@ -229,6 +228,7 @@ func podSummary(p corev1.Pod) Object {
 // Assemble never creates a historical Incident or substitutes demo data.
 func Assemble(in Input, m candidates.Metrics, at time.Time, metricError bool) (Object, error) {
 	nodes := []Object{}
+	selector, selectorErr := metav1.LabelSelectorAsSelector(in.Deployment.Spec.Selector)
 	sort.Slice(in.Nodes, func(i, j int) bool { return in.Nodes[i].Name < in.Nodes[j].Name })
 	for _, n := range in.Nodes {
 		arch := n.Status.NodeInfo.Architecture
@@ -270,7 +270,13 @@ func Assemble(in Input, m candidates.Metrics, at time.Time, metricError bool) (O
 			if p.Spec.NodeName != n.Name {
 				continue
 			}
-			pods = append(pods, podSummary(p))
+			summary := podSummary(p)
+			// This is a workload presentation grouping, not owner/rollout proof.
+			// Never group a same-name or same-label Pod from another Namespace.
+			if selectorErr == nil && !selector.Empty() && p.Namespace == in.Deployment.Namespace && selector.Matches(labels.Set(p.Labels)) {
+				summary["role"] = "demo-api"
+			}
+			pods = append(pods, summary)
 			if p.Status.Phase != corev1.PodSucceeded && p.Status.Phase != corev1.PodFailed {
 				a, b := candidates.PodRequests(p.Spec)
 				cpu += a
@@ -333,6 +339,9 @@ func Assemble(in Input, m candidates.Metrics, at time.Time, metricError bool) (O
 			continue
 		}
 		record := incident(i)
+		if binding := observedBinding(in.Policy, in.Deployment, i); binding != nil {
+			record["runtimeBinding"] = binding
+		}
 		if a := in.Policy.Status.ActiveIncident; a != nil && a.IncidentUID == string(i.UID) {
 			active = record
 		}

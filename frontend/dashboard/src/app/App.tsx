@@ -16,10 +16,11 @@ import { RealityDialog } from './RealityDialog';
 import { SourceNotice } from './SourceNotice';
 import { RegionBoundary } from './RegionBoundary';
 import styles from './app.module.css';
+import { LiveOverview } from '../m3/LiveOverview';
 
 const NEXT_THEME: Record<Theme, Theme> = { auto: 'dark', dark: 'light', light: 'auto' };
 
-export function App({ source, kiosk, publicView = false }: { source: DashboardDataSource; kiosk: boolean; publicView?: boolean }) {
+export function App({ source, kiosk, publicView = false, integrated = false }: { source: DashboardDataSource; kiosk: boolean; publicView?: boolean; integrated?: boolean }) {
   const { snapshot, status, playback } = useDashboard(source);
   const [theme, setTheme] = useTheme();
   const [realityOpen, setRealityOpen] = useState(false);
@@ -41,8 +42,8 @@ export function App({ source, kiosk, publicView = false }: { source: DashboardDa
   const resetKey = snapshot?.observedAt;
 
   return (
-    <div className={styles.app} data-kiosk={kiosk || undefined} data-idle={idle || undefined}>
-      <Header
+    <div className={styles.app} data-integrated={integrated || undefined} data-kiosk={kiosk || undefined} data-idle={idle || undefined}>
+      {!integrated ? <Header
         publicView={publicView}
         source={source}
         status={status}
@@ -50,9 +51,10 @@ export function App({ source, kiosk, publicView = false }: { source: DashboardDa
         theme={theme}
         onCycleTheme={actions.cycleTheme}
         onOpenReality={() => setRealityOpen(true)}
-      />
+      /> : null}
 
       <SourceNotice publicView={publicView} kind={source.kind} snapshot={snapshot} status={status} />
+      {integrated ? <LiveOverview snapshot={snapshot} status={status} label={source.label} /> : null}
       {snapshot ? (
         <main className={styles.stage}>
           <div className={styles.hero}>

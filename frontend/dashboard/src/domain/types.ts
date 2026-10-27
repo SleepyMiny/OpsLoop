@@ -468,6 +468,8 @@ export interface IncidentEngineeringStatus {
   stages: StageResult[];
   /** Demo shows a placeholder; a real URL only exists after the Publisher ran. */
   pullRequest?: { number: number; title: string; url: string | null; headSha: string };
+  /** Sanitized projection of hash-bound local verification and actual GitHub GET. */
+  evidence?: { bundleSha256: string; resultSha256: string; prReceiptSha256: string; remoteCI: 'NOT_RUN'; model: string; observedAt: string; executionMode: string; runtimeRunID?: string; epoch?: string; policyUID?: string; grantSha256?: string };
 }
 
 export interface IncidentCondition {
@@ -508,6 +510,7 @@ export type IncidentTrigger = (
   | { type: 'RepeatedRestart'; podName: string; restarts?: number; observedAt: number }) & { reason?: string };
 
 export interface RecoveryIncident {
+  uid?: string;
   name: string;
   namespace: string;
   createdAt: number;

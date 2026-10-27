@@ -19,12 +19,15 @@ import (
 )
 
 func main() {
-	listen := flag.String("listen", "127.0.0.1:8090", "Loopback default; external exposure needs separate authorization/authenticated proxy")
-	kube := flag.String("kubeconfig", "", "Server-only kubeconfig; empty uses in-cluster ServiceAccount")
-	endpoint := flag.String("prometheus-url", "", "Server-side Prometheus URL; empty returns missing metrics")
-	ns := flag.String("namespace", "opsloop-demo", "Observed policy namespace")
-	policy := flag.String("policy", "demo-api", "Observed policy")
-	flag.Parse()
+	// Dependencies may register process-global flags during init (including
+	// controller-runtime's kubeconfig). Keep this executable's CLI independent.
+	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	listen := flags.String("listen", "127.0.0.1:8090", "Loopback default; external exposure needs separate authorization/authenticated proxy")
+	kube := flags.String("kubeconfig", "", "Server-only kubeconfig; empty uses in-cluster ServiceAccount")
+	endpoint := flags.String("prometheus-url", "", "Server-side Prometheus URL; empty returns missing metrics")
+	ns := flags.String("namespace", "opsloop-demo", "Observed policy namespace")
+	policy := flags.String("policy", "demo-api", "Observed policy")
+	_ = flags.Parse(os.Args[1:])
 	var cfg *rest.Config
 	var e error
 	if *kube != "" {
@@ -50,7 +53,7 @@ func main() {
 			return candidates.QueryMetrics(ctx, api, t, w)
 		}
 	}
-	server := &http.Server{Addr: *listen, Handler: service, ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second}
+	server := &http.Server{Addr: *listen, Handler: protectLoopbackHost(*listen, service), ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second}
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
 	go func() {

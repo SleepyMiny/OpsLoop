@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "lib": ["ES2022", "DOM"],
+    "module": "ESNext", "moduleResolution": "bundler",
+    "resolveJsonModule": true, "allowSyntheticDefaultImports": true,
+    "strict": true, "noEmit": true, "skipLibCheck": true,
+    "types": []
+  },
+  "include": ["public-status.ts", "../frontend/dashboard/src/status/contract.ts"]
+}

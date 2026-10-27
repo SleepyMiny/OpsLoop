@@ -1,0 +1,21 @@
+{
+  "name": "opsloop",
+  "compatibility_date": "2026-10-20",
+  "main": "../../worker/public-status.ts",
+  "assets": {
+    "directory": "../../frontend/dashboard/dist-status",
+    "binding": "ASSETS",
+    "not_found_handling": "none",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "STATUS_DB",
+      "database_name": "opsloop-public-status",
+      "database_id": "<APPROVED_D1_DATABASE_ID>"
+    }
+  ],
+  "vars": {
+    "PUBLIC_ORIGIN": "https://opsloop.sleepyminy44.workers.dev"
+  }
+}

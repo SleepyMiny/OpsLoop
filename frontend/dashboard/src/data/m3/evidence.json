@@ -1,0 +1,542 @@
+{
+  "schema": "opsloop-m3-evidence/v1",
+  "mode": "historical",
+  "archives": [
+    {
+      "id": "demo-a",
+      "file": "OpsLoop_DemoA_HybridE2E_20261027_030110_KST.zip",
+      "sha256": "c396116dd0670a82c78c2ac9574c0e7a66521739e9f9862b02abd549c0a04ce0",
+      "crc": "PASS",
+      "manifestChecks": [
+        {
+          "path": "source-manifest.json",
+          "checked": 545,
+          "missing": 0,
+          "status": "PASS"
+        },
+        {
+          "path": "runtime-evidence/observer/manifest.json",
+          "checked": 349,
+          "missing": 2058,
+          "status": "PARTIAL",
+          "scope": "Original observer manifest lists a larger collection; this sealed archive intentionally contains selected files only."
+        }
+      ]
+    },
+    {
+      "id": "demo-b",
+      "file": "OpsLoop_DemoB_EngineeringE2E_20261027_064911_KST.zip",
+      "sha256": "43dae1309ebb2b22f29ec48cc8bfef3beebfad51355e2aa92e40d7a0e93e2bee",
+      "crc": "PASS",
+      "manifestChecks": [
+        {
+          "path": "artifact-manifest.json",
+          "checked": 481,
+          "missing": 0,
+          "status": "PASS"
+        },
+        {
+          "path": "incident-evidence/manifest.json",
+          "checked": 1,
+          "missing": 0,
+          "status": "PASS"
+        },
+        {
+          "path": "source-manifest.json",
+          "checked": 406,
+          "missing": 0,
+          "status": "PASS",
+          "scope": "Source snapshot coverage in the archive; source paths absent from the package remain unverified by this check."
+        }
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "id": "demo-a",
+      "title": "Demo A · Runtime Self-Healing",
+      "track": "runtime",
+      "status": "PASS",
+      "scope": "FIRST_ACTUAL_FUNCTIONAL_RUNTIME_SELF_HEALING_ONLY",
+      "binding": {
+        "incidentUID": "e939e078-76e6-418c-92a4-f941818315fb",
+        "runID": "hybrid-readiness-trial-3",
+        "epoch": "hybrid-readiness-epoch-3",
+        "namespace": "opsloop-demo-a",
+        "policyUID": "c556fd15-e1f4-4660-a6ac-dc5edf82d50f",
+        "deploymentUID": "66a708e2-dfd4-44de-8e4e-498c9f764e66",
+        "podUIDs": [
+          "283cf097-712d-4bf5-9056-3285b57c2e54",
+          "00bb7fa5-5e0c-431a-9eb7-de99a10c9266"
+        ]
+      },
+      "outcome": {
+        "runtime": "RECOVERED",
+        "engineering": null,
+        "serviceRecovered": true,
+        "patchedImageDeployed": false,
+        "remoteCI": null,
+        "prURL": null,
+        "prNumber": null,
+        "commitSHA": null
+      },
+      "candidates": [
+        {
+          "node": "opsloop-azure-worker",
+          "nodeUID": "96f91dd4-b96b-4927-90d3-e63b4f319ef1",
+          "platform": "linux/arm64",
+          "eligible": true,
+          "selected": true,
+          "cpuUtilizationPermille": 8,
+          "cpuObservedAt": "2026-10-26T17:47:53Z",
+          "memoryObservedAt": "2026-10-26T17:47:53Z",
+          "memAvailableBytes": 3372441600,
+          "memTotalBytes": 4089188352,
+          "allocatableCPUMilli": 2000,
+          "requestedCPUMilli": 10,
+          "requestedMemoryBytes": 25165824,
+          "newPodCPUMilli": 50,
+          "newPodMemoryBytes": 67108864,
+          "scoreMilli": 89085
+        },
+        {
+          "node": "opsloop-control",
+          "nodeUID": "2c6064f1-5f66-4da7-ae87-0cf71cc2bfaf",
+          "platform": "linux/amd64",
+          "eligible": true,
+          "selected": false,
+          "cpuUtilizationPermille": 66,
+          "cpuObservedAt": "2026-10-26T17:48:05Z",
+          "memoryObservedAt": "2026-10-26T17:48:05Z",
+          "memAvailableBytes": 6177730560,
+          "memTotalBytes": 8322285568,
+          "allocatableCPUMilli": 4000,
+          "requestedCPUMilli": 560,
+          "requestedMemoryBytes": 1312817152,
+          "newPodCPUMilli": 50,
+          "newPodMemoryBytes": 67108864,
+          "scoreMilli": 79680
+        }
+      ],
+      "events": [
+        {
+          "id": "fault",
+          "title": "물리 Worker의 readiness 장애",
+          "at": null,
+          "status": "OBSERVED",
+          "summary": "AMD64 Worker의 기존 Pod readiness 장애가 실제로 관측되었습니다. 정확한 장애 발생 UTC 시각은 이 요약에서 단정하지 않습니다.",
+          "facts": {
+            "podUID": "283cf097-712d-4bf5-9056-3285b57c2e54",
+            "node": "sarmubuntuserver",
+            "outageCorroborated": true
+          },
+          "sources": [
+            {
+              "archive": "demo-a",
+              "path": "verification.json",
+              "sha256": "eb3a3e4571685da6adfe498a51e7eabb391818c84a12c84fce404c53844656ed",
+              "href": "m3-evidence/demo-a/verification.json",
+              "downloadSha256": "f7db9acff5d2c0262fae2afb86590b7149c711f7ab7a644d42b397531fbb60a0",
+              "transformation": "internal-endpoints-removed"
+            }
+          ]
+        },
+        {
+          "id": "detection",
+          "title": "Controller 장애 감지",
+          "at": "2026-10-26T17:48:22Z",
+          "status": "OBSERVED",
+          "summary": "POD_NOT_READY 분류 및 실제 Incident가 생성되었습니다.",
+          "facts": {
+            "incidentUID": "e939e078-76e6-418c-92a4-f941818315fb",
+            "reason": "POD_NOT_READY",
+            "actionID": "demo-api-c556fd15-00001-a1"
+          },
+          "sources": [
+            {
+              "archive": "demo-a",
+              "path": "verification.json",
+              "sha256": "eb3a3e4571685da6adfe498a51e7eabb391818c84a12c84fce404c53844656ed",
+              "href": "m3-evidence/demo-a/verification.json",
+              "downloadSha256": "f7db9acff5d2c0262fae2afb86590b7149c711f7ab7a644d42b397531fbb60a0",
+              "transformation": "internal-endpoints-removed"
+            }
+          ]
+        },
+        {
+          "id": "selection",
+          "title": "자원 기반 후보 선택",
+          "at": "2026-10-26T17:48:22Z",
+          "status": "SELECTED",
+          "summary": "CPU·메모리·요청량·아키텍처를 비교하여 Azure ARM64 Worker를 선택했습니다.",
+          "facts": {
+            "selectedNode": "opsloop-azure-worker",
+            "reason": "SELECTED_HIGHEST_SCORE",
+            "candidateCount": 2
+          },
+          "sources": [
+            {
+              "archive": "demo-a",
+              "path": "verification.json",
+              "sha256": "eb3a3e4571685da6adfe498a51e7eabb391818c84a12c84fce404c53844656ed",
+              "href": "m3-evidence/demo-a/verification.json",
+              "downloadSha256": "f7db9acff5d2c0262fae2afb86590b7149c711f7ab7a644d42b397531fbb60a0",
+              "transformation": "internal-endpoints-removed"
+            }
+          ]
+        },
+        {
+          "id": "patch",
+          "title": "Deployment 변경",
+          "at": null,
+          "status": "OBSERVED",
+          "summary": "Controller action에 연결된 template 변경을 확인했습니다. template 외 spec은 보존되었습니다.",
+          "facts": {
+            "deploymentUID": "66a708e2-dfd4-44de-8e4e-498c9f764e66",
+            "actionID": "demo-api-c556fd15-00001-a1",
+            "beforeTemplateHash": "8011891e6bdabe8ed25360f00ef5d35374671f6fa318718c0c82b4a3fdde2f53",
+            "afterTemplateHash": "bb7a53daf556ba67983e02203e7d526fe32ea62716accb4af88a713673bdbc08",
+            "outsideTemplateUnchanged": true
+          },
+          "sources": [
+            {
+              "archive": "demo-a",
+              "path": "verification.json",
+              "sha256": "eb3a3e4571685da6adfe498a51e7eabb391818c84a12c84fce404c53844656ed",
+              "href": "m3-evidence/demo-a/verification.json",
+              "downloadSha256": "f7db9acff5d2c0262fae2afb86590b7149c711f7ab7a644d42b397531fbb60a0",
+              "transformation": "internal-endpoints-removed"
+            }
+          ]
+        },
+        {
+          "id": "placement",
+          "title": "Scheduler ARM64 배치",
+          "at": "2026-10-26T17:48:23.224Z",
+          "status": "OBSERVED",
+          "summary": "default-scheduler가 새로운 Pod를 Azure Worker에 실제 배치했습니다. 시각은 Observer 관측 시각입니다.",
+          "facts": {
+            "oldPodUID": "283cf097-712d-4bf5-9056-3285b57c2e54",
+            "newPodUID": "00bb7fa5-5e0c-431a-9eb7-de99a10c9266",
+            "node": "opsloop-azure-worker",
+            "architecture": "arm64"
+          },
+          "sources": [
+            {
+              "archive": "demo-a",
+              "path": "verification.json",
+              "sha256": "eb3a3e4571685da6adfe498a51e7eabb391818c84a12c84fce404c53844656ed",
+              "href": "m3-evidence/demo-a/verification.json",
+              "downloadSha256": "f7db9acff5d2c0262fae2afb86590b7149c711f7ab7a644d42b397531fbb60a0",
+              "transformation": "internal-endpoints-removed"
+            }
+          ]
+        },
+        {
+          "id": "endpoint",
+          "title": "Endpoint 전환",
+          "at": null,
+          "status": "OBSERVED",
+          "summary": "새 Pod UID로 Endpoint가 전환된 증거입니다. 마지막 관측 시각을 최초 전환 시각으로 해석하지 않습니다.",
+          "facts": {
+            "readyPodUID": "00bb7fa5-5e0c-431a-9eb7-de99a10c9266",
+            "lastObservedAt": "2026-10-26T17:54:40.691Z"
+          },
+          "sources": [
+            {
+              "archive": "demo-a",
+              "path": "verification.json",
+              "sha256": "eb3a3e4571685da6adfe498a51e7eabb391818c84a12c84fce404c53844656ed",
+              "href": "m3-evidence/demo-a/verification.json",
+              "downloadSha256": "f7db9acff5d2c0262fae2afb86590b7149c711f7ab7a644d42b397531fbb60a0",
+              "transformation": "internal-endpoints-removed"
+            }
+          ]
+        },
+        {
+          "id": "stability",
+          "title": "Service 안정화",
+          "at": null,
+          "status": "RECOVERED",
+          "summary": "직접 Service HTTP 13회 연속 성공, 관측 안정화 구간 32.42초. 장애 감지부터의 총 복구 시간과는 구별합니다.",
+          "facts": {
+            "stableSamples": 13,
+            "stableElapsedMS": 32420,
+            "architecture": "arm64",
+            "podUID": "00bb7fa5-5e0c-431a-9eb7-de99a10c9266"
+          },
+          "sources": [
+            {
+              "archive": "demo-a",
+              "path": "verification.json",
+              "sha256": "eb3a3e4571685da6adfe498a51e7eabb391818c84a12c84fce404c53844656ed",
+              "href": "m3-evidence/demo-a/verification.json",
+              "downloadSha256": "f7db9acff5d2c0262fae2afb86590b7149c711f7ab7a644d42b397531fbb60a0",
+              "transformation": "internal-endpoints-removed"
+            }
+          ]
+        },
+        {
+          "id": "stop",
+          "title": "Guard 안전 종료",
+          "at": null,
+          "status": "STOP_CONFIRMED",
+          "summary": "Policy disabled 및 strong fence를 확인하고 Observer를 정리했습니다. 현재 상태를 의미하지 않습니다.",
+          "facts": {
+            "policyEnabled": false,
+            "generation": 8,
+            "closedThroughGeneration": 8,
+            "observerCleanup": "PASS_OWN_JOB_CONFIGMAP_AND_POD_ABSENT"
+          },
+          "sources": [
+            {
+              "archive": "demo-a",
+              "path": "verification.json",
+              "sha256": "eb3a3e4571685da6adfe498a51e7eabb391818c84a12c84fce404c53844656ed",
+              "href": "m3-evidence/demo-a/verification.json",
+              "downloadSha256": "f7db9acff5d2c0262fae2afb86590b7149c711f7ab7a644d42b397531fbb60a0",
+              "transformation": "internal-endpoints-removed"
+            }
+          ]
+        }
+      ],
+      "limitations": [
+        "과거 기능 E2E PASS이며 현재 Live 상태가 아닙니다.",
+        "runtime-v1 전체 actor/clock 증명 및 실제 전원 차단은 UNPROVEN입니다.",
+        "Observer 원본은 complete-with-gaps이며 ZIP에는 선택한 원본 파일만 포함되어 있습니다.",
+        "일부 이벤트의 정확한 UTC 시각은 제공되지 않아 null로 유지합니다."
+      ]
+    },
+    {
+      "id": "demo-b",
+      "title": "Demo B · Engineering Self-Healing",
+      "track": "engineering",
+      "status": "PASS",
+      "scope": "actual application failure to verified real Codex repair and approved actual GitHub Draft PR; not deployment or runtime service restoration",
+      "binding": {
+        "incidentUID": "219f6a02-b8b0-4c47-b685-db1884d0dbb7",
+        "runID": "demo-b-empty-order-1",
+        "epoch": "demo-b-epoch-1",
+        "namespace": "opsloop-demo-b",
+        "policyUID": "1681e8da-f79a-4c9e-a352-90c6dc598c06",
+        "deploymentUID": "ee1fee32-691b-410f-b632-4221c07c7bf5",
+        "podUIDs": [
+          "a67fad9f-1557-4839-905a-897751d067b5",
+          "f358771c-a474-4acd-8f38-87e502504076"
+        ]
+      },
+      "outcome": {
+        "runtime": "EXHAUSTED",
+        "engineering": "PR_CREATED",
+        "serviceRecovered": false,
+        "patchedImageDeployed": false,
+        "remoteCI": "NOT_RUN",
+        "prURL": "https://github.com/SleepyMiny/OpsLoop/pull/6",
+        "prNumber": 6,
+        "commitSHA": "7e38e2b0196b726140c157b8d51b0fd5d33896da"
+      },
+      "candidates": [],
+      "events": [
+        {
+          "id": "defect",
+          "title": "실제 애플리케이션 결함",
+          "at": "2026-10-26T21:05:54.67751918Z",
+          "status": "HTTP_500",
+          "summary": "빈 주문 요청에서 QUOTE_DIVISION_BY_ZERO가 발생했습니다.",
+          "facts": {
+            "errorCode": "QUOTE_DIVISION_BY_ZERO",
+            "httpStatus": 500,
+            "podUID": "a67fad9f-1557-4839-905a-897751d067b5"
+          },
+          "sources": [
+            {
+              "archive": "demo-b",
+              "path": "incident-evidence/bundle.json",
+              "sha256": "b2c0eb09d308abb8359ee7647d9def3c2381c94e6ea334fe138d6e38d8de572b",
+              "href": "m3-evidence/demo-b/incident-evidence/bundle.json",
+              "downloadSha256": "b2c0eb09d308abb8359ee7647d9def3c2381c94e6ea334fe138d6e38d8de572b",
+              "transformation": "none"
+            }
+          ]
+        },
+        {
+          "id": "runtime",
+          "title": "Runtime 재배치 후 동일 오류",
+          "at": "2026-10-26T21:07:13.301209839Z",
+          "status": "EXHAUSTED",
+          "summary": "실제 Runtime 재시도 후 새 Pod에서도 같은 HTTP 500이 재현되어 budget이 소진되었습니다.",
+          "facts": {
+            "attempts": 1,
+            "actionID": "engineering-demo-1681e8da-00001-a1",
+            "podUID": "f358771c-a474-4acd-8f38-87e502504076",
+            "errorCode": "QUOTE_DIVISION_BY_ZERO"
+          },
+          "sources": [
+            {
+              "archive": "demo-b",
+              "path": "incident-evidence/bundle.json",
+              "sha256": "b2c0eb09d308abb8359ee7647d9def3c2381c94e6ea334fe138d6e38d8de572b",
+              "href": "m3-evidence/demo-b/incident-evidence/bundle.json",
+              "downloadSha256": "b2c0eb09d308abb8359ee7647d9def3c2381c94e6ea334fe138d6e38d8de572b",
+              "transformation": "none"
+            }
+          ]
+        },
+        {
+          "id": "stop",
+          "title": "Guard strong stop",
+          "at": null,
+          "status": "STOP_CONFIRMED",
+          "summary": "Policy disabled와 fence를 확인했습니다. 종료 helper exit 1은 서비스 복구 성공을 뜻하지 않습니다.",
+          "facts": {
+            "generation": 4,
+            "policyEnabled": false,
+            "finishExitCode": 1
+          },
+          "sources": [
+            {
+              "archive": "demo-b",
+              "path": "incident-evidence/runtime-and-stop.json",
+              "sha256": "2ad2672661e3c3a47063832822a2e7b1851e23a9d3b313e4e2df70d1bb585d7b",
+              "href": "m3-evidence/demo-b/incident-evidence/runtime-and-stop.json",
+              "downloadSha256": "2ad2672661e3c3a47063832822a2e7b1851e23a9d3b313e4e2df70d1bb585d7b",
+              "transformation": "none"
+            }
+          ]
+        },
+        {
+          "id": "evidence",
+          "title": "불변 Incident Evidence Bundle",
+          "at": null,
+          "status": "SEALED",
+          "summary": "같은 Incident UID·run·epoch 및 workload UID에 결합된 봉인 증거입니다.",
+          "facts": {
+            "bundleSHA256": "b2c0eb09d308abb8359ee7647d9def3c2381c94e6ea334fe138d6e38d8de572b",
+            "incidentUID": "219f6a02-b8b0-4c47-b685-db1884d0dbb7",
+            "runID": "demo-b-empty-order-1",
+            "epoch": "demo-b-epoch-1"
+          },
+          "sources": [
+            {
+              "archive": "demo-b",
+              "path": "incident-evidence/bundle.json",
+              "sha256": "b2c0eb09d308abb8359ee7647d9def3c2381c94e6ea334fe138d6e38d8de572b",
+              "href": "m3-evidence/demo-b/incident-evidence/bundle.json",
+              "downloadSha256": "b2c0eb09d308abb8359ee7647d9def3c2381c94e6ea334fe138d6e38d8de572b",
+              "transformation": "none"
+            },
+            {
+              "archive": "demo-b",
+              "path": "incident-evidence/manifest.json",
+              "sha256": "5ede697443eeca05c551d4331a61ec1fbbeee20d172f64ef2874d427f3001524",
+              "href": "m3-evidence/demo-b/incident-evidence/manifest.json",
+              "downloadSha256": "5ede697443eeca05c551d4331a61ec1fbbeee20d172f64ef2874d427f3001524",
+              "transformation": "none"
+            }
+          ]
+        },
+        {
+          "id": "luna",
+          "title": "Luna 격리 실행 및 코드 수정",
+          "at": null,
+          "status": "MODEL_EXECUTED",
+          "summary": "실제 gpt-6-luna Medium / ChatGPT 인증 호출 1회. Runtime run과 Engineering job 식별자는 별도로 보존합니다.",
+          "facts": {
+            "model": "gpt-6-luna",
+            "reasoningEffort": "medium",
+            "auth": "chatgpt",
+            "requests": 1,
+            "engineeringJobID": "eb-538d7e73ac924298b148f5b97347baea",
+            "isolation": "bubblewrap-unshare-all+systemd-cgroup",
+            "providerCredentialsInSandbox": false,
+            "changedFiles": "apps/engineering-demo/discount.go, apps/engineering-demo/discount_test.go",
+            "patchSHA256": "6cf6e9c9419921989f3e150bcac67bf9b2225b1bbac1e1ff06df63f769ce6e29"
+          },
+          "sources": [
+            {
+              "archive": "demo-b",
+              "path": "patch-and-tests/actual-run/result.json",
+              "sha256": "5aa79bebd0e9a07f068a273bdda0e523f461fe7b83e17777dea6acd10ca0712f",
+              "href": "m3-evidence/demo-b/patch-and-tests/actual-run/result.json",
+              "downloadSha256": "5aa79bebd0e9a07f068a273bdda0e523f461fe7b83e17777dea6acd10ca0712f",
+              "transformation": "none"
+            },
+            {
+              "archive": "demo-b",
+              "path": "patch-and-tests/actual-run/candidate.patch",
+              "sha256": "6cf6e9c9419921989f3e150bcac67bf9b2225b1bbac1e1ff06df63f769ce6e29",
+              "href": "m3-evidence/demo-b/patch-and-tests/actual-run/candidate.patch",
+              "downloadSha256": "6cf6e9c9419921989f3e150bcac67bf9b2225b1bbac1e1ff06df63f769ce6e29",
+              "transformation": "none"
+            }
+          ]
+        },
+        {
+          "id": "verification",
+          "title": "수정 전 FAIL → 독립 검증 PASS",
+          "at": null,
+          "status": "VERIFIED",
+          "summary": "기존 결함을 독립 재현한 후 후보의 15개 검사를 통과했습니다. ARM64는 교차 빌드이며 native 실행이 아닙니다.",
+          "facts": {
+            "baselineDefectReproduced": true,
+            "checksPassed": 15,
+            "checksTotal": 15,
+            "candidateSourceSHA256": "727dde63c9083df119cebd2903873a6035505578667636b6475aa5544afda002",
+            "nativeARM64": "NOT_RUN"
+          },
+          "sources": [
+            {
+              "archive": "demo-b",
+              "path": "patch-and-tests/actual-run/result.json",
+              "sha256": "5aa79bebd0e9a07f068a273bdda0e523f461fe7b83e17777dea6acd10ca0712f",
+              "href": "m3-evidence/demo-b/patch-and-tests/actual-run/result.json",
+              "downloadSha256": "5aa79bebd0e9a07f068a273bdda0e523f461fe7b83e17777dea6acd10ca0712f",
+              "transformation": "none"
+            }
+          ]
+        },
+        {
+          "id": "pr",
+          "title": "GitHub Draft PR #6",
+          "at": "2026-10-26T21:28:53Z",
+          "status": "PR_CREATED",
+          "summary": "검증한 두 파일을 Draft PR로 제출했습니다. 승인·merge·수정 이미지 배포·현재 서비스 복구와 구별합니다.",
+          "facts": {
+            "prNumber": 6,
+            "prURL": "https://github.com/SleepyMiny/OpsLoop/pull/6",
+            "commitSHA": "7e38e2b0196b726140c157b8d51b0fd5d33896da",
+            "draft": true,
+            "merged": false,
+            "deployed": false,
+            "remoteCI": "NOT_RUN",
+            "prObservedAt": "2026-10-26T21:33:24.432Z"
+          },
+          "sources": [
+            {
+              "archive": "demo-b",
+              "path": "pr-result.json",
+              "sha256": "d66001812d66b7b7d71eb98e49515364ceacb1c779328d74794efac611cdcf50",
+              "href": "m3-evidence/demo-b/pr-result.json",
+              "downloadSha256": "d66001812d66b7b7d71eb98e49515364ceacb1c779328d74794efac611cdcf50",
+              "transformation": "none"
+            },
+            {
+              "archive": "demo-b",
+              "path": "patch-and-tests/receipts/github-pr-observation.json",
+              "sha256": "e38a8b07e67dce73d6e5ded26522e675bfa70bb38b9a83d4f6ab995561f274de",
+              "href": "m3-evidence/demo-b/patch-and-tests/receipts/github-pr-observation.json",
+              "downloadSha256": "b59edaea1c74467fc585c29f143cc23d5d1c9ccfc3af43e8b94f75491d66b90b",
+              "transformation": "allowlisted-pr-receipt"
+            }
+          ]
+        }
+      ],
+      "limitations": [
+        "Engineering E2E PASS 범위는 실제 수정·독립 검증·Draft PR 제출까지입니다.",
+        "기록 당시 결함 Pod는 Running/NotReady였으며 현재 상태는 Live 조회로 확인해야 합니다.",
+        "원격 CI NOT_RUN, 수정 이미지 배포 NOT_RUN, native ARM64 실행 NOT_RUN입니다.",
+        "일부 이벤트의 UTC 시각은 원본 receipt에 없어 null로 유지합니다."
+      ]
+    }
+  ]
+}

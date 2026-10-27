@@ -186,6 +186,8 @@ export type CrdRuntimePhase =
   | 'OBSERVED';
 
 export interface CrdRecoveryIncident {
+  /** BFF-validated execution grant; never inferred from deployment names. */
+  runtimeBinding?: { runID: string; epoch: string; policyUID: string; workloadUID: string; clusterUID: string; namespaceUID: string; grantSha256: string };
   apiVersion?: string;
   kind: 'RecoveryIncident';
   metadata: CrdObjectMeta;

@@ -344,6 +344,7 @@ export function incidentFromCrd(crd: CrdRecoveryIncident, driver?: DriverReport)
       : undefined;
 
   return {
+    uid: crd.metadata.uid,
     name: crd.metadata.name,
     namespace: crd.metadata.namespace ?? '',
     createdAt: optionalTime(crd.metadata.creationTimestamp, 'metadata.creationTimestamp') ?? triggeredAt,

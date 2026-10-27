@@ -1,4 +1,3 @@
-import { displayIncident } from '../../domain/displayIncident';
 import { useMemo } from 'react';
 import { ENGINEERING_PHASE_LABEL, STAGE_LABEL } from '../../domain/labels';
 import type { IncidentCondition, IncidentEngineeringStatus, StageResult } from '../../domain/types';
@@ -14,7 +13,7 @@ import {
   type TrackModel,
   type TrackState,
 } from './engineeringModel';
-import { runtimeAlongside, type RuntimeAlongside } from './runtimeState';
+import { engineeringIncident, runtimeAlongside, type RuntimeAlongside } from './runtimeState';
 import styles from './EngineeringTrack.module.css';
 
 const TRACK_LAMP: Record<TrackState, { tone: LampState; word: string }> = {
@@ -37,10 +36,10 @@ const OUTCOME_WORD: Record<IterationGroup['outcome'], string> = {
 };
 
 export function EngineeringTrack({ snapshot, emphasized }: RegionProps) {
-  const incident = displayIncident(snapshot);
+  const incident = engineeringIncident(snapshot);
   const eng = incident?.status.engineering;
   const block = incident ? engineeringBlock(incident.status.conditions) : null;
-  const runtime = runtimeAlongside(snapshot);
+  const runtime = runtimeAlongside(snapshot, incident);
   const track = useMemo(() => buildTrack(eng), [eng]);
 
   const aside = eng ? <RunReadout eng={eng} track={track} /> : null;
@@ -48,11 +47,13 @@ export function EngineeringTrack({ snapshot, emphasized }: RegionProps) {
   return (
     <Instrument title="Engineering Runner" emphasized={emphasized ?? false} aside={aside}>
       <div className={styles.root} tabIndex={0} role="region" aria-label="Engineering Runner 진행 상황">
-        <Boundary runtime={runtime} />
+        <Boundary runtime={runtime} workloadName={snapshot.workload.name} />
+        {eng?.evidence ? <p className={styles.explain}>{incident === snapshot.activeIncident ? '현재 Incident' : '종료된 Incident 이력'}: {incident?.namespace}/{incident?.name}. Runtime 조치 실패. 현재 정책 {snapshot.policy.spec.enabled ? '활성' : '비활성'}. 실제 Codex {eng.evidence.model}의 코드 응답을 coordinator가 적용하고 독립 검증했습니다. 로컬 검증 통과 · ARM64 교차 빌드만 확인 · 원격 CI 미실행. GitHub 조회 시각: {eng.evidence.observedAt}. 이 표시는 증거의 요약이며 운영 복구를 뜻하지 않습니다.</p> : null}
+        {eng?.evidence ? <details className={styles.explain}><summary>Incident · Runtime 실행 · 증거 연결</summary><dl className={styles.meta}>{Object.entries({ 'Incident UID': incident?.uid, 'Runtime run ID': eng.evidence.runtimeRunID, epoch: eng.evidence.epoch, 'Policy UID': eng.evidence.policyUID, 'Grant SHA-256': eng.evidence.grantSha256, 'Bundle SHA-256': eng.evidence.bundleSha256, '검증 result SHA-256': eng.evidence.resultSha256, 'PR receipt SHA-256': eng.evidence.prReceiptSha256 }).map(([name, value]) => <div key={name}><dt>{name}</dt><dd><code>{value ?? '미확인'}</code></dd></div>)}</dl></details> : null}
         {eng ? (
           <Run eng={eng} track={track} />
         ) : snapshot.source !== 'demo' ? (
-          <p className={styles.explain}>Engineering Runner·자동 수정·PR 생성은 미구현입니다. 이 관측 기록에서 Engineering 작업을 실행하지 않았습니다.</p>
+          <p className={styles.explain}>이 관측 기록에 연결된 검증 가능한 Engineering 실행 결과가 없습니다.</p>
         ) : (
           <NotStarted track={track} block={block} />
         )}
@@ -77,13 +78,13 @@ function RunReadout({ eng, track }: { eng: IncidentEngineeringStatus; track: Tra
 // ---------------------------------------------------------------------------
 
 /** Always visible: what a pull request does and does not mean. */
-function Boundary({ runtime }: { runtime: RuntimeAlongside }) {
+function Boundary({ runtime, workloadName }: { runtime: RuntimeAlongside; workloadName: string }) {
   return (
     <ul className={styles.plate} aria-label="Engineering의 경계">
       <li className={styles.plateRuntime}>
         <Lamp state={runtime.tone} label={RUNTIME_WORD[runtime.tone]} />
         <span>
-          <strong>Demo API</strong> {runtime.state} <EnumCode>{runtime.fact}</EnumCode>
+          <strong>{workloadName}</strong> {runtime.state} <EnumCode>{runtime.fact}</EnumCode>
         </span>
       </li>
       <li>PR 생성은 서비스 복구가 아닙니다</li>
@@ -212,7 +213,7 @@ function PullRequest({ pr }: { pr: IncidentEngineeringStatus['pullRequest'] }) {
         <span className={styles.prNumber}>{pr ? (pr.number > 0 ? `#${pr.number}` : '번호 없음') : '준비 중'}</span>
         {pr ? (
           <span className={styles.prNote}>
-            {pr.url === null ? 'Demo: 실제 GitHub PR은 만들지 않았습니다' : <EnumCode>{pr.url}</EnumCode>}
+            {pr.url === null ? 'Demo: 실제 GitHub PR은 만들지 않았습니다' : <a href={pr.url} target="_blank" rel="noopener noreferrer">{pr.url}</a>}
           </span>
         ) : null}
       </p>

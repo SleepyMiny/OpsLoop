@@ -28,10 +28,26 @@ func main() {
 }
 
 func run(args []string, stdout io.Writer) error {
+	return runWithObserverClock(args, stdout, observerWallClock{})
+}
+
+func runWithObserverClock(args []string, stdout io.Writer, clock observerClock) error {
 	if len(args) == 0 {
-		return errors.New("usage: demo-driver probe|report|summarize ...")
+		return errors.New("usage: demo-driver probe|report|summarize|observe|finish-run|guard|finalize-run ...")
 	}
 	switch args[0] {
+	case "guard-workload":
+		return runWorkloadGuard(args[1:], stdout)
+	case "finish-workload":
+		return runWorkloadFinish(args[1:], stdout)
+	case "finalize-run":
+		return runFinalize(args[1:], stdout)
+	case "guard":
+		return runGuard(args[1:], stdout)
+	case "finish-run":
+		return runFinish(args[1:], stdout)
+	case "observe":
+		return runObserve(args[1:], stdout, clock)
 	case "probe":
 		return runProbe(args[1:])
 	case "report":
@@ -87,7 +103,7 @@ func runProbe(args []string) error {
 
 // newProbeClient dials per request: a kept-alive connection stays conntrack-pinned to the old Pod after it leaves the Endpoints.
 func newProbeClient(timeout time.Duration) *http.Client {
-	return &http.Client{Timeout: timeout, Transport: &http.Transport{DisableKeepAlives: true}}
+	return &http.Client{Timeout: timeout, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }, Transport: &http.Transport{DisableKeepAlives: true}}
 }
 
 func probeOnce(ctx context.Context, client *http.Client, url string, start time.Time) (rec ProbeRecord) {
@@ -127,6 +143,8 @@ func probeOnce(ctx context.Context, client *http.Client, url string, start time.
 
 func runReport(args []string, stdout io.Writer) error {
 	fl := flag.NewFlagSet("report", flag.ContinueOnError)
+	acceptance := fl.String("acceptance", "", "runtime-v1 (explicit offline v2 mode)")
+	evidencePath := fl.String("evidence", "", "versioned runtime evidence JSON")
 	probePath := fl.String("probe", "", "probe.jsonl")
 	incidentPath := fl.String("incident", "", "incident.json")
 	podsPath := fl.String("pods", "", "pods.json")
@@ -170,6 +188,63 @@ func runReport(args []string, stdout io.Writer) error {
 			in.PlatformDigests = append(in.PlatformDigests, d)
 		}
 	}
+	if *acceptance != "" && *acceptance != "runtime-v1" {
+		return fmt.Errorf("unsupported acceptance mode %q", *acceptance)
+	}
+	if *acceptance == "runtime-v1" {
+		if *evidencePath == "" {
+			return errors.New("report: runtime-v1 requires -evidence")
+		}
+		e, err := readEvidence(*evidencePath)
+		if err != nil {
+			return err
+		}
+		in.SourceHashes = map[string]string{}
+		for _, src := range []struct {
+			role, path string
+			value      any
+		}{
+			{"probe", *probePath, nil}, {"incident", *incidentPath, &in.Incident}, {"pods", *podsPath, &in.Pods}, {"env", *envPath, &in.Env},
+		} {
+			b, err := boundedFile(src.path)
+			if err != nil {
+				return err
+			}
+			in.SourceHashes[src.role] = digestBytes(b)
+			if src.value != nil {
+				if err := strictDecode(b, src.value, false); err != nil {
+					return fmt.Errorf("malformed %s: %w", src.role, err)
+				}
+			} else {
+				in.Probe, err = ReadProbe(strings.NewReader(string(b)))
+				if err != nil {
+					return err
+				}
+			}
+		}
+		result := Acceptance(in, e)
+		b, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(*out, append(b, '\n'), 0644); err != nil {
+			return err
+		}
+		verdict := "PASS"
+		if !result.OverallPass {
+			verdict = "FAIL/UNPROVEN"
+		}
+		if _, err := fmt.Fprintf(stdout, "%s %s %s\n", verdict, result.Scenario, *out); err != nil {
+			return err
+		}
+		if !result.OverallPass {
+			return errors.New("runtime-v1 acceptance FAIL/UNPROVEN; structured result written")
+		}
+		return nil
+	}
+	if *evidencePath != "" {
+		return errors.New("-evidence requires -acceptance runtime-v1")
+	}
 	pf, err := os.Open(*probePath)
 	if err != nil {
 		return err
@@ -201,7 +276,7 @@ func runReport(args []string, stdout io.Writer) error {
 }
 
 func readJSON(path string, v any) error {
-	b, err := os.ReadFile(path)
+	b, err := boundedFile(path)
 	if err != nil {
 		return err
 	}
@@ -214,20 +289,49 @@ func readJSON(path string, v any) error {
 // summarize prints every summary.json under dir as a markdown table plus per-scenario totals.
 func summarize(dir string, w io.Writer) error {
 	var rows []Summary
+	var runtimeRows []AcceptanceResult
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || d.Name() != "summary.json" {
 			return err
 		}
-		var s Summary
-		if err := readJSON(path, &s); err != nil {
+		b, err := boundedFile(path)
+		if err != nil {
 			return err
 		}
-		rows = append(rows, s)
+		var header struct {
+			SchemaVersion string `json:"schemaVersion"`
+		}
+		if err := strictDecode(b, &header, false); err != nil {
+			return err
+		}
+		switch header.SchemaVersion {
+		case summarySchemaVersion:
+			var s Summary
+			if err := strictDecode(b, &s, false); err != nil {
+				return err
+			}
+			rows = append(rows, s)
+		case acceptanceVersion:
+			var s AcceptanceResult
+			if err := strictDecode(b, &s, true); err != nil {
+				return err
+			}
+			if s.Acceptance != "runtime-v1" || (s.EvidenceKind != "synthetic" && s.EvidenceKind != "observed") {
+				return fmt.Errorf("invalid v2 summary classification")
+			}
+			if s.OverallPass && (s.ServiceRecovery.Status != "PASS" || s.Attribution.Status != "PASS" || s.Cleanup.Status != "PASS") {
+				return fmt.Errorf("inconsistent v2 overallPass")
+			}
+			runtimeRows = append(runtimeRows, s)
+		default:
+			return fmt.Errorf("unsupported summary version %q", header.SchemaVersion)
+		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
+	fmt.Fprintln(w, "Legacy v1 (not Runtime acceptance):")
 	slices.SortFunc(rows, func(a, b Summary) int {
 		return strings.Compare(a.Scenario+"/"+a.RunID, b.Scenario+"/"+b.RunID)
 	})
@@ -263,6 +367,23 @@ func summarize(dir string, w io.Writer) error {
 			med, mx = fmtSec(&m), fmtSec(&rec[n-1])
 		}
 		fmt.Fprintf(w, "| %s | %d/%d | %s | %s |\n", rows[i].Scenario, pass, j-i, med, mx)
+		i = j
+	}
+	fmt.Fprintln(w, "\nRuntime v2: offline consistency only; independently proven live recoveries: 0")
+	fmt.Fprintln(w, "| evidenceKind | scenario | input PASS/runs |")
+	fmt.Fprintln(w, "| --- | --- | --- |")
+	slices.SortFunc(runtimeRows, func(a, b AcceptanceResult) int {
+		return strings.Compare(a.EvidenceKind+"/"+a.Scenario, b.EvidenceKind+"/"+b.Scenario)
+	})
+	for i := 0; i < len(runtimeRows); {
+		j, passes := i, 0
+		for j < len(runtimeRows) && runtimeRows[j].EvidenceKind == runtimeRows[i].EvidenceKind && runtimeRows[j].Scenario == runtimeRows[i].Scenario {
+			if runtimeRows[j].OverallPass {
+				passes++
+			}
+			j++
+		}
+		fmt.Fprintf(w, "| %s | %s | %d/%d |\n", runtimeRows[i].EvidenceKind, runtimeRows[i].Scenario, passes, j-i)
 		i = j
 	}
 	return nil

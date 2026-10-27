@@ -22,6 +22,15 @@ export function CandidateBoard({ snapshot, emphasized }: RegionProps) {
   const uid = useId();
   const stripId = `${uid}-strip`;
 
+  if (snapshot.source === 'live' && model.kind.startsWith('preview-') && snapshot.workload.platforms.length === 0) {
+    return (
+      <Instrument title="복구 후보 평가" emphasized={emphasized ?? false} className={styles.board}>
+        <p className={styles.empty}>이미지 플랫폼 manifest를 조회하지 않아 현재 후보 적격 여부는 미확인입니다. 아키텍처 불일치로 판정하지 않습니다.</p>
+        <p className={styles.empty}><a href="?source=replay&view=runtime">실제 Controller 후보 선택 기록 보기 →</a></p>
+      </Instrument>
+    );
+  }
+
   return (
     <Instrument
       title="복구 후보 평가"

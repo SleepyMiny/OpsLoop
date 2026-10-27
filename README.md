@@ -4,11 +4,11 @@
 
 OpsLoop는 Kubernetes 장애를 근거 기반 규칙으로 분류하고, 자원 상태를 고려한 Runtime Recovery를 시도하도록 설계된 프로젝트입니다. 운영 단계에서 해결되지 않는 반복 Application Failure만 독립된 Engineering Runner로 넘겨 Evidence 수집, 코드 분석·수정, Build/Test Feedback, Verification, Pull Request 생성으로 연결합니다.
 
-> **현재 상태 (2026-10-20): Hybrid 3노드와 Fence v2 ObserveOnly 실환경 검증 완료.** AMD64 Control VM·물리 Worker와 Azure ARM64 Worker에서 Controller·Demo API·내부 Service·Prometheus를 운영합니다. Digest 고정 이미지와 native AMD64/ARM64 Pull·실행, main 보호·수동 승인 Gate·Azure OIDC·ACR 게시가 검증됐습니다. 현재 건강 상태와 과거 완료 이력은 구분합니다.
+> **실증 기준 (2026-10-27): Demo A 기능 E2E와 Demo B 수정 PR 제출 E2E PASS.** Demo A는 물리 AMD64 Worker의 readiness 장애에서 실제 후보 평가·Azure ARM64 재배치·새 Pod/Endpoint·Service HTTP 13회 연속 정상 응답·32.42초 안정화·Policy disabled gen8을 확인했습니다. 실제 전원 차단과 runtime-v1 전체 actor/clock 증명은 **UNPROVEN**입니다.
 >
-> **IMAGE_PULL / NODE_NOT_READY ObserveOnly 실증 PASS, 시험 리소스 정리 완료.** 이미지 오류는 MANUAL_REQUIRED / CLASS_NOT_AUTOMATED와 Circuit, Azure Worker NodeNotReady는 후보 평가·OBSERVED를 확인했습니다. 두 실험의 attempts는 0이고 Azure Worker 복원은 운영자가 수행했습니다. **Enforce 자동 복구는 실환경 미검증·BLOCKED**, Engineering Runner·자동 수정·PR 파이프라인은 미구현입니다. Node–Deployment 객체 간 원자성 및 partition 중 단일 실행을 보장하지 않습니다.
+> Demo B는 빈 주문 HTTP 500이 Runtime 재배치 뒤에도 재현되어 budget 소진·Guard STOP_CONFIRMED·불변 Evidence Bundle로 연결됐습니다. 실제 `gpt-6-luna` / Medium / ChatGPT 인증 호출 1회, 수정 전 FAIL → 독립 검증 15/15 PASS, [Draft PR #6](https://github.com/SleepyMiny/OpsLoop/pull/6) 생성까지 검증했습니다. **PR_CREATED는 DEPLOYED/RECOVERED가 아닙니다.** 수정본 merge·운영 배포는 하지 않았으며 원격 CI는 확인된 receipt 기준 `NOT_RUN`입니다.
 >
-> **전시 Dashboard:** [Demo / Live / Evidence Replay](frontend/dashboard/README.md)를 명시적으로 구분합니다. [읽기 전용 BFF](cmd/dashboard-bff/main.go)는 Kubernetes/Prometheus 현재 관측을 결합하며 Incident가 없으면 빈 상태를 유지합니다. Replay에는 체크섬 검증 후 허용 필드만 추출한 과거 두 실험 기록을 제공합니다. BFF 및 Dashboard 운영 배포는 별도 승인 대상입니다.
+> **M3 통합 전시:** [설치·실행](docs/m3/deployment-runbook.md), [5~8분 시연](docs/m3/exhibition-runbook.md), [통합 아키텍처](docs/m3/architecture.md)를 사용합니다. 기본 진입점은 봉인된 Demo A/B 기록 Replay이며 Live는 별도 현재 관측입니다. M3 자체 수용 결과는 최종 `acceptance-matrix.md`와 `verification.json`으로 판정합니다. 이 README는 M3 전체 PASS를 선언하지 않습니다.
 
 ## 프로젝트의 중심
 
@@ -46,12 +46,12 @@ flowchart LR
 
 Tailscale 실험망과 Multi-Architecture 이미지를 사용합니다. 이 구성은 **단일 control plane을 가진 실험 환경**이며 Enterprise Production Architecture나 HA를 주장하지 않습니다.
 
-## 계획된 대표 Demo
+## 실증된 대표 Demo
 
-- **Demo A — Node Failure:** Physical Server 장애 후, CPU·Memory 상태에 따라 Laptop VM 또는 Azure ARM64 Node를 선택합니다. 후보별 reject reason과 실제 HTTP 복구를 검증합니다.
-- **Demo B — Application Failure:** 고정 입력으로 Application Crash를 반복 재현합니다. Runtime 예산 소진, Evidence 보존, workload 격리, Engineering Feedback loop를 거쳐 검증된 PR을 생성합니다.
+- **Demo A — Runtime Self-Healing:** 전용 `opsloop-demo-a/demo-api`의 readiness 장애 → Controller 자원 평가 → Azure ARM64 Worker 선택 → Deployment 변경 → Scheduler 배치 → 직접 Service 복구 → 안전 종료. 전체 물리 서버 전원 차단 시험과 구분합니다.
+- **Demo B — Engineering Self-Healing:** 전용 `opsloop-demo-b/engineering-demo`의 `QUOTE_DIVISION_BY_ZERO` → 실제 Runtime 시도 소진 → Evidence → 격리 Runner의 실제 AI 수정 → 독립 검증 → Draft PR. 기존 결함 소스와 이미지는 실증 기준점으로 보존합니다.
 
-Demo A는 Controller의 Enforce 경로와 하네스(`cmd/demo-driver`, `demos/node-failure/run.sh`, [runbook](demos/node-failure/README.md))를 구현했지만 라이브 실행과 5회 반복 측정은 하지 않았습니다. Demo B는 구현하지 않았습니다.
+과거 ObserveOnly 기록과 원본 Demo A/B 증거를 보존합니다. 전시 Replay나 모드 전환은 장애 주입·Enforce·배포를 수행하지 않습니다. 실환경 재실행에는 대상 UID·기한·횟수·복원 경로를 고정한 별도 승인이 필요합니다.
 
 ## 핵심 설계 결정
 
@@ -61,12 +61,16 @@ Demo A는 Controller의 Enforce 경로와 하네스(`cmd/demo-driver`, `demos/no
 - `RecoveryPolicy`, `RecoveryIncident` 두 CRD에 정책과 영속 상태를 보관합니다.
 - 초기 지원 대상은 replica 1개의 stateless Deployment 한 개입니다. partition 중 중복 실행을 허용하며 fencing을 보장하지 않습니다.
 - Engineering Runner는 Controller와 별도 실행하며 Codex에 운영 자격 증명과 PR 게시 권한을 제공하지 않습니다.
-- 검증은 모든 브랜치에서 수행하되 ACR 게시 권한은 보호된 main에만 부여합니다.
+- 로컬 검증과 GitHub Actions 실행을 구분합니다. CI workflow 게시·Git push·ACR 이미지 게시·운영 배포는 각각 별도 승인 대상입니다.
 
 ## 문서와 개발 진입점
 
 | 문서 | 용도 |
 | --- | --- |
+| [M3 통합 아키텍처](docs/m3/architecture.md) | 현재 Runtime·Engineering·Live·Replay 연결과 증명 경계 |
+| [M3 설치·운영](docs/m3/deployment-runbook.md) | 고정 도구, 로컬 빌드·검증, 읽기 전용 Live, 장비 이전 |
+| [M3 전시 Runbook](docs/m3/exhibition-runbook.md) | 5~8분 시연, 실제 PR, 오프라인 Replay 대체 |
+| [Git 통합 계획](docs/m3/git-integration-plan.md) | 미커밋 소스 보존과 main 반영 검토 구조 |
 | [Architecture v0.1](docs/architecture/architecture-v0.1.md) | 기준 Architecture, 상태 머신, Contract, 보안·검증·제약 |
 | [Implementation Plan](docs/implementation-plan.md) | P0~P8 순서와 Phase별 Definition of Done |
 | [ADR-001: 단일 k3s control plane](docs/adr/ADR-001-k3s-single-control-plane.md) | control plane, datastore, SPOF 결정 |
@@ -87,17 +91,17 @@ Demo A는 Controller의 Enforce 경로와 하네스(`cmd/demo-driver`, `demos/no
 
 2026-10-13의 Azure Saved Plan·미구축 기록은 역사적 준비 기록입니다. 현재 배포·실증 상태는 위 요약 및 Dashboard의 증거 출처를 우선합니다.
 
-현재 Subscription Budget **`opsloop-monthly-budget`은 월 27,000 KRW**이며 Actual 80%·Actual 100%·Forecasted 100% 알림이 설정됐고 **Spending Limit은 On**입니다. 이는 이번 독립 감사 수정 요청에서 제공한 현재 상태이며 외부 재조회는 하지 않았습니다. 이전 Budget 미생성·KRW 금액 미확정 기록은 역사적 기록입니다. 이메일·Subscription ID는 공개 문서에 기록하지 않습니다. Budget은 알림이며 48시간 종료 타이머를 대신하지 않습니다. [최신 상태와 남은 운영 조건](docs/experiments/p1-d-azure-backend-initialization.md#11-p1-독립-감사-후-현재-상태).
+과거 소유자 제공 기록에는 Subscription Budget **`opsloop-monthly-budget` 월 27,000 KRW**, Actual 80%·Actual 100%·Forecasted 100% 알림과 **Spending Limit On**이 명시돼 있습니다. M3에서 현재 비용·Budget 상태를 재조회하지 않았으므로 운영 전 소유자가 확인해야 합니다. 이전 Budget 미생성·KRW 금액 미확정 기록은 역사적 기록입니다. 이메일·Subscription ID는 공개 문서에 기록하지 않습니다. Budget은 알림이며 48시간 종료 타이머를 대신하지 않습니다. [최신 상태와 남은 운영 조건](docs/experiments/p1-d-azure-backend-initialization.md#11-p1-독립-감사-후-현재-상태).
 
 [관측 values](infra/observability/kube-prometheus-stack.values.yaml)는 기존 수동 배포 파일이며 chart `91.8.1`, release `opsloop-mon`, namespace `monitoring` 기준입니다. 읽기 전용 검증은 `python3 scripts/verify-platform.py --help`, Azure 조사·배포 전 조건 확인은 `python3 scripts/azure-arm64-survey.py --help`에서 시작합니다. [플랫폼 runbook](docs/runbooks/p1-platform-preparation.md)과 [Azure 배포 준비 절차](docs/runbooks/azure-arm64-deployment.md)에 승인 경계·state·bootstrap·cleanup을 기록합니다. 관리자 kubeconfig `~/.kube/opsloop.yaml`은 출력·복사·Git 추적하지 않습니다.
 
 ## 남은 실증 및 운영 조건
 
-- Enforce 자동 재배치·HTTP 복구 검증은 별도 안전 승인과 배포 전환이 필요합니다. ObserveOnly의 후보 선택 성공을 자동 복구 성공으로 간주하지 않습니다.
-- 장기 인증 대신 최소 repository-scoped ACR Pull 인증을 사용하며, 초기 30일 토큰의 회전·만료 확인이 필요합니다.
-- BFF 운영 배포에는 읽기 전용 ServiceAccount/RBAC와 비공개 same-origin 접근 경계가 필요합니다. 준비한 RBAC는 자동 적용하지 않습니다.
-- Live 후보 미리보기의 Registry platform index, 외부 HTTP probe/복구 시간 수집, Engineering Runner는 아직 연결하지 않았습니다.
-- NodeNotReady 실증 증거를 전시 Replay로 활용합니다. 기존 `run.sh`의 NodePort·물리 서버 장애 전제를 현재 ClusterIP 운영 환경에 그대로 적용하지 않습니다.
+- Demo A 기능 E2E 범위를 전원 차단 내성이나 runtime-v1 전체 증명으로 확대하지 않습니다. `archgram`은 실제 Control Plane VM을 호스팅하므로 전원 차단 때 원격 API PATCH·strong stop 확인이 불가능한 한계가 남습니다.
+- Demo B 수정본은 PR 제출까지입니다. [선택적 ARM64 릴리스 검증 계획](docs/m3/optional-arm64-release-plan.md)의 commit·digest·대상·복원 조건을 확정하고 승인받기 전 배포하지 않습니다.
+- BFF의 기존 RBAC 예제는 `opsloop-demo`용이며 Demo A/B Namespace 권한을 자동 부여하지 않습니다. 운영 설치나 scope 확대는 별도 승인 대상입니다.
+- Live BFF는 Registry platform index와 직접 Service HTTP probe를 수집하지 않습니다. 결측 지표·미확인 Guard 상태를 healthy나 0으로 대체하지 않습니다.
+- ACR Pull 자격 증명의 유효기간·회전, Azure 비용과 VM 종료는 소유자가 별도로 관리합니다. 과거 비용·건강 상태 기록은 현재 상태를 보장하지 않습니다.
 
 ## 기술 범위와 제외 범위
 
