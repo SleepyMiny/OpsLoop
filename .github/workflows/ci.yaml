@@ -44,6 +44,10 @@ jobs:
         run: |
           KUBEBUILDER_ASSETS="$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.2 use 1.35.0 --bin-dir "$RUNNER_TEMP/envtest" -p path)"
           export KUBEBUILDER_ASSETS
+          cli="$RUNNER_TEMP/demo-driver"
+          go build -o "$cli" ./cmd/demo-driver
+          export P2C_CLI="$cli" P2D_CLI="$cli" P2E_CLI="$cli" P2F_CLI="$cli"
+          export P3B_CLI="$cli" WORKLOAD_SAFETY_CLI="$cli"
           OPSLOOP_REQUIRE_ENVTEST=1 go test -timeout=45m ./...
       - name: Demo A reset safety (mock only)
         run: |

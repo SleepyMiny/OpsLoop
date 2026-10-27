@@ -187,7 +187,13 @@ class SandboxAndLedgerTests(unittest.TestCase):
             self.assertNotIn("--bind", argv)
             self.assertNotIn("/broker", argv)
             self.assertNotIn("/var/run/docker.sock", argv)
-            self.assertNotIn(str(Path.home()), argv)
+            # A sandbox-created HOME may share the host's pathname (GitHub CI).
+            # Check actual host bind sources/destinations, not all argv strings.
+            mounts = [(argv[i + 1], argv[i + 2]) for i, arg in enumerate(argv) if arg == "--ro-bind"]
+            allowed = [("/usr", "/usr"), (str(root), "/workspace"), (str(root), "/opt/go")]
+            allowed += [(p, p) for p in ("/bin", "/sbin", "/lib", "/lib64")
+                        if Path(p).is_dir() and not Path(p).is_symlink()]
+            self.assertCountEqual(mounts, allowed)
 
     def test_cgroup_is_mandatory_and_has_whole_group_kill(self):
         argv = systemd_argv("opsloop-eb-unit", ["/usr/bin/true"], Limits())
