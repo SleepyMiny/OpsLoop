@@ -289,8 +289,13 @@ def prepare(run_dir, *, result_sha256, review_path, review_sha256, target_path, 
         "The coordinator applied those exact returned bytes; the independent verifier tested a frozen copy.\n\n"
         "Model: `gpt-6-luna`; reasoning: `medium`; authentication: existing ChatGPT account. "
         + request_summary +
-        "The repair returns a zero-valued quote when item count is zero and adds nil/empty-slice unit tests.\n\n"
+        "The reviewed model proposal changes the two files listed below. "
+        "The exact patch and candidate hashes identify its implementation and regression tests.\n\n"
         "Changed paths:\n" + "".join(f"- `{p}`\n" for p in candidate_info["changed_paths"]) + "\n"
+        "Reviewed candidate files (SHA-256):\n" + "".join(
+            f"- `{path}`: `{candidate_info['source_files'][path]}`\n" for path in candidate_info["changed_paths"]) + "\n"
+        "Passed independent checks:\n" + "".join(
+            f"- `{check['name']}`\n" for check in result["candidate_verification"]["report"]["checks"]) + "\n"
         "Before the change, the fixed empty-order reproduction failed while the other required checks passed. "
         "After the change, all 15 independent checks passed: reproduction, normal and boundary inputs, unit tests, "
         "static analysis, AMD64 build, ARM64 cross-build, startup and health. ARM64 cross-build is not native ARM64 execution.\n\n"
