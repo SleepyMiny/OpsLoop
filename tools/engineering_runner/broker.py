@@ -40,7 +40,7 @@ class BrokerLimits:
 
 class ModelBroker:
     def __init__(self, directory: Path, auth_path: Path, model: str, mode: str,
-                 limits: BrokerLimits = BrokerLimits(), *, reasoning_effort: str = "medium"):
+                 limits: BrokerLimits = BrokerLimits(), *, reasoning_effort: str = "medium", cancel_event=None, on_request=None):
         limits.validate()
         if mode not in ("chatgpt", "api") or not model or len(model) > 80:
             raise Rejected("unsupported model or authentication mode")
@@ -48,13 +48,19 @@ class ModelBroker:
             raise Rejected("only the approved medium reasoning effort is allowed")
         self.directory, self.model, self.mode, self.limits = directory, model, mode, limits
         self.reasoning_effort = reasoning_effort
+        self.cancel_event = cancel_event
+        self.on_request = on_request
         self.capability = secrets.token_urlsafe(32)
         self._auth = self._read_auth(auth_path)
         self.started = time.monotonic()
         self.requests = self.connections = self.input_bytes = self.output_bytes = 0
+        self.dispatched_requests = 0
         self.errors = {}
         self._lock = threading.Lock()
         self._server = self._thread = None
+        self._active_connection = None
+        self._watcher_stop = threading.Event()
+        self._watcher = None
 
     def _read_auth(self, path):
         try:
@@ -110,16 +116,26 @@ class ModelBroker:
         self._server.timeout = 1
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
+        if self.cancel_event is not None:
+            self._watcher = threading.Thread(target=self._watch_cancel, daemon=True)
+            self._watcher.start()
         return self
 
     def __exit__(self, *unused):
-        self._server.shutdown()
-        self._server.server_close()
-        self._thread.join(timeout=3)
-        self._auth = None
+        try:
+            # Keep cancellation active until the current provider handler has exited.
+            self._server.shutdown()
+            self._server.server_close()
+            self._thread.join(timeout=3)
+        finally:
+            self._watcher_stop.set()
+            if self._watcher:
+                self._watcher.join(timeout=1)
+            self._auth = None
 
     def handle(self, handler):
         try:
+            self._check_cancelled()
             if handler.path != "/v1/responses" or handler.headers.get("Transfer-Encoding"):
                 raise Rejected("endpoint not allowed")
             if handler.headers.get_all("Authorization") != ["Bearer " + self.capability]:
@@ -154,6 +170,7 @@ class ModelBroker:
             body["stream"] = True
             encoded = canonical(body)
             with self._lock:
+                self._check_cancelled()
                 if (time.monotonic() - self.started >= self.limits.wall_seconds
                         or self.requests >= self.limits.requests
                         or self.input_bytes + len(encoded) > self.limits.total_input_bytes
@@ -174,6 +191,8 @@ class ModelBroker:
         host, path = ("chatgpt.com", "/backend-api/codex/responses") if self.mode == "chatgpt" else ("api.openai.com", "/v1/responses")
         remaining = max(1, self.limits.wall_seconds - int(time.monotonic() - self.started))
         connection = http.client.HTTPSConnection(host, timeout=min(15, remaining), context=ssl.create_default_context())
+        with self._lock:
+            self._active_connection = connection
         headers = {"Authorization": "Bearer " + self._auth[0], "Content-Type": "application/json",
                    "Accept": "text/event-stream", "User-Agent": "codex_cli_rs/0.164.0 (OpsLoop broker)",
                    "originator": "codex_cli_rs"}
@@ -181,7 +200,19 @@ class ModelBroker:
             headers["ChatGPT-Account-Id"] = self._auth[1]
         try:
             # http.client ignores proxy environment variables and never follows redirects.
+            self._check_cancelled()
+            # DNS/TCP/TLS can block while HTTPSConnection.sock is still None.
+            # Never let a completed connection dispatch a POST after stop/expiry.
+            connection.connect()
+            self._check_cancelled()
+            if time.monotonic() - self.started >= self.limits.wall_seconds:
+                raise Rejected("model request deadline")
+            self._check_cancelled()
             connection.request("POST", path, body=encoded, headers=headers)
+            self.dispatched_requests += 1
+            if self.on_request:
+                self.on_request()
+            self._check_cancelled()
             upstream = connection.getresponse()
             if upstream.status != 200:
                 self.record_error("upstream_status_" + str(upstream.status))
@@ -193,6 +224,7 @@ class ModelBroker:
             handler.end_headers()
             pending = b""
             while True:
+                self._check_cancelled()
                 if time.monotonic() - self.started >= self.limits.wall_seconds:
                     raise Rejected("model stream deadline")
                 available = self.limits.total_output_bytes - self.output_bytes
@@ -218,10 +250,32 @@ class ModelBroker:
                     handler.wfile.flush()
         finally:
             connection.close()
+            with self._lock:
+                self._active_connection = None
+
+    def _watch_cancel(self):
+        while not self._watcher_stop.wait(0.05):
+            if self.cancel_event.is_set():
+                with self._lock:
+                    connection = self._active_connection
+                if connection is not None:
+                    sock = connection.sock
+                    if sock is not None:
+                        try:
+                            sock.shutdown(socket.SHUT_RDWR)
+                        except OSError:
+                            pass
+                        connection.close()
+
+    def _check_cancelled(self):
+        if time.monotonic() - self.started >= self.limits.wall_seconds:
+            raise Rejected("model communications deadline")
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            raise Rejected("CANCELLED")
 
     def summary(self):
         return {"mode": self.mode, "model": self.model, "reasoning_effort": self.reasoning_effort,
-                "requests": self.requests, "connections": self.connections,
+                "requests": self.requests, "dispatched_requests": self.dispatched_requests, "connections": self.connections,
                 "input_bytes": self.input_bytes, "output_bytes": self.output_bytes,
                 "limits": self.limits.__dict__, "errors": self.errors,
                 "provider_credentials_in_sandbox": False,

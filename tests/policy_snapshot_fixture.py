@@ -1,0 +1,5 @@
+"""Complete synthetic v1alpha1 policy; not execution evidence."""
+import json
+
+def policy_spec():
+    return json.loads('{"budget": {"cooldown": "120s", "incidentDeadline": "5m", "maxActionsPerIncident": 1, "placementTimeout": "90s", "verificationTimeout": "60s"}, "candidateSelector": {"matchLabels": {"app": "synthetic"}}, "detection": {"nodeUnreadyFor": "20s", "podUnreadyFor": "15s", "restartThreshold": 3, "restartWindow": "120s"}, "enabled": true, "filter": {"maxCPUUtilizationPercent": 85, "maxMemoryUtilizationPercent": 85, "maxSampleAge": "90s", "minimumAvailableMemory": "512Mi", "requestedCapacityReservePercent": 10, "startupMemoryBudget": "256Mi"}, "mode": "Enforce", "requiredPlatforms": ["linux/amd64", "linux/arm64"], "score": {"cpuWeight": 30, "maxRecentFailurePenalty": 45, "memoryWeight": 35, "recentFailurePenalty": 15, "recentFailureWindow": "30m", "requestsWeight": 35}, "targetRef": {"name": "quote"}, "verification": {"consecutiveSuccesses": 5, "port": 8080, "serviceName": "quote", "stabilityWindow": "45s"}}')

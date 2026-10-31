@@ -116,13 +116,82 @@ def secret_free(content):
     )), "possible secret in publishing content")
 
 
-def validate_target(target):
-    require(target.get("schema_version") == "opsloop-publish-target/v1", "invalid publishing target schema")
+def validate_target(target, now=None):
+    version = target.get("schema_version")
+    require(version in ("opsloop-publish-target/v1", "opsloop-publish-target/v2"), "invalid publishing target schema")
     require(target.get("repository") == REPOSITORY and target.get("repository_id") == REPOSITORY_ID,
             "publishing repository is outside approved scope")
-    require(target.get("base_ref") == BASE_REF and target.get("head_ref") == HEAD_REF, "publishing branch is outside approved scope")
+    if version == "opsloop-publish-target/v1":
+        require(target.get("base_ref") == BASE_REF and target.get("head_ref") == HEAD_REF, "publishing branch is outside approved scope")
+    else:
+        require(set(target) == {"schema_version", "repository", "repository_id", "base_ref", "head_ref",
+                               "base_commit", "base_tree", "run_id", "epoch", "head_ref_exists", "observed_at"},
+                "incomplete fresh publishing target")
+        run_id = target.get("run_id")
+        require(isinstance(run_id, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,95}", run_id), "unsafe exhibition branch run")
+        safe_id(target.get("epoch"))
+        require(target.get("base_ref") == "main" and target.get("head_ref") == "opsloop/exhibition/" + run_id,
+                "exhibition publishing branch is outside approved scope")
+        require(target.get("head_ref_exists") is False, "fresh exhibition branch must not exist")
+        now = now or dt.datetime.now(dt.timezone.utc)
+        observed = instant(target.get("observed_at"))
+        require(now - dt.timedelta(minutes=10) <= observed <= now, "publishing target observation stale or future dated")
     sha(target.get("base_commit"), 40)
     sha(target.get("base_tree"), 40)
+
+
+def winning_attempt(root, result):
+    """Keep legacy single-attempt evidence valid; retries never overwrite it."""
+    attempts = result.get("attempts")
+    if attempts is None:
+        require("candidate_directory" not in result and "patch_path" not in result, "unbound candidate path")
+        return root, 1
+    plan = result.get("execution_plan", {})
+    require(isinstance(attempts, list) and 1 <= len(attempts) <= 3, "invalid attempt evidence")
+    require(type(plan.get("max_model_calls")) is int and len(attempts) <= plan["max_model_calls"] <= 3,
+            "attempt count exceeds approved plan")
+    require(plan.get("model") == "gpt-6-luna" and plan.get("reasoning_effort") == "medium", "attempt plan model changed")
+    for number, entry in enumerate(attempts, 1):
+        require(isinstance(entry, dict), "invalid attempt entry")
+        require(entry.get("attempt") == number and type(entry.get("attempt")) is int, "attempt sequence changed")
+        where = root if number == 1 else root / ("attempt-" + str(number))
+        require(where.is_dir() and not where.is_symlink(), "attempt directory rejected")
+        broker = entry.get("broker", {})
+        require(type(broker.get("requests")) is int and broker["requests"] == 1 and broker.get("dispatched_requests") == 1 and not broker.get("errors")
+                and broker.get("model") == "gpt-6-luna" and broker.get("reasoning_effort") == "medium"
+                and broker.get("mode") == "chatgpt" and broker.get("provider_credentials_in_sandbox") is False,
+                "attempt broker evidence changed")
+        process = entry.get("model_process", {})
+        check_process(process, 0)
+        require(digest(regular_file(where / "codex.jsonl", 4 * 1024 * 1024)) == process["log_sha256"], "attempt model log changed")
+        require(digest(regular_file(where / "candidate.patch", 256 * 1024)) == entry.get("patch_sha256"), "attempt patch changed")
+        verification = entry.get("verification", {})
+        require(verification.get("accepted") is (number == len(attempts)), "retry did not follow completed rejection")
+        verification_log = regular_file(where / "candidate.log", 4 * 1024 * 1024)
+        require(digest(verification_log) == verification.get("process", {}).get("log_sha256"), "attempt verification log changed")
+        if number < len(attempts):
+            check_process(verification.get("process", {}), 1)
+            try:
+                report = json.loads(verification_log.splitlines()[-1], object_pairs_hook=_unique_object)
+            except (ValueError, IndexError) as exc:
+                raise Rejected("failed attempt report missing") from exc
+            checks = report.get("checks", [])
+            require(report == verification.get("report") and report.get("all_passed") is False
+                    and len(checks) == len(REQUIRED_CHECKS) and {c.get("name") for c in checks} == REQUIRED_CHECKS
+                    and all(type(c.get("passed")) is bool for c in checks) and any(not c["passed"] for c in checks),
+                    "retry lacks completed failed checks")
+            info = check_candidate(root / "baseline", where / "candidate")
+            require(info == entry.get("candidate") and inventory(where / "verification-source") == info["source_files"]
+                    and verification.get("source_sha256") == info["source_sha256"], "failed attempt source changed")
+    winner = root if len(attempts) == 1 else root / ("attempt-" + str(len(attempts)))
+    for key, expected in (("candidate_directory", winner / "candidate"), ("patch_path", winner / "candidate.patch")):
+        require(result.get(key) == str(expected.resolve()), "winner path is not the exact bound attempt")
+    last = attempts[-1]
+    for result_key, attempt_key in (("candidate", "candidate"), ("broker", "broker"), ("model_process", "model_process"),
+                                    ("candidate_verification", "verification"), ("patch_sha256", "patch_sha256"),
+                                    ("proposal_sha256", "proposal_sha256")):
+        require(result.get(result_key) == last.get(attempt_key), "winning result differs from attempt evidence")
+    return winner, len(attempts)
 
 
 def prepare(run_dir, *, result_sha256, review_path, review_sha256, target_path, target_sha256, now=None):
@@ -133,7 +202,10 @@ def prepare(run_dir, *, result_sha256, review_path, review_sha256, target_path, 
     result = read_json(root / "result.json", result_sha256)
     review = read_json(review_path, review_sha256)
     target = read_json(target_path, target_sha256)
-    validate_target(target)
+    validate_target(target, now)
+    if target["schema_version"] == "opsloop-publish-target/v2":
+        require(target["run_id"] == result.get("incident", {}).get("run_id") and
+                target["epoch"] == result.get("incident", {}).get("epoch"), "fresh target belongs to a different run or epoch")
     require(result.get("state") == "VERIFIED_PENDING_REVIEW" and result.get("real_model_execution") is True,
             "real AI candidate has not completed independent validation")
     require(result.get("execution_mode") == "DIRECT_MODEL_CODE_PROPOSAL_APPLIED_BY_COORDINATOR", "unrecognized real model execution path")
@@ -142,12 +214,13 @@ def prepare(run_dir, *, result_sha256, review_path, review_sha256, target_path, 
     require(source.get("repository") in {"https://github.com/" + REPOSITORY, "https://github.com/" + REPOSITORY + ".git"} and
             source.get("base_commit") == target["base_commit"], "source base is stale or targets a different repository")
     require(result.get("independent_review") == "REQUIRED_FOR_EXACT_SOURCE_SHA256", "unexpected review state")
-    baseline, candidate = root / "baseline", root / "candidate"
+    winner, provider_requests = winning_attempt(root, result)
+    baseline, candidate = root / "baseline", winner / "candidate"
     baseline_files = inventory(baseline)
     require(baseline_files == result.get("baseline_source_files") == source.get("source_files"), "baseline source changed")
     candidate_info = check_candidate(baseline, candidate)
     require(candidate_info == result.get("candidate"), "candidate differs from independently verified result")
-    require(inventory(root / "verification-source") == candidate_info["source_files"], "frozen verifier source changed")
+    require(inventory(winner / "verification-source") == candidate_info["source_files"], "frozen verifier source changed")
     require(inventory(root / "harness") == result.get("harness_files") and set(result["harness_files"]) == {"audit.go", "verify.py"}, "trusted verifier changed")
     preflight = result.get("preflight", {})
     check_process(preflight, 0)
@@ -159,10 +232,10 @@ def prepare(run_dir, *, result_sha256, review_path, review_sha256, target_path, 
         sha(bundle.get("collection", {}).get(key))
     require(bundle.get("collection", {}).get("complete") is True, "incident evidence incomplete")
     check_verification(result.get("baseline_verification", {}), digest(canonical(baseline_files)), "baseline", root / "baseline.log")
-    check_verification(result.get("candidate_verification", {}), candidate_info["source_sha256"], "candidate", root / "candidate.log")
+    check_verification(result.get("candidate_verification", {}), candidate_info["source_sha256"], "candidate", winner / "candidate.log")
     model = result.get("model_process", {})
     check_process(model, 0)
-    codex_log = regular_file(root / "codex.jsonl", 4 * 1024 * 1024)
+    codex_log = regular_file(winner / "codex.jsonl", 4 * 1024 * 1024)
     require(digest(codex_log) == model["log_sha256"], "real Codex execution log changed")
     broker = result.get("broker", {})
     require(type(broker.get("requests")) is int and broker["requests"] == 1 and not broker.get("errors") and
@@ -171,7 +244,7 @@ def prepare(run_dir, *, result_sha256, review_path, review_sha256, target_path, 
     safe_id(broker.get("model"))
     require(broker.get("model") == "gpt-6-luna" and broker.get("reasoning_effort") == "medium" and
             broker.get("mode") == "chatgpt", "result is not the approved Luna Medium ChatGPT execution")
-    proposal = read_json(root / "model-proposal.json", result.get("proposal_sha256"), 256 * 1024)
+    proposal = read_json(winner / "model-proposal.json", result.get("proposal_sha256"), 256 * 1024)
     try:
         completion = json.loads(codex_log.splitlines()[-1], object_pairs_hook=_unique_object)
     except (ValueError, IndexError) as exc:
@@ -185,7 +258,7 @@ def prepare(run_dir, *, result_sha256, review_path, review_sha256, target_path, 
     expected_patch = "".join("".join(difflib.unified_diff(regular_file(baseline / p).decode().splitlines(keepends=True),
                        regular_file(candidate / p).decode().splitlines(keepends=True), fromfile="a/" + p, tofile="b/" + p))
                              for p in candidate_info["changed_paths"]).encode()
-    patch_data = regular_file(root / "candidate.patch", 256 * 1024)
+    patch_data = regular_file(winner / "candidate.patch", 256 * 1024)
     require(patch_data == expected_patch and digest(patch_data) == sha(result.get("patch_sha256")), "candidate patch changed")
     require(review.get("schema_version") == "opsloop-independent-review/v1" and review.get("decision") == "APPROVED" and
             review.get("findings") == [], "independent review has unresolved findings")
@@ -205,6 +278,8 @@ def prepare(run_dir, *, result_sha256, review_path, review_sha256, target_path, 
         data = content.encode()
         files.append({"path": path, "mode": "100644", "type": "blob", "encoding": "utf-8", "content": content,
                       "sha256": digest(data), "git_blob_sha": hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()})
+    request_summary = ("Exactly one provider request succeeded, with no retry or model fallback. " if provider_requests == 1
+                       else f"{provider_requests} approved provider requests completed with a fixed model and bounded verification-driven revisions; no transport retry or model fallback. ")
     # Fixed rationale is derived from trusted reproduction, not arbitrary model text.
     body = (
         "An empty order caused the application quote calculation to divide by zero. "
@@ -213,7 +288,7 @@ def prepare(run_dir, *, result_sha256, review_path, review_sha256, target_path, 
         "A real Codex run returned the application source and regression-test changes in this PR. "
         "The coordinator applied those exact returned bytes; the independent verifier tested a frozen copy.\n\n"
         "Model: `gpt-6-luna`; reasoning: `medium`; authentication: existing ChatGPT account. "
-        "Exactly one provider request succeeded, with no retry or model fallback. "
+        + request_summary +
         "The repair returns a zero-valued quote when item count is zero and adds nil/empty-slice unit tests.\n\n"
         "Changed paths:\n" + "".join(f"- `{p}`\n" for p in candidate_info["changed_paths"]) + "\n"
         "Before the change, the fixed empty-order reproduction failed while the other required checks passed. "
@@ -229,8 +304,10 @@ def prepare(run_dir, *, result_sha256, review_path, review_sha256, target_path, 
         "This PR does not restore the running service, activate Enforce, merge itself, or deploy the patch.\n"
     )
     secret_free(body)
-    return {"schema_version": "opsloop-publish-plan/v1", "state": "PREPARED_PENDING_APPROVAL", "requires_user_approval": True,
-            "repository": REPOSITORY, "repository_id": REPOSITORY_ID, "base_ref": BASE_REF, "head_ref": HEAD_REF,
+    plan_version = "opsloop-publish-plan/v2" if target["schema_version"] == "opsloop-publish-target/v2" else "opsloop-publish-plan/v1"
+    return {"schema_version": plan_version, "state": "PREPARED_PENDING_APPROVAL", "requires_user_approval": True,
+            "target": target,
+            "repository": REPOSITORY, "repository_id": REPOSITORY_ID, "base_ref": target["base_ref"], "head_ref": target["head_ref"],
             "base_commit": target["base_commit"], "base_tree": target["base_tree"], "incident": incident,
             "result_sha256": result_sha256, "review_sha256": review_sha256, "target_sha256": target_sha256,
             "bundle_sha256": result["bundle_sha256"], "patch_sha256": result["patch_sha256"],
@@ -238,7 +315,7 @@ def prepare(run_dir, *, result_sha256, review_path, review_sha256, target_path, 
             "commit": {"parents": [target["base_commit"]], "message": "fix(demo): handle empty order quotes"},
             "preconditions": {"base_ref_must_equal": target["base_commit"], "head_ref_must_not_exist": True, "force_push": False},
             "pull_request": {"title": "Fix empty order quotes from verified OpsLoop incident", "body": body,
-                             "base": BASE_REF, "head": HEAD_REF, "draft": True},
+                             "base": target["base_ref"], "head": target["head_ref"], "draft": True},
             "remote_ci": "NOT_RUN", "pr_number": None, "pr_url": None}
 
 
@@ -247,8 +324,17 @@ def record_pr(plan_path, *, plan_sha256, approval_path, approval_sha256, remote_
     """Validate a trusted coordinator's actual GitHub PR GET receipt; no API call."""
     now = now or dt.datetime.now(dt.timezone.utc)
     plan = read_json(plan_path, plan_sha256)
-    require(plan.get("schema_version") == "opsloop-publish-plan/v1" and plan.get("state") == "PREPARED_PENDING_APPROVAL", "invalid prepared plan")
-    validate_target({"schema_version": "opsloop-publish-target/v1", **{k: plan.get(k) for k in ("repository", "repository_id", "base_ref", "head_ref", "base_commit", "base_tree")}})
+    require(plan.get("schema_version") in ("opsloop-publish-plan/v1", "opsloop-publish-plan/v2") and plan.get("state") == "PREPARED_PENDING_APPROVAL", "invalid prepared plan")
+    target_fields = ("repository", "repository_id", "base_ref", "head_ref", "base_commit", "base_tree")
+    if plan["schema_version"] == "opsloop-publish-plan/v2":
+        target = plan.get("target", {})
+        require(target.get("schema_version") == "opsloop-publish-target/v2" and
+                all(target.get(k) == plan.get(k) for k in target_fields) and
+                target.get("run_id") == plan.get("incident", {}).get("run_id") and
+                target.get("epoch") == plan.get("incident", {}).get("epoch"), "fresh plan target binding changed")
+        validate_target(target, now)
+    else:
+        validate_target({"schema_version": "opsloop-publish-target/v1", **{k: plan.get(k) for k in target_fields}}, now)
     approval = read_json(approval_path, approval_sha256)
     require(approval.get("schema_version") == "opsloop-publish-approval/v1" and approval.get("approved") is True and
             approval.get("plan_sha256") == plan_sha256, "publishing approval does not authorize exact plan")
@@ -263,13 +349,15 @@ def record_pr(plan_path, *, plan_sha256, approval_path, approval_sha256, remote_
     pr = receipt.get("response", {})
     number = pr.get("number")
     require(type(number) is int and number > 0, "actual PR number missing")
+    if plan["schema_version"] == "opsloop-publish-plan/v2":
+        require(number != 6, "historical PR 6 cannot be an exhibition publication")
     require(receipt.get("path") == f"/repos/{REPOSITORY}/pulls/{number}", "GitHub PR GET path mismatch")
     require(pr.get("html_url") == f"https://github.com/{REPOSITORY}/pull/{number}" and pr.get("state") == "open" and
             pr.get("merged") is not True, "actual PR URL or state invalid")
     require(pr.get("title") == plan["pull_request"]["title"] and pr.get("body") == plan["pull_request"]["body"] and
             pr.get("draft") is True and pr.get("auto_merge") is None, "PR content, draft or merge policy differs from prepared request")
     sha(expected_head_sha, 40)
-    for side, ref, commit in (("base", BASE_REF, plan["base_commit"]), ("head", HEAD_REF, expected_head_sha)):
+    for side, ref, commit in (("base", plan["base_ref"], plan["base_commit"]), ("head", plan["head_ref"], expected_head_sha)):
         value = pr.get(side, {})
         require(value.get("ref") == ref and value.get("sha") == commit, "actual PR branch or commit mismatch")
         require(value.get("repo", {}).get("full_name") == REPOSITORY and value.get("repo", {}).get("id") == REPOSITORY_ID,
@@ -301,7 +389,7 @@ def record_pr(plan_path, *, plan_sha256, approval_path, approval_sha256, remote_
         require(len(matches) == 1 and matches[0].get("mode") == "100644" and matches[0].get("type") == "blob" and
                 matches[0].get("sha") == expected, "remote commit tree has unexpected file mode or content")
     return {"schema_version": "opsloop-pr-result/v1", "state": "PR_CREATED", "repository": REPOSITORY, "repository_id": REPOSITORY_ID,
-            "pr_number": number, "pr_url": pr["html_url"], "base_ref": BASE_REF, "head_ref": HEAD_REF,
+            "pr_number": number, "pr_url": pr["html_url"], "base_ref": plan["base_ref"], "head_ref": plan["head_ref"],
             "base_commit": plan["base_commit"], "head_commit": expected_head_sha, "plan_sha256": plan_sha256,
             "approval_sha256": approval_sha256, "remote_receipt_sha256": remote_sha256, "bundle_sha256": plan["bundle_sha256"],
             "candidate_source_sha256": plan["candidate_source_sha256"], "remote_ci": "NOT_RUN", "merged": False, "deployed": False}
