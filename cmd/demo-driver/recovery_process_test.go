@@ -176,6 +176,10 @@ func TestRecoveryProcessHelper(t *testing.T) {
 		t.Fatal(e)
 	}
 	gate := os.Getenv("P2E_HELPER_GATE")
+	if mode := os.Getenv("P2E_HELPER_BOUNDARY"); mode != "" {
+		recoveryWatchBoundaryHelper(t, c, gate, mode)
+		return
+	}
 	recoveryEventually(t, func() bool { _, e := os.Stat(gate); return e == nil })
 	var g *guardStore
 	recoveryEventually(t, func() bool { var e error; g, e = openGuard(c); return e == nil })
@@ -246,9 +250,23 @@ func TestRecoverySeparateProcesses(t *testing.T) {
 				}
 				normal = recoveryStart(t, exe, []string{"-test.run=^TestRecoveryProcessHelper$"}, []string{"P2E_HELPER_CONFIG=" + config, "P2E_HELPER_GATE=" + gate})
 			}
-			guard := recoveryStart(t, cli, recoveryArgs("arm", config, c), nil)
+			var guard *recoveryChild
+			var armedDiagnostic *guardState
+			armDetected, guardWaitObserved, ownerKillRequested := false, false, false
+			if scene == "executor-kill" {
+				// Log on PASS and failure before harness cleanup or TempDir removal.
+				// This adds no startup I/O and never treats ARMED as a watch tick.
+				defer func() {
+					recoveryLogCLIDiagnostic(t, c, cli, owner, guard, armedDiagnostic, armDetected, guardWaitObserved, ownerKillRequested)
+				}()
+			}
+			guard = recoveryStart(t, cli, recoveryArgs("arm", config, c), nil)
 			recoveryEventually(t, func() bool { b, _ := os.ReadFile(guard.log); return strings.Contains(string(b), `"phase":"ARMED"`) })
 			before := recoveryLoad(t, c)
+			if scene == "executor-kill" {
+				armDetected = true
+				armedDiagnostic = &before
+			}
 			if n, r := recoveryCalls(t, dir); n != 0 || r != 0 {
 				t.Fatal("arm itself queried/restored")
 			}
@@ -309,6 +327,9 @@ func TestRecoverySeparateProcesses(t *testing.T) {
 				if e = guard.cmd.Process.Signal(syscall.Signal(0)); e != nil {
 					t.Fatal("guard not independent/alive")
 				}
+				if scene == "executor-kill" {
+					ownerKillRequested = true
+				}
 				owner.cmd.Process.Kill()
 				owner.wait(t)
 				if second != nil {
@@ -316,6 +337,7 @@ func TestRecoverySeparateProcesses(t *testing.T) {
 				}
 			}
 			guard.wait(t)
+			guardWaitObserved = true
 			if normal != nil {
 				normal.wait(t)
 				if normal.err != nil {

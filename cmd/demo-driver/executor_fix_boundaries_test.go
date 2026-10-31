@@ -101,10 +101,9 @@ func TestFinishFixArchiveFailures(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			s := newFinishScene(t, "normal")
 			state := installFinishFixture(t, s)
-			if kind == "owner" {
-				s.c.DeadlineMS = 1500
-				s.c.PollMS = 10
-			}
+			// Ownership contradiction is checked only after normal preparation.
+			// Keep the shared executable fixture budget; deadline rejection has
+			// separate tests and must not abort this case before its mutation.
 			if b, code := fixCLI(t, s.c); code != 0 {
 				t.Fatalf("initial %s", b)
 			}
@@ -134,7 +133,15 @@ func TestFinishFixArchiveFailures(t *testing.T) {
 				t.Fatal(e)
 			}
 			fired := false
-			err := executeFinish(context.Background(), s.c, io.Discard, observerWallClock{}, fixtureVMRunner{s.c.Executable, s.c.ExecutableSHA256}, func(j *finishJournal) {
+			var contradictionClock observerClock = observerWallClock{}
+			if kind == "owner" {
+				// The foreign-owner polling outcome is independent of host scheduling.
+				// Keep the same binding and production poll limit, advancing only the
+				// existing test clock between observations; no timeout/TTL is renewed.
+				now := time.Now()
+				contradictionClock = &observerTestClock{t: now, start: now}
+			}
+			err := executeFinish(context.Background(), s.c, io.Discard, contradictionClock, fixtureVMRunner{s.c.Executable, s.c.ExecutableSHA256}, func(j *finishJournal) {
 				j.before = func(k string) error {
 					if kind == "archive-collision" && k == "archive-before" {
 						fired = true
@@ -166,7 +173,17 @@ func TestFinishFixArchiveFailures(t *testing.T) {
 			}
 			// Each state either verifies and continues its non-success verdict or fails
 			// closed on publication mismatch. It must never replay or claim stale success.
-			b, code := fixCLI(t, s.c)
+			var b []byte
+			code := 1
+			if kind == "owner" {
+				var output bytes.Buffer
+				if e := executeFinish(context.Background(), s.c, &output, contradictionClock, fixtureVMRunner{s.c.Executable, s.c.ExecutableSHA256}, nil); e == nil {
+					code = 0
+				}
+				b = output.Bytes()
+			} else {
+				b, code = fixCLI(t, s.c)
+			}
 			if code == 0 {
 				t.Fatalf("stale success after boundary: %s", b)
 			}
@@ -272,13 +289,21 @@ func TestFinishFixPreStart(t *testing.T) {
 				}
 				os.WriteFile(s.c.Executable, data, 0700)
 				s.c.ExecutableSHA256 = digestBytes(data)
-				s.c.TimeoutMS = 150
+				if kind != "timeout" {
+					s.c.TimeoutMS = 150
+				}
 			}
 			if kind == "deadline" {
 				s.c.DeadlineMS = 2000
 				s.c.PollMS = 10
 			}
-			err := executeFinish(ctx, s.c, io.Discard, observerWallClock{}, fixtureVMRunner{s.c.Executable, s.c.ExecutableSHA256}, hook)
+			var runner finishVMRunner = fixtureVMRunner{s.c.Executable, s.c.ExecutableSHA256}
+			if kind == "timeout" {
+				// Expire only the resume command, after actual Start was recorded.
+				// Initial identity queries retain the shared fixture timeout.
+				runner = finishStartedTimeout{base: runner, operation: "resume", afterStart: 150 * time.Millisecond}
+			}
+			err := executeFinish(ctx, s.c, io.Discard, observerWallClock{}, runner, hook)
 			if (kind == "deadline" || kind == "start-failure") && !reachedResumeBoundary {
 				t.Fatal("fixture did not reach the intended resume boundary")
 			}
