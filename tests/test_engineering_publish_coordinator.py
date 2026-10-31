@@ -73,6 +73,11 @@ class FakeGitHub:
 class CoordinatorTests(unittest.TestCase):
     def setUp(self):
         self.f = fixtures.PublisherTests(); self.f.setUp(); self.addCleanup(self.f.tearDown)
+        # CI's host also uses /home/runner. Positive transport tests model a
+        # separate host explicitly; the sandbox-denial test overrides it below.
+        host_home = self.f.root / 'host-home'; host_home.mkdir()
+        home = patch.object(Path, 'home', return_value=host_home)
+        home.start(); self.addCleanup(home.stop)
         self.prep = self.f.arguments(); self.plan = self.f.plan()
         args, self.approval, _ = self.f.receipt_arguments()
         self.api = FakeGitHub(self.plan, self.f.run/"baseline")
