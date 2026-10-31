@@ -34,6 +34,10 @@ jobs:
       - name: Install hash-locked Python test dependencies
         run: |
           python3 -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements-ci.txt
+      - name: Install checksum-pinned Terraform for console tests
+        run: |
+          bash scripts/install-ci-terraform.sh "$RUNNER_TEMP/terraform/bin"
+          printf '%s\n' "$RUNNER_TEMP/terraform/bin" >> "$GITHUB_PATH"
       - name: Install pinned security scanner (isolated tool cache)
         run: |
           mkdir -p "$RUNNER_TEMP/security-tools/home" "$RUNNER_TEMP/security-tools/bin"
@@ -57,9 +61,11 @@ jobs:
           go build -o "$cli" ./cmd/demo-driver
           export P2C_CLI="$cli" P2D_CLI="$cli" P2E_CLI="$cli" P2F_CLI="$cli"
           export P3B_CLI="$cli" WORKLOAD_SAFETY_CLI="$cli"
-          python3 -B scripts/m3-ci-contract.py environment --go "$(command -v go)" --envtest-assets "$KUBEBUILDER_ASSETS"
+          python3 -B scripts/m3-ci-contract.py environment --go "$(command -v go)" --envtest-assets "$KUBEBUILDER_ASSETS" --terraform "$(command -v terraform)"
           OPSLOOP_REQUIRE_ENVTEST=1 go test -json -count=1 -timeout=45m ./... | tee "$RUNNER_TEMP/go-tests.jsonl"
           python3 -B scripts/m3-ci-contract.py go-log "$RUNNER_TEMP/go-tests.jsonl"
+      - name: Terraform disk input contract (console only)
+        run: python3 -B scripts/m3-python-tests.py --terraform-only
       - name: Demo A reset safety (mock only)
         run: |
           bash -n demos/node-failure/run.sh
@@ -185,22 +191,9 @@ jobs:
         working-directory: worker
         run: npm run test:browser
       - name: Pinned Go contract fixtures remain identical
-        run: |
-          git cat-file -e b4fb78d0707afdbc93867d087fea5d1511203208^{commit}
-          bash frontend/dashboard/contracts/regenerate.sh "$PWD"
-          git diff --exit-code -- frontend/dashboard/src/domain/__fixtures__/go-candidates.json frontend/dashboard/src/domain/__fixtures__/go-quantities.json
+        run: bash frontend/dashboard/contracts/verify.sh "$PWD" historical
       - name: Current merged Go backend agrees with committed fixtures
-        run: |
-          contract_tmp=$(mktemp -d "$RUNNER_TEMP/opsloop-contract.XXXXXXXX")
-          trap 'rm -rf -- "$contract_tmp"' EXIT
-          mkdir "$contract_tmp/backend"
-          git archive HEAD | tar -x -C "$contract_tmp/backend"
-          cp frontend/dashboard/contracts/export_test.go.txt "$contract_tmp/backend/internal/candidates/dashboard_contract_test.go"
-          DASHBOARD_CONTRACT_OUT="$contract_tmp/current-candidates.json" \
-          DASHBOARD_QUANTITY_OUT="$contract_tmp/current-quantities.json" \
-          go -C "$contract_tmp/backend" test ./internal/candidates -run '^TestDashboard(Contract|Quantity)Export$' -count=1
-          cmp frontend/dashboard/src/domain/__fixtures__/go-candidates.json "$contract_tmp/current-candidates.json"
-          cmp frontend/dashboard/src/domain/__fixtures__/go-quantities.json "$contract_tmp/current-quantities.json"
+        run: bash frontend/dashboard/contracts/verify.sh "$PWD" current
 
   publish:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'

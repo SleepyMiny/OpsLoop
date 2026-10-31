@@ -101,6 +101,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--go", default=shutil.which("go") or "go")
     p.add_argument("--node", default=shutil.which("node") or "node")
+    p.add_argument("--terraform", default=shutil.which("terraform") or "terraform")
     p.add_argument("--gomodcache", type=Path, required=True)
     p.add_argument("--gocache", type=Path)
     p.add_argument("--envtest-assets", type=Path)
@@ -111,6 +112,7 @@ def main():
     p.add_argument("--timeout", type=int, default=3600, help="Per-check seconds")
     a = p.parse_args()
     go, node = str(Path(a.go).resolve()), str(Path(a.node).resolve())
+    terraform = str(Path(a.terraform).resolve())
     output = a.output.resolve()
     build = output / "build"
     frontend = ROOT / "frontend/dashboard"
@@ -118,7 +120,7 @@ def main():
     packages = a.go_package or ["./..."]
     if any(not package.startswith("./") or any(part == ".." for part in Path(package).parts) for package in packages):
         p.error("--go-package must select packages within this repository, such as ./cmd/demo-driver")
-    environment_command = [sys.executable, str(ROOT / "scripts/m3-ci-contract.py"), "environment", "--go", go, "--node", node]
+    environment_command = [sys.executable, str(ROOT / "scripts/m3-ci-contract.py"), "environment", "--go", go, "--node", node, "--terraform", terraform]
     if a.envtest_assets:
         environment_command += ["--envtest-assets", str(a.envtest_assets.resolve())]
     connection_names = [n for names in contract.REQUIRED_CONNECTIONS.values() for n in names]
@@ -130,7 +132,7 @@ def main():
         ("go-test", [go, "test", "-json", "-timeout=45m", "-count=1", *packages], ROOT, {}),
         ("go-race", [go, "test", "-json", "-race", "-timeout=45m", "-count=1", *packages], ROOT, {}),
         ("go-connections", [go, "test", "-json", "-timeout=10m", "-count=1", "./api/v1alpha1", "./internal/controller", "-run", "^(" + "|".join(connection_names) + ")$"], ROOT, {}),
-        ("python", [sys.executable, "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], ROOT, {}),
+        ("python", [sys.executable, "-B", str(ROOT / "scripts/m3-python-tests.py")], ROOT, {}),
         ("frontend-typecheck", [node, "node_modules/typescript/bin/tsc", "--noEmit", "-p", "tsconfig.json"], frontend, {}),
         ("frontend-test", [node, "node_modules/vitest/vitest.mjs", "run"], frontend, {}),
         ("frontend-build", [node, "node_modules/vite/bin/vite.js", "build"], frontend, {}),
@@ -154,7 +156,7 @@ def main():
         p.error("output already contains verification.json; use a fresh output directory")
     for directory in [output, build, output / "tmp", output / "gopath", a.gocache or output / "gocache"]:
         directory.mkdir(parents=True, exist_ok=True)
-    env = {"PATH": str(Path(go).parent) + os.pathsep + str(Path(node).parent) + os.pathsep + str(Path(sys.executable).absolute().parent) + ":/usr/bin:/bin",
+    env = {"PATH": str(Path(go).parent) + os.pathsep + str(Path(node).parent) + os.pathsep + str(Path(sys.executable).absolute().parent) + os.pathsep + str(Path(terraform).parent) + ":/usr/bin:/bin",
            "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TMPDIR": str(output / "tmp"),
            "GOTOOLCHAIN": "local", "GOENV": "off", "GOTELEMETRY": "off", "GOPROXY": "off", "GOSUMDB": "off",
            "GOCACHE": str((a.gocache or output / "gocache").resolve()), "GOMODCACHE": str(a.gomodcache.resolve()),

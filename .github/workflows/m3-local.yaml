@@ -35,6 +35,10 @@ jobs:
       - name: Install hash-locked Python test dependencies
         run: |
           python3 -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements-ci.txt
+      - name: Install checksum-pinned Terraform for console tests
+        run: |
+          bash scripts/install-ci-terraform.sh "$RUNNER_TEMP/terraform/bin"
+          printf '%s\n' "$RUNNER_TEMP/terraform/bin" >> "$GITHUB_PATH"
       - name: Prepare locked dependencies and local envtest tools (network phase)
         shell: bash
         run: |
@@ -47,6 +51,7 @@ jobs:
         run: |
           python3 -B scripts/m3-verify.py \
             --go "$(command -v go)" --node "$(command -v node)" \
+            --terraform "$(command -v terraform)" \
             --gomodcache "$(go env GOMODCACHE)" --gocache "$RUNNER_TEMP/m3-gocache" \
             --envtest-assets "$M3_ENVTEST_ASSETS" --output "$RUNNER_TEMP/m3-checks"
       - name: Retain local check receipts

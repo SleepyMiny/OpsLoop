@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import vectors from './__fixtures__/go-candidates.json';
+import historicalVectors from './__fixtures__/go-candidates.json';
+import currentVectors from './__fixtures__/current/go-candidates.json';
 import { baselineWorkload } from '../data/demo/baseline';
 import { policyFromCrd, policySpecFromCrd, parseMemoryQuantity } from '../data/live/fromCrd';
 import type { CrdDecision, CrdRecoveryPolicySpec } from '../data/live/crd';
@@ -17,9 +18,33 @@ interface Vector {
   decision: CrdDecision;
 }
 
+interface CurrentVector extends Vector {
+  input: Vector['input'] & {RunID: string; Epoch: string; PolicyUID: string; ResourceConditions: null};
+}
+
+// These numerical vectors deliberately have no experiment binding or injected resource
+// conditions. Assert that boundary so this adapter cannot silently ignore an active overlay.
+describe('current Go Input wire contract', () => {
+  for (const vector of currentVectors as unknown as CurrentVector[]) {
+    it(vector.name + ' preserves explicit current binding fields', () => {
+      expect(vector.input.RunID).toBe('');
+      expect(vector.input.Epoch).toBe('');
+      expect(vector.input.PolicyUID).toBe('');
+      expect(vector.input.ResourceConditions).toBeNull();
+      expect(Object.keys(vector.input).sort()).toEqual([
+        ...Object.keys(historicalVectors[0]!.input),
+        'RunID', 'Epoch', 'PolicyUID', 'ResourceConditions',
+      ].sort());
+    });
+  }
+});
+
 // The same raw Go Input and its actual Evaluate output, exported by contracts/export_test.go.txt.
 // This adapter only translates units/shape. Expected scores and eligibility are never recomputed here.
-describe('Go Controller candidate contract', () => {
+describe.each([
+  ['historical b4fb78d', historicalVectors],
+  ['current backend', currentVectors],
+] as const)('%s Go Controller candidate contract', (_version, vectors) => {
   for (const vector of vectors as unknown as Vector[]) {
     it(vector.name, () => {
       const i = vector.input;

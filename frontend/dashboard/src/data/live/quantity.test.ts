@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import goQuantities from '../../domain/__fixtures__/go-quantities.json';
+import historicalQuantities from '../../domain/__fixtures__/go-quantities.json';
+import currentQuantities from '../../domain/__fixtures__/current/go-quantities.json';
 import { parseMemoryQuantity } from './fromCrd';
 
 describe('Kubernetes Quantity Value() bytes contract', () => {
@@ -18,7 +19,10 @@ describe('Kubernetes Quantity Value() bytes contract', () => {
 });
 
 // Values come from Kubernetes resource.ParseQuantity(...).Value(), not a TS oracle.
-describe('actual Kubernetes Quantity cross-language vectors', () => {
+describe.each([
+  ['historical b4fb78d', historicalQuantities],
+  ['current backend', currentQuantities],
+] as const)('%s actual Kubernetes Quantity cross-language vectors', (_version, goQuantities) => {
   for (const q of goQuantities) it(q.input || '(empty)', () => {
     // Reject the Go parser's digitless "." quirk explicitly at the UI boundary.
     if (q.invalid || q.input === '.' || BigInt(q.bytes ?? '0') > BigInt(Number.MAX_SAFE_INTEGER)) {

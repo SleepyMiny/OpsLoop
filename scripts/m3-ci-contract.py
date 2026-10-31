@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -43,7 +44,7 @@ def connection_results(data):
             'requiredConnections': results, 'failedEvents': failures}
 
 
-def environment(go=None, node=None, assets=None):
+def environment(go=None, node=None, assets=None, terraform=None):
     import yaml  # Missing dependency must fail before local API tests start.
     expected_python = (ROOT / '.python-version').read_text().strip()
     found = {'python': '.'.join(map(str, sys.version_info[:3])), 'PyYAML': yaml.__version__}
@@ -59,6 +60,13 @@ def environment(go=None, node=None, assets=None):
         found['node'] = output([node, '--version'])
         if found['node'] != 'v24.22.0':
             raise ValueError('Node version mismatch')
+    if terraform:
+        pin = (ROOT / 'infra/terraform/p1/versions.tf').read_text()
+        if not re.search(r'required_version\s*=\s*"= 1\.15\.9"', pin):
+            raise ValueError('Terraform repository version pin mismatch')
+        found['terraform'] = json.loads(output([terraform, 'version', '-json']))['terraform_version']
+        if found['terraform'] != '1.15.9':
+            raise ValueError('Terraform version mismatch')
     if assets:
         assets = Path(assets)
         for name in ('kube-apiserver', 'etcd', 'kubectl'):
@@ -78,11 +86,12 @@ def main():
     env.add_argument('--go')
     env.add_argument('--node')
     env.add_argument('--envtest-assets')
+    env.add_argument('--terraform')
     log = commands.add_parser('go-log')
     log.add_argument('path', type=Path)
     args = parser.parse_args()
     try:
-        result = environment(args.go, args.node, args.envtest_assets) if args.command == 'environment' else connection_results(args.path.read_text())
+        result = environment(args.go, args.node, args.envtest_assets, args.terraform) if args.command == 'environment' else connection_results(args.path.read_text())
     except (ImportError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         result = {'status': 'FAIL', 'reason': type(error).__name__ + ': CI prerequisite/result contract failed'}
     print(json.dumps(result, indent=2))

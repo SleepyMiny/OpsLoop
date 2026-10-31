@@ -44,7 +44,11 @@ func recoveryHas(s *guardState, kind string) bool {
 
 func TestRecoveryDisarmFreshBoundary(t *testing.T) {
 	for _, scene := range []string{"normal", "heartbeat-before", "heartbeat-during", "hard-before", "hard-during", "owner-before", "owner-during", "authority-before", "authority-during", "clock-skew-before", "clock-skew-during", "boot-during", "tick-back-during", "clock-read-error-during", "final-clock-read-error", "final-clock-invalid", "restoring", "emergency", "disarmed-save-error"} {
-		t.Run(scene, func(t *testing.T) {
+		// Keep command timers in the same deterministic clock domain as the
+		// injected state transitions. Real journal fsync latency must not select
+		// an unrelated command timeout before the intended heartbeat boundary.
+		// The 50ms command timeout and all durable Guard operations are retained.
+		t.Run(scene, recoveryClockTest(func(t *testing.T) {
 			c, g, s, v, n := recoverySetup(t)
 			v.state = "running"
 			var owner *recoveryChild
@@ -163,7 +167,7 @@ func TestRecoveryDisarmFreshBoundary(t *testing.T) {
 				wantCalls = 0
 			}
 			if len(v.calls) != wantCalls || v.resumes != 0 {
-				t.Fatalf("calls=%d resumes=%d", len(v.calls), v.resumes)
+				t.Fatalf("calls=%d want=%d resumes=%d err=%v phase=%s events=%+v", len(v.calls), wantCalls, v.resumes, err, loaded.Phase, loaded.Events)
 			}
 			if scene == "hard-during" && n.Tick-s.HeartbeatTick != int64(20*time.Millisecond) {
 				t.Fatal("hard control lost valid heartbeat")
@@ -210,8 +214,51 @@ func TestRecoveryDisarmFreshBoundary(t *testing.T) {
 				t.Fatal("false resume/receipt")
 			}
 			t.Logf("scene=%s disarmError=%v durablePhase=%s emergency=%t disarmCalls=%d watchCalls=%d resumes=%d restartError=%v", scene, err, s.Phase, s.Emergency, before, len(v.calls)-before, v.resumes, restartErr)
-		})
+		}))
 	}
+}
+
+// The same initial heartbeat state has a different safe result when the command
+// budget, rather than the heartbeat, expires first. Advance synctest time at the
+// durable Start boundary; no real sleep or host scheduling selects this branch.
+func TestRecoveryDisarmHeartbeatCommandDeadline(t *testing.T) {
+	recoveryClockTest(func(t *testing.T) {
+		c, g, s, v, n := recoverySetup(t)
+		v.state = "running"
+		recoveryAdvance(n, 490*time.Millisecond)
+		if err := g.save(s); err != nil {
+			t.Fatal(err)
+		}
+		injected := false
+		g.beforeSave = func(next *guardState) error {
+			event := next.Events[len(next.Events)-1]
+			if !injected && event.Kind == "vm-start-attempt" && event.Operation == "domuuid" {
+				injected = true
+				time.Sleep(time.Duration(c.TimeoutMS)*time.Millisecond + time.Nanosecond)
+			}
+			return nil
+		}
+		x := recoveryEngine(n, v)
+		err := x.step(context.Background(), g, s, true)
+		loaded, loadErr := g.load(c)
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		if !injected || err == nil || len(v.calls) != 0 || v.resumes != 0 || loaded.Phase != "ABORTED_MANUAL" || recoveryHas(loaded, "disarmed") || loaded.AutomaticSuccessEligible {
+			t.Fatalf("command deadline did not fail closed: injected=%v err=%v calls=%d resumes=%d phase=%s events=%+v", injected, err, len(v.calls), v.resumes, loaded.Phase, loaded.Events)
+		}
+		if n.Tick-loaded.HeartbeatTick != int64(490*time.Millisecond) {
+			t.Fatal("command deadline control changed the injected heartbeat clock")
+		}
+		if !recoveryHas(loaded, "vm-start-attempt") || !recoveryHas(loaded, "command-result") || !recoveryHas(loaded, "manual-review") {
+			t.Fatal("command timeout lost its durable attempt/result/manual-review evidence")
+		}
+		g.beforeSave = nil
+		if err := x.step(context.Background(), g, loaded, false); err == nil || len(v.calls) != 0 || v.resumes != 0 || loaded.Phase != "ABORTED_MANUAL" {
+			t.Fatal("reload retried a command or converted uncertain termination to success")
+		}
+		t.Logf("timeoutMS=%d heartbeatAgeMS=490 calls=0 resumes=0 phase=%s; original heartbeat-during still requires two observations", c.TimeoutMS, loaded.Phase)
+	})(t)
 }
 
 // Establish unresolved intent through the product path, with a pre-Start disk

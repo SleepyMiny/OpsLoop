@@ -1,22 +1,49 @@
 # Go ↔ Dashboard contract vectors
 
-Backend reference: `b4fb78d0707afdbc93867d087fea5d1511203208` (PR #2 Runtime Safety fix).
-Dashboard base: `ccbe94667fa7921b252da422ea2dc6d90e604eec` (PR #1).
-No backend files are merged into this branch. `export_test.go.txt` runs **inside a
-scratch archive** of the pinned backend alongside its existing fixture helpers.
-It calls the real `candidates.Evaluate` and Kubernetes `resource.Quantity.Value`.
+Two fixture versions serve separate checks:
 
-To regenerate, provide a local repository containing that backend commit:
+- `src/domain/__fixtures__/go-{candidates,quantities}.json` retains the exact
+  historical backend contract at `b4fb78d0707afdbc93867d087fea5d1511203208`
+  (PR #2 Runtime Safety fix). These bytes are not replaced by current output.
+- `src/domain/__fixtures__/current/go-{candidates,quantities}.json` is the contract
+  exported by the checked-out `HEAD`, including every field serialized by the
+  current Go `Input` and actual `Decision`. In PR CI this is the test merge commit.
+
+`export_test.go.txt` runs **inside a scratch archive** alongside the backend's
+existing fixture helpers. It calls real `candidates.Evaluate` and Kubernetes
+`resource.Quantity.Value`; it does not strip current fields to imitate history.
+The current inputs explicitly include `RunID`, `Epoch`, `PolicyUID`, and
+`ResourceConditions`. These numerical vectors have empty bindings and no resource
+conditions; TS tests assert those values rather than silently applying the ordinary
+candidate adapter to a nonempty experimental input. Runtime resource-condition
+and Controller-owned decision tests remain separate.
+
+To check both versions without rewriting committed fixtures:
 
 ```bash
-bash contracts/regenerate.sh /path/to/OpsLoop-backend
+bash contracts/verify.sh /path/to/OpsLoop historical
+bash contracts/verify.sh /path/to/OpsLoop current
 npm test -- src/domain/go-contract.test.ts src/data/live/quantity.test.ts
 ```
 
+To intentionally regenerate the current version after a backend contract change:
+
+```bash
+bash contracts/regenerate.sh /path/to/OpsLoop current
+```
+
+`regenerate.sh` defaults to `historical` for compatibility. Its optional third
+argument selects a separate output directory. Both generation modes archive a
+local Git object (`HEAD` or the fixed historical commit); neither reads uncommitted
+backend changes. After a backend edit, generate from a prepared Git snapshot and
+verify again against the committed candidate. The historical fixture is an
+immutable compatibility reference; a new current fixture does not change it.
+
 Go needs its normal toolchain/module cache (or network access to obtain modules).
 Set `GOCACHE`, `GOMODCACHE`, and `TMPDIR` to isolated paths when desired.
-The script does not fetch, checkout, merge, commit, or write to the backend repo.
-Only the two frontend JSON fixtures are overwritten; scratch files are removed.
+Scripts do not fetch, checkout, merge, commit, or write to the backend repo.
+`verify.sh` generates temporary files and byte-compares both JSON contracts.
+It never updates fixtures to hide drift. Scratch files are removed on exit.
 
 `go-candidates.json` stores raw Go Inputs and actual Decisions. The TS adapter
 converts shape/units; it does not calculate expected eligibility or scores.
