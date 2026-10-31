@@ -4,6 +4,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -21,6 +23,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/SleepyMiny/OpsLoop/api/v1alpha1"
+	"github.com/SleepyMiny/OpsLoop/internal/candidates"
 	"github.com/SleepyMiny/OpsLoop/internal/controller"
 	"github.com/SleepyMiny/OpsLoop/internal/verification"
 )
@@ -32,20 +35,33 @@ const (
 
 func main() {
 	var promURL string
-	var scopeFile string
+	var scopeFile, resourceFile, resourceSHA256, exhibitionFile string
 	var leaderElect bool
 	flag.StringVar(&promURL, "prometheus-url", "", "Prometheus base URL (required)")
 	flag.BoolVar(&leaderElect, "leader-elect", true, "enable leader election")
 	flag.StringVar(&scopeFile, "execution-scope-file", "", "trusted exact experiment scope; empty denies all Enforce actions")
+	flag.StringVar(&resourceFile, "resource-conditions-file", "", "trusted run-scoped conservative candidate inputs; empty uses only measurements")
+	flag.StringVar(&resourceSHA256, "resource-conditions-sha256", "", "required exact SHA-256 of resource condition file")
+	flag.StringVar(&exhibitionFile, "exhibition-authority-file", "", "static exact Policy/workload allowlist and offline Ed25519 issuer public key; mutually exclusive with execution-scope-file")
 	flag.Parse()
 	ctrl.SetLogger(zap.New())
-	if err := run(promURL, leaderElect, scopeFile); err != nil {
+	if err := run(promURL, leaderElect, scopeFile, resourceFile, resourceSHA256, exhibitionFile); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(promURL string, leaderElect bool, scopeFile string) error {
+func run(promURL string, leaderElect bool, scopeFile, resourceFile, resourceSHA256 string, exhibitionFiles ...string) error {
+	exhibitionFile := ""
+	if len(exhibitionFiles) > 1 {
+		return fmt.Errorf("exhibition authority: multiple files")
+	}
+	if len(exhibitionFiles) == 1 {
+		exhibitionFile = exhibitionFiles[0]
+	}
+	if exhibitionFile != "" && (scopeFile != "" || resourceFile != "" || resourceSHA256 != "") {
+		return fmt.Errorf("exhibition authority cannot be combined with legacy scope/resource files")
+	}
 	if promURL == "" {
 		return fmt.Errorf("--prometheus-url is required")
 	}
@@ -71,9 +87,58 @@ func run(promURL string, leaderElect bool, scopeFile string) error {
 			return fmt.Errorf("execution scope: invalid configuration")
 		}
 	}
-	authority, err := controller.NewExecutionAuthority(scope)
+	var conditions *candidates.ResourceConditions
+	if (resourceFile == "") != (resourceSHA256 == "") {
+		return fmt.Errorf("resource conditions: file and SHA-256 must be supplied together")
+	}
+	if resourceFile != "" {
+		f, err := os.Open(resourceFile)
+		if err != nil {
+			return fmt.Errorf("resource conditions: cannot open configured file")
+		}
+		raw, err := io.ReadAll(io.LimitReader(f, 16385))
+		f.Close()
+		if err != nil || len(raw) > 16384 {
+			return fmt.Errorf("resource conditions: unreadable/oversize configuration")
+		}
+		sum := sha256.Sum256(raw)
+		if hex.EncodeToString(sum[:]) != resourceSHA256 {
+			return fmt.Errorf("resource conditions: approved hash mismatch")
+		}
+		conditions, err = candidates.ParseResourceConditions(raw)
+		if err != nil {
+			return err
+		}
+		if err := controller.BindResourceConditions(scope, conditions); err != nil {
+			return err
+		}
+	}
+	legacyAuthority, err := controller.NewExecutionAuthority(scope)
 	if err != nil {
 		return err
+	}
+	var authority interface {
+		controller.ExecutionAuthorizer
+		Instance() string
+	} = legacyAuthority
+	if exhibitionFile != "" {
+		f, err := os.Open(exhibitionFile)
+		if err != nil {
+			return fmt.Errorf("exhibition authority: cannot open configured file")
+		}
+		raw, err := io.ReadAll(io.LimitReader(f, 32769))
+		f.Close()
+		if err != nil || len(raw) > 32768 {
+			return fmt.Errorf("exhibition authority: unreadable/oversized configuration")
+		}
+		config, err := controller.ParseExhibitionAuthorityConfig(raw)
+		if err != nil {
+			return err
+		}
+		authority, err = controller.NewExhibitionAuthority(config)
+		if err != nil {
+			return err
+		}
 	}
 	// Non-secret identity only. Approval tooling must bind this exact process in
 	// the exact current Pod's authenticated log; it is never an execution permit.
@@ -110,11 +175,12 @@ func run(promURL string, leaderElect bool, scopeFile string) error {
 	}
 	ctx := ctrl.SetupSignalHandler()
 	r := &controller.PolicyReconciler{
-		Client:    mgr.GetClient(),
-		APIReader: mgr.GetAPIReader(),
-		Now:       time.Now,
-		Prom:      promv1.NewAPI(pc),
-		Authority: authority,
+		Client:             mgr.GetClient(),
+		APIReader:          mgr.GetAPIReader(),
+		Now:                time.Now,
+		Prom:               promv1.NewAPI(pc),
+		Authority:          authority,
+		ResourceConditions: conditions,
 		Probe: func(ctx context.Context, podIP string, port int32, podUID string) error {
 			return verification.Probe(ctx, nil, podIP, port, podUID)
 		},

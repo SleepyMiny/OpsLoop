@@ -286,6 +286,9 @@ func (r *PolicyReconciler) reconcileStop(ctx context.Context, p *v1alpha1.Recove
 			return requeueOnConflict(err)
 		}
 	}
+	if authority, ok := r.Authority.(*ExhibitionAuthority); ok && status == metav1.ConditionTrue {
+		authority.ObserveStopped(current)
+	}
 	if !hadActive && current.Status.ActiveIncident == nil && current.Spec.Enabled {
 		// Continue the existing ObserveOnly monitoring path without Deployment writes.
 		return r.reconcileMonitoring(ctx, current, now)

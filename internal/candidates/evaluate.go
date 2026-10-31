@@ -50,6 +50,8 @@ const (
 
 type Input struct {
 	Now                               time.Time
+	RunID, Epoch, PolicyUID           string
+	ResourceConditions                *ResourceConditions
 	Spec                              v1alpha1.RecoveryPolicySpec // incident.spec.policy snapshot
 	RecentFailures                    []v1alpha1.NodeFailure      // live Policy status.recentFailures
 	Attempts                          []v1alpha1.Attempt          // current Incident attempts
@@ -77,10 +79,22 @@ func Evaluate(in Input) v1alpha1.RecoveryDecision {
 	newCPU, newMem := PodRequests(in.Deployment.Spec.Template.Spec)
 	maxAge := in.Spec.Filter.MaxSampleAge.Duration
 
+	resourceErr := ValidateResourceInput(in)
 	cands := []v1alpha1.CandidateEvaluation{}
 	best := -1
 	for i := range nodes {
-		c := evaluateNode(in, &nodes[i], failures, newCPU, newMem, maxAge)
+		nodeInput := in
+		if resourceErr != nil {
+			nodeInput.ResourceConditions = nil
+		}
+		c := evaluateNode(nodeInput, &nodes[i], failures, newCPU, newMem, maxAge)
+		if resourceErr != nil {
+			c.Eligible, c.Score = false, nil
+			if !slices.Contains(c.RejectReasons, RejectUnsupportedConstraint) {
+				c.RejectReasons = append(c.RejectReasons, RejectUnsupportedConstraint)
+			}
+			c.Details = v1alpha1.CapList(append([]string{resourceErr.Error()}, c.Details...), v1alpha1.MaxDetailsItems)
+		}
 		cands = append(cands, c)
 		if c.Eligible && (best < 0 || c.Score.ScoreMilli > cands[best].Score.ScoreMilli) {
 			best = len(cands) - 1
@@ -120,6 +134,9 @@ func Evaluate(in Input) v1alpha1.RecoveryDecision {
 	}
 	d.ActionID = in.ActionID
 	d.SnapshotExpiresAt = metav1.NewTime(oldest.Add(maxAge))
+	if in.ResourceConditions != nil && in.ResourceConditions.ExpiresAt.Before(d.SnapshotExpiresAt.Time) {
+		d.SnapshotExpiresAt = metav1.NewTime(in.ResourceConditions.ExpiresAt)
+	}
 	d.SelectedNodeName = sel.NodeName
 	d.SelectedNodeUID = sel.NodeUID
 	d.SelectedHostname = sel.Hostname
@@ -177,16 +194,6 @@ func evaluateNode(in Input, n *corev1.Node, failures []v1alpha1.NodeFailure, new
 	}
 	promOK := !promMissing && !promStale
 
-	for _, reason := range StructuralRejectReasons(n, in.Spec, in.Deployment.Spec.Template.Spec.Tolerations) {
-		reject(reason)
-	}
-	if promOK && (*meas.MemTotalBytes-*meas.MemAvailableBytes)*100 > int64(in.Spec.Filter.MaxMemoryUtilizationPercent)**meas.MemTotalBytes {
-		reject(RejectMemoryPressure, "prometheus memory utilization above limit")
-	}
-	if promOK && *meas.CPUUtilizationPermille > in.Spec.Filter.MaxCPUUtilizationPercent*10 {
-		reject(RejectCPUPressure)
-	}
-
 	meas.AllocatableCPUMilli = n.Status.Allocatable.Cpu().MilliValue()
 	meas.AllocatableMemoryBytes = n.Status.Allocatable.Memory().Value()
 	for _, p := range in.PodsByNode[n.Name] {
@@ -202,6 +209,21 @@ func evaluateNode(in Input, n *corev1.Node, failures []v1alpha1.NodeFailure, new
 	reserve := int64(in.Spec.Filter.RequestedCapacityReservePercent)
 	meas.ReserveCPUMilli = meas.AllocatableCPUMilli * reserve / 100
 	meas.ReserveMemoryBytes = meas.AllocatableMemoryBytes * reserve / 100
+	meas = applyResourceCondition(in, &c)
+	for _, reason := range StructuralRejectReasons(n, in.Spec, in.Deployment.Spec.Template.Spec.Tolerations) {
+		reject(reason)
+	}
+	if promOK && (*meas.MemTotalBytes-*meas.MemAvailableBytes)*100 > int64(in.Spec.Filter.MaxMemoryUtilizationPercent)**meas.MemTotalBytes {
+		reason := "prometheus memory utilization above limit"
+		if c.ResourceCondition != nil {
+			reason = "experiment evaluation memory utilization above limit; original preserved"
+		}
+		reject(RejectMemoryPressure, reason)
+	}
+	if promOK && *meas.CPUUtilizationPermille > in.Spec.Filter.MaxCPUUtilizationPercent*10 {
+		reject(RejectCPUPressure)
+	}
+
 	// shortcut: Pod overhead (RuntimeClass) not counted, add when a RuntimeClass with overhead is used
 	if meas.RequestedCPUMilli+newCPU+meas.ReserveCPUMilli > meas.AllocatableCPUMilli {
 		reject(RejectInsufficientRequestedCPU)

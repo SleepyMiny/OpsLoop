@@ -3,6 +3,7 @@
 import argparse
 from datetime import datetime, timezone
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,9 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+_contract_spec = importlib.util.spec_from_file_location("m3_ci_contract", ROOT / "scripts/m3-ci-contract.py")
+contract = importlib.util.module_from_spec(_contract_spec)
+_contract_spec.loader.exec_module(contract)
 
 
 def now():
@@ -43,7 +47,7 @@ def stop_group(process, graceful=False):
     process.wait()
 
 
-def execute(name, argv, cwd, env, output, timeout):
+def execute(name, argv, cwd, env, output, timeout, require_connections=False):
     started, tick = now(), time.monotonic()
     path = output / (name + ".log")
     with path.open("wb") as log:
@@ -71,7 +75,7 @@ def execute(name, argv, cwd, env, output, timeout):
               "exitCode": code, "startedAt": started, "completedAt": now(),
               "durationSeconds": round(time.monotonic() - tick, 3), "log": path.name,
               "logSHA256": sha(path), "scope": "local"}
-    if name.startswith("go-test") or name.startswith("go-race"):
+    if name in ("go-test", "go-race", "go-connections"):
         events = []
         for line in data.splitlines():
             try:
@@ -84,7 +88,12 @@ def execute(name, argv, cwd, env, output, timeout):
                                 for key in ["pass", "fail", "skip"]}
         result["skippedTests"] = [{"package": e.get("Package"), "test": e["Test"]}
                                   for e in events if e.get("Action") == "skip" and "Test" in e]
-    print(name + ": " + status, flush=True)
+    if require_connections:
+        result["connectionContract"] = contract.connection_results(data)
+        if result["connectionContract"]["status"] != "PASS":
+            result["status"] = "FAIL"
+            result["failureReason"] = "Required local Go/Python connection tests missing, skipped or failed"
+    print(name + ": " + result["status"], flush=True)
     return result
 
 
@@ -92,6 +101,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--go", default=shutil.which("go") or "go")
     p.add_argument("--node", default=shutil.which("node") or "node")
+    p.add_argument("--terraform", default=shutil.which("terraform") or "terraform")
     p.add_argument("--gomodcache", type=Path, required=True)
     p.add_argument("--gocache", type=Path)
     p.add_argument("--envtest-assets", type=Path)
@@ -102,6 +112,7 @@ def main():
     p.add_argument("--timeout", type=int, default=3600, help="Per-check seconds")
     a = p.parse_args()
     go, node = str(Path(a.go).resolve()), str(Path(a.node).resolve())
+    terraform = str(Path(a.terraform).resolve())
     output = a.output.resolve()
     build = output / "build"
     frontend = ROOT / "frontend/dashboard"
@@ -109,13 +120,19 @@ def main():
     packages = a.go_package or ["./..."]
     if any(not package.startswith("./") or any(part == ".." for part in Path(package).parts) for package in packages):
         p.error("--go-package must select packages within this repository, such as ./cmd/demo-driver")
+    environment_command = [sys.executable, str(ROOT / "scripts/m3-ci-contract.py"), "environment", "--go", go, "--node", node, "--terraform", terraform]
+    if a.envtest_assets:
+        environment_command += ["--envtest-assets", str(a.envtest_assets.resolve())]
+    connection_names = [n for names in contract.REQUIRED_CONNECTIONS.values() for n in names]
     tasks = [
+        ("ci-environment", environment_command, ROOT, {}),
         ("source-scan", [sys.executable, str(ROOT / "scripts/m3-source-scan.py"), "--output", str(output / "source-scan.json")], ROOT, {}),
         ("build-cli", [go, "build", "-o", str(cli), "./cmd/demo-driver"], ROOT, {}),
         ("go-vet", [go, "vet", *packages], ROOT, {}),
         ("go-test", [go, "test", "-json", "-timeout=45m", "-count=1", *packages], ROOT, {}),
         ("go-race", [go, "test", "-json", "-race", "-timeout=45m", "-count=1", *packages], ROOT, {}),
-        ("python", [sys.executable, "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], ROOT, {}),
+        ("go-connections", [go, "test", "-json", "-timeout=10m", "-count=1", "./api/v1alpha1", "./internal/controller", "-run", "^(" + "|".join(connection_names) + ")$"], ROOT, {}),
+        ("python", [sys.executable, "-B", str(ROOT / "scripts/m3-python-tests.py")], ROOT, {}),
         ("frontend-typecheck", [node, "node_modules/typescript/bin/tsc", "--noEmit", "-p", "tsconfig.json"], frontend, {}),
         ("frontend-test", [node, "node_modules/vitest/vitest.mjs", "run"], frontend, {}),
         ("frontend-build", [node, "node_modules/vite/bin/vite.js", "build"], frontend, {}),
@@ -129,15 +146,17 @@ def main():
         unknown = set(a.only) - {t[0] for t in tasks}
         if unknown:
             p.error("unknown checks: " + ", ".join(sorted(unknown)))
-        tasks = [t for t in tasks if t[0] in a.only or (t[0] == "build-cli" and any(x.startswith("go-test") or x.startswith("go-race") for x in a.only))]
+        tasks = [t for t in tasks if t[0] in a.only or t[0] == "ci-environment" or (t[0] == "build-cli" and any(x in ("go-test", "go-race", "go-connections") for x in a.only))]
     if a.list:
         print(json.dumps([{"name": t[0], "command": t[1]} for t in tasks], indent=2))
         return 0
+    if any(t[0] == "go-connections" or (t[0] in ("go-test", "go-race") and packages == ["./..."]) for t in tasks) and not a.envtest_assets:
+        p.error("full Go/connection checks require --envtest-assets; missing local API tests cannot count as PASS")
     if output.exists() and (output / "verification.json").exists():
         p.error("output already contains verification.json; use a fresh output directory")
     for directory in [output, build, output / "tmp", output / "gopath", a.gocache or output / "gocache"]:
         directory.mkdir(parents=True, exist_ok=True)
-    env = {"PATH": str(Path(go).parent) + os.pathsep + str(Path(node).parent) + ":/usr/bin:/bin",
+    env = {"PATH": str(Path(go).parent) + os.pathsep + str(Path(node).parent) + os.pathsep + str(Path(sys.executable).absolute().parent) + os.pathsep + str(Path(terraform).parent) + ":/usr/bin:/bin",
            "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TMPDIR": str(output / "tmp"),
            "GOTOOLCHAIN": "local", "GOENV": "off", "GOTELEMETRY": "off", "GOPROXY": "off", "GOSUMDB": "off",
            "GOCACHE": str((a.gocache or output / "gocache").resolve()), "GOMODCACHE": str(a.gomodcache.resolve()),
@@ -151,7 +170,7 @@ def main():
         env["KUBEBUILDER_ASSETS"] = str(a.envtest_assets.resolve())
         env["OPSLOOP_REQUIRE_ENVTEST"] = "1"
     receipt = {"schema": "opsloop-m3-local-verification/v1", "startedAt": now(), "checks": [],
-               "goPackages": packages,
+               "goPackages": packages, "selectedChecks": [t[0] for t in tasks], "partialSelection": bool(a.only or a.go_package),
                "environment": env, "remoteCI": "NOT_RUN", "deployment": "NOT_RUN", "nativeARM64": "NOT_RUN",
                "networkBoundary": "offline dependency resolution; tests may bind loopback; no kernel egress isolation claimed",
                "envtest": "REQUESTED" if a.envtest_assets else "NOT_RUN", "toolchain": {}}
@@ -159,10 +178,14 @@ def main():
         r = execute("version-" + name, argv, ROOT, env, output, 30)
         receipt["toolchain"][name] = {"path": argv[0], "version": (output / r["log"]).read_text().strip(), "status": r["status"]}
     for name, argv, cwd, additions in tasks:
-        receipt["checks"].append(execute(name, argv, cwd, {**env, **additions}, output, a.timeout))
+        receipt["checks"].append(execute(name, argv, cwd, {**env, **additions}, output, a.timeout,
+            require_connections=name == "go-connections" or (name in ("go-test", "go-race") and packages == ["./..."])))
         receipt["status"] = "PASS" if all(c["status"] == "PASS" for c in receipt["checks"]) else "FAIL"
         receipt["completedAt"] = now()
         (output / "verification.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        if name == "ci-environment" and receipt["checks"][-1]["status"] != "PASS":
+            receipt["notRunChecks"] = [t[0] for t in tasks if t[0] != name]
+            break
         if receipt["checks"][-1]["status"] == "INTERRUPTED":
             break
     receipt["binaries"] = {f.name: sha(f) for f in build.iterdir() if f.is_file()}

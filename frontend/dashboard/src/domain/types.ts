@@ -307,6 +307,8 @@ export interface CandidateEvaluation {
   hostname: string;
   arch: Arch;
   measurements: CandidateMeasurements;
+  /** Original measurements remain above; only this run uses these applied inputs. */
+  resourceCondition?: { runID: string; epoch: string; policyUID: string; configSHA256: string; expiresAt: string; appliedMeasurements: CandidateMeasurements };
   rejectReasons: RejectReason[];
   exclusion?: CandidateExclusion;
   /** Present only when the candidate passed every hard filter. */

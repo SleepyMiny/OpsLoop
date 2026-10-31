@@ -106,8 +106,10 @@ def _manager_env() -> dict[str, str]:
 
 
 def execute(sandbox: Sandbox, command: list[str], log_path: Path, limits: Limits,
-            input_bytes: bytes = b"") -> dict:
+            input_bytes: bytes = b"", *, cancel_event=None) -> dict:
     """Execute with hard cgroup/time caps. A host approval must precede actual use."""
+    if cancel_event is not None and cancel_event.is_set():
+        raise Rejected("CANCELLED")
     unit = "opsloop-eb-" + uuid.uuid4().hex
     release = log_path.with_suffix(log_path.suffix + ".release").resolve()
     if release.exists():
@@ -120,6 +122,19 @@ def execute(sandbox: Sandbox, command: list[str], log_path: Path, limits: Limits
     fd = os.open(input_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "wb") as f:
         f.write(input_bytes)
+    receipt_path = log_path.with_suffix(log_path.suffix + '.process.json')
+    receipt = {'schema':'opsloop-sandbox-process/v1','unit':unit,'state':'RESERVED',
+               'hostBoot':Path('/proc/sys/kernel/random/boot_id').read_text().strip()}
+    def save_process():
+        tmp=receipt_path.with_name(receipt_path.name+'.new')
+        with os.fdopen(os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600),'wb') as f:
+            f.write(json.dumps(receipt,sort_keys=True).encode());f.flush();os.fsync(f.fileno())
+        os.replace(tmp,receipt_path)
+        fd=os.open(receipt_path.parent,os.O_RDONLY|os.O_DIRECTORY)
+        try:os.fsync(fd)
+        finally:os.close(fd)
+    if receipt_path.exists():raise Rejected('sandbox process receipt already exists')
+    save_process()  # Durable unique unit identity before any process can launch.
     started = time.monotonic()
     termination = None
     with input_path.open("rb") as stdin, log_path.open("xb") as output:
@@ -130,11 +145,17 @@ def execute(sandbox: Sandbox, command: list[str], log_path: Path, limits: Limits
         settled = False
         try:
             cgroup, caps = _confirm_cgroup(unit, process, limits)
+            receipt.update(state='STARTED',cgroup=str(cgroup));save_process()
+            if cancel_event is not None and cancel_event.is_set():
+                raise Rejected("CANCELLED")
             release.write_bytes(b"release\n")
             selector = selectors.DefaultSelector()
             selector.register(process.stdout, selectors.EVENT_READ)
             written = 0
             while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    termination = "CANCELLED"
+                    break
                 if time.monotonic() - started > limits.wall_seconds + 10:
                     termination = "TIMED_OUT"
                     break
@@ -164,6 +185,7 @@ def execute(sandbox: Sandbox, command: list[str], log_path: Path, limits: Limits
             if selector is not None:
                 selector.close()
             process.stdout.close()
+            receipt.update(state='TERMINATED',descendantsTerminated=True);save_process()
     payload = log_path.read_bytes()
     if len(payload) > limits.output_bytes:
         termination = "OUTPUT_LIMIT"
@@ -222,7 +244,7 @@ def _confirm_empty(cgroup: Path):
     raise Rejected("UNCONFIRMED_TERMINATION: cgroup descendants remain")
 
 
-def preflight(sandbox: Sandbox, log_path: Path) -> dict:
+def preflight(sandbox: Sandbox, log_path: Path, *, cancel_event=None, limits=Limits(wall_seconds=20)) -> dict:
     """Check boundaries inside the same cgroup+namespace path used for workload code."""
     probe = """import os,socket,json
 assert os.environ.get('OPENAI_API_KEY') is None
@@ -245,7 +267,7 @@ except OSError: pass
 assert os.listdir('/sys') == [] if os.path.isdir('/sys') else True
 print(json.dumps({'sandbox_probe':'PASS','network':'DENIED','host_credentials':'NOT_MOUNTED'}))
 """
-    result = execute(sandbox, ["/usr/bin/python3", "-c", probe], log_path, Limits(wall_seconds=20))
+    result = execute(sandbox, ["/usr/bin/python3", "-c", probe], log_path, limits, cancel_event=cancel_event)
     if result["exit_code"] != 0 or result["termination"]:
         raise Rejected("BLOCKED_ENVIRONMENT: namespace/cgroup preflight failed")
     return result

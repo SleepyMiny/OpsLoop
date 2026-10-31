@@ -166,7 +166,7 @@ def normalized_policy(policy):
         "verification": ("stabilityWindow",),
     }
     units = {"ns": 1, "us": 1000, "µs": 1000, "μs": 1000, "ms": 10**6, "s": 10**9, "m": 60 * 10**9, "h": 3600 * 10**9}
-    token = re.compile(r"(\d+(?:\.\d{1,9})?|\.\d{1,9})(ns|us|µs|μs|ms|s|m|h)")
+    token = re.compile(r"([0-9]+(?:\.[0-9]{1,9})?|\.[0-9]{1,9})(ns|us|µs|μs|ms|s|m|h)")
     for section, fields in known.items():
         values = result.get(section, {})
         require(isinstance(values, dict), "policy section is not an object")
@@ -180,12 +180,62 @@ def normalized_policy(policy):
             while remaining:
                 match = token.match(remaining)
                 require(match is not None, "invalid policy duration syntax")
-                total += Fraction(match[1]) * units[match[2]]
+                segment = Fraction(match[1]) * units[match[2]]
+                # Go truncates sub-ns parts per segment. Reject these rather
+                # than summing them into a different duration. No float math.
+                require(segment.denominator == 1, "policy duration segment loses nanosecond precision")
+                total += segment
                 remaining = remaining[match.end():]
             require(total.denominator == 1 and 0 < total <= 2**63 - 1, "policy duration outside positive nanosecond range")
             values[field] = int(total)
     return result
 
+
+
+def policy_snapshots_equal(left, right):
+    """Semantic comparison of complete v1alpha1 snapshots, never a raw hash/signature.
+
+    Reject unknown/missing typed fields before duration normalization. In particular,
+    Go Unmarshal/PolicyHash alone drops unknown fields and supplies zero values.
+    Optional members retain their presence (absent != null != empty/default).
+    """
+    shapes = {
+        "targetRef": {"name": str},
+        "detection": {"nodeUnreadyFor": str, "restartThreshold": int, "restartWindow": str},
+        "filter": {"maxCPUUtilizationPercent": int, "maxMemoryUtilizationPercent": int,
+                   "minimumAvailableMemory": str, "startupMemoryBudget": str,
+                   "requestedCapacityReservePercent": int, "maxSampleAge": str},
+        "score": {"cpuWeight": int, "memoryWeight": int, "requestsWeight": int,
+                  "recentFailurePenalty": int, "maxRecentFailurePenalty": int, "recentFailureWindow": str},
+        "budget": {"maxActionsPerIncident": int, "cooldown": str, "placementTimeout": str,
+                   "verificationTimeout": str, "incidentDeadline": str},
+        "verification": {"serviceName": str, "port": int, "consecutiveSuccesses": int, "stabilityWindow": str},
+    }
+
+    def fields(value, required, optional=None):
+        optional = optional or {}
+        require(type(value) is dict and set(required) <= set(value) <= set(required) | set(optional),
+                "policy snapshot missing/unknown fields")
+        for key, item in value.items():
+            require(type(item) is (required | optional)[key], "policy snapshot field type invalid")
+
+    def validate(value):
+        fields(value, {**{k: dict for k in shapes}, "candidateSelector": dict,
+                       "enabled": bool, "mode": str, "requiredPlatforms": list})
+        for section, shape in shapes.items():
+            fields(value[section], shape, {"podUnreadyFor": str} if section == "detection" else {})
+        require(all(type(v) is str for v in value["requiredPlatforms"]), "policy platforms malformed")
+        selector = value["candidateSelector"]
+        fields(selector, {}, {"matchLabels": dict, "matchExpressions": list})
+        require(all(type(k) is str and type(v) is str for k, v in selector.get("matchLabels", {}).items()),
+                "policy selector labels malformed")
+        for expression in selector.get("matchExpressions", []):
+            fields(expression, {"key": str, "operator": str}, {"values": list})
+            require(all(type(v) is str for v in expression.get("values", [])), "policy selector values malformed")
+        return normalized_policy(value)
+
+    # JSON typed equality avoids Python's True == 1 and does not default fields.
+    return canonical(validate(left)) == canonical(validate(right))
 
 def verify_source(repo_root, provenance, authorization):
     require(provenance.get("schema_version") == "opsloop-image-source-provenance/v1", "unsupported provenance schema")
@@ -243,7 +293,7 @@ def validate_objects(raw, authorization, provenance, now):
     require(spec.get("workload") == {"name": am["name"], "uid": am["uid"]}, "Incident Deployment mismatch")
     require(spec.get("policyRef") == {"name": pm["name"], "uid": pm["uid"]}, "Incident Policy mismatch")
     policy = pol.get("spec", {})
-    require(normalized_policy(policy) == normalized_policy(spec.get("policy")) and policy.get("enabled") is True and policy.get("mode") == "Enforce", "policy changed or runtime not enabled")
+    require(policy_snapshots_equal(policy, spec.get("policy")) and policy.get("enabled") is True and policy.get("mode") == "Enforce", "policy changed or runtime not enabled")
     require(policy.get("targetRef", {}).get("name") == am["name"], "policy target mismatch")
     require(pm.get("generation") == spec.get("policyGeneration"), "policy generation changed")
     grant_text = pm.get("annotations", {}).get("opsloop.io/execution-grant", "")

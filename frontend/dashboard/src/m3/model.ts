@@ -26,7 +26,7 @@ export function route(search: string): { mode: ViewMode; section: Section; run: 
   const source = params.get('source');
   const section = params.get('view');
   return {
-    mode: source === 'live' ? 'live' : source === 'replay' ? 'replay' : 'exhibition',
+    mode: source === 'replay' ? 'replay' : source === 'exhibition' ? 'exhibition' : 'live',
     section: section === 'runtime' || section === 'engineering' || section === 'evidence' ? section : 'overview',
     run: params.get('run') === 'demo-b' ? 'demo-b' : 'demo-a',
   };

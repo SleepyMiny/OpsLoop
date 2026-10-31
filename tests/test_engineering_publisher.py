@@ -64,7 +64,7 @@ class PublisherTests(unittest.TestCase):
                        "baseline_source_files": before, "candidate": candidate, "harness_files": inventory(self.run / "harness"),
                        "bundle_sha256": digest(canonical(bundle)), "proposal_sha256": digest(canonical(proposal)), "patch_sha256": digest(patch),
                        "model_process": self.process(0, codex),
-                       "broker": {"requests": 1, "errors": {}, "input_bytes": 10, "output_bytes": 10, "model": "gpt-6-luna",
+                       "broker": {"requests": 1, "dispatched_requests": 1, "errors": {}, "input_bytes": 10, "output_bytes": 10, "model": "gpt-6-luna",
                                   "reasoning_effort": "medium", "mode": "chatgpt",
                                   "provider_credentials_in_sandbox": False}}
         (self.run / "preflight.log").write_bytes(b"synthetic sandbox preflight fixture\n")
@@ -114,8 +114,8 @@ class PublisherTests(unittest.TestCase):
                     **{k: plan[k] for k in ("repository", "repository_id", "base_ref", "head_ref", "base_commit", "candidate_source_sha256")}}
         pr = {"number": 123, "html_url": f"https://github.com/{REPOSITORY}/pull/123", "state": "open", "merged": False,
               "title": plan["pull_request"]["title"], "body": plan["pull_request"]["body"], "draft": True, "auto_merge": None,
-              "base": {"ref": BASE_REF, "sha": self.base, "repo": {"full_name": REPOSITORY, "id": REPOSITORY_ID}},
-              "head": {"ref": HEAD_REF, "sha": "c" * 40, "repo": {"full_name": REPOSITORY, "id": REPOSITORY_ID}}}
+              "base": {"ref": plan["base_ref"], "sha": self.base, "repo": {"full_name": REPOSITORY, "id": REPOSITORY_ID}},
+              "head": {"ref": plan["head_ref"], "sha": "c" * 40, "repo": {"full_name": REPOSITORY, "id": REPOSITORY_ID}}}
         remote = {"schema_version": "opsloop-github-pr-observation/v1", "evidence_kind": "observed", "observed_at": when(-1),
                   "method": "GET", "api_origin": "https://api.github.com", "path": f"/repos/{REPOSITORY}/pulls/123", "response": pr,
                   "head_commit_path": f"/repos/{REPOSITORY}/git/commits/" + "c" * 40,
@@ -138,6 +138,60 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(p["commit"]["parents"], [self.base])
         self.assertEqual(p["remote_ci"], "NOT_RUN")
         self.assertNotIn("synthetic test proposal", p["pull_request"]["body"])
+
+    def test_retry_winner_keeps_first_attempt_and_requires_exact_paths(self):
+        winner = self.run / 'attempt-2'; winner.mkdir()
+        for name in ('candidate','verification-source'):
+            shutil.copytree(self.run/name,winner/name)
+        for name in ('candidate.log','codex.jsonl','candidate.patch','model-proposal.json'):
+            shutil.copyfile(self.run/name,winner/name)
+        failed=copy.deepcopy(self.result['candidate_verification'])
+        failed['accepted']=False; failed['report']['all_passed']=False
+        failed['report']['checks'][0]['passed']=False
+        log=canonical(failed['report']); (self.run/'candidate.log').write_bytes(log)
+        failed['process']=self.process(1,log)
+        def attempt(number, verification):
+            return {'attempt':number,'broker':self.result['broker'],'model_process':self.result['model_process'],
+                    'patch_sha256':self.result['patch_sha256'],'proposal_sha256':self.result['proposal_sha256'],
+                    'candidate':self.result['candidate'],'verification':verification}
+        self.result.update(attempts=[attempt(1,failed),attempt(2,self.result['candidate_verification'])],
+                           execution_plan={'max_model_calls':2,'model':'gpt-6-luna','reasoning_effort':'medium'},
+                           candidate_directory=str(winner/'candidate'),patch_path=str(winner/'candidate.patch'))
+        self.review['result_sha256']=digest(canonical(self.result))
+        plan=self.plan()
+        self.assertIn('2 approved provider requests',plan['pull_request']['body'])
+        self.assertTrue((self.run/'candidate').is_dir())
+        self.result['candidate_directory']=str(self.run/'candidate')
+        self.review['result_sha256']=digest(canonical(self.result))
+        with self.assertRaises(Rejected): self.plan()
+        self.result['candidate_directory']=str(winner/'candidate')
+        self.result['attempts'][0]['verification']['accepted']=True
+        self.review['result_sha256']=digest(canonical(self.result))
+        with self.assertRaises(Rejected): self.plan()
+
+    def fresh_target(self):
+        return {**self.target, 'schema_version':'opsloop-publish-target/v2','base_ref':'main',
+                'head_ref':'opsloop/exhibition/runtime-one','run_id':'runtime-one','epoch':'epoch-one',
+                'head_ref_exists':False,'observed_at':when(-1)}
+
+    def test_fresh_exhibition_target_is_run_bound_and_preserves_pr6(self):
+        self.target=self.fresh_target()
+        plan=self.plan()
+        self.assertEqual(plan['schema_version'],'opsloop-publish-plan/v2')
+        self.assertEqual(plan['pull_request']['base'],'main')
+        self.assertEqual(plan['pull_request']['head'],'opsloop/exhibition/runtime-one')
+        self.assertTrue(plan['preconditions']['head_ref_must_not_exist'])
+        args, approval, remote=self.receipt_arguments()
+        self.assertEqual(record_pr(**args)['state'],'PR_CREATED')
+        remote['response']['number']=6
+        args['remote_sha256']=self.write(args['remote_path'],remote)
+        with self.assertRaises(Rejected): record_pr(**args)
+        valid=copy.deepcopy(self.target)
+        for key,value in [('run_id','another-run'),('epoch','other'),('head_ref',HEAD_REF),
+                           ('base_ref',BASE_REF),('head_ref_exists',True),('repository','attacker/repo'),
+                           ('observed_at',when(-601))]:
+            self.target=copy.deepcopy(valid); self.target[key]=value
+            with self.subTest(key=key), self.assertRaises(Rejected): self.plan()
 
     def test_changed_candidate_and_stale_review_are_rejected(self):
         p = self.run / "candidate" / ALLOWED_PATHS[0]

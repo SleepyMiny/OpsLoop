@@ -46,7 +46,7 @@ export class HttpDataSource implements DashboardDataSource {
     this.label = this.baseUrl !== undefined ? `Live · ${this.baseUrl || 'same origin'}` : 'Live · 연결 안 됨';
     this.status = this.baseUrl !== undefined
       ? { state: 'connecting' }
-      : { state: 'unconfigured', message: 'VITE_OPSLOOP_API_BASE가 설정되지 않았습니다.' };
+      : { state: 'unconfigured', message: '실측 관측 연결이 설정되지 않았습니다.' };
   }
 
   start(): void {
@@ -92,6 +92,13 @@ export class HttpDataSource implements DashboardDataSource {
         headers: { Accept: 'application/json' },
         credentials: 'omit',
       });
+      if (res.status === 410) {
+        const closed: unknown = await res.json();
+        if (generation !== this.generation) return;
+        if (closed && typeof closed === 'object' && 'snapshot' in closed && closed.snapshot) this.snapshot = parseSnapshot(closed.snapshot);
+        this.running = false;
+        throw new Error('실측 연결을 종료했습니다. 마지막 관측 기록입니다.');
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body: unknown = await res.json();
       if (generation !== this.generation) return;

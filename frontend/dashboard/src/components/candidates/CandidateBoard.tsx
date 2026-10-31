@@ -1,4 +1,6 @@
 import { useId, useMemo } from 'react';
+import { displayIncident } from '../../domain/displayIncident';
+import { bytes, percent } from '../shared/format';
 import { EnumCode, Instrument, Lamp } from '../shared/primitives';
 import type { RegionProps } from '../types';
 import { CandidateRow } from './CandidateRow';
@@ -48,6 +50,13 @@ export function CandidateBoard({ snapshot, emphasized }: RegionProps) {
         ) : (
           <CandidateTable model={model} idBase={uid} describedBy={stripId} />
         )}
+        {displayIncident(snapshot)?.status.runtime.decision?.candidates.some(c => c.resourceCondition) ? <section aria-label="실측과 실험 입력 구분" className={styles.empty}>
+          <strong>이번 run의 실험 입력 · 위 평가 막대는 적용값</strong><p>Prometheus 원본 실측과 Node 상태는 변경하지 않았습니다.</p>
+          {displayIncident(snapshot)?.status.runtime.decision?.candidates.filter(c => c.resourceCondition).map(c => <div key={c.nodeUid}>
+            <strong>{c.nodeName}</strong><p>CPU 실측 {c.measurements.cpuUtilization === null ? '미확인' : percent(c.measurements.cpuUtilization)} → 적용 {c.resourceCondition!.appliedMeasurements.cpuUtilization === null ? '미확인' : percent(c.resourceCondition!.appliedMeasurements.cpuUtilization!)} · 가용 메모리 실측 {c.measurements.memAvailableBytes === null ? '미확인' : bytes(c.measurements.memAvailableBytes)} → 적용 {c.resourceCondition!.appliedMeasurements.memAvailableBytes === null ? '미확인' : bytes(c.resourceCondition!.appliedMeasurements.memAvailableBytes!)}</p>
+            <details><summary>run · Policy / Node UID · 만료 · SHA-256</summary><p>{c.resourceCondition!.runID} / {c.resourceCondition!.epoch} / {c.resourceCondition!.policyUID} / {c.nodeUid}</p><p>{c.resourceCondition!.expiresAt}</p><code>{c.resourceCondition!.configSHA256}</code></details>
+          </div>)}
+        </section> : null}
         <Foot model={model} />
       </div>
     </Instrument>

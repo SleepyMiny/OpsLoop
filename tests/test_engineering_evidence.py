@@ -13,6 +13,7 @@ from tools.engineering_evidence.seal import (
     build_bundle, canonical, digest, pinned_json, seal_bundle, verify_sealed, verify_source,
     validate_image_digests,
     normalized_policy,
+    policy_snapshots_equal,
 )
 
 
@@ -45,7 +46,8 @@ def fixtures():
                   "platform_image_digests": [image], "source_files": source_files}
     policy = meta("RecoveryPolicy", "quote", "policy-uid")
     policy["metadata"]["generation"] = 3
-    policy["spec"] = {"enabled": True, "mode": "Enforce", "targetRef": {"name": "quote"}, "budget": {"maxActionsPerIncident": 1}}
+    from tests.policy_snapshot_fixture import policy_spec
+    policy["spec"] = policy_spec()
     scope = {"runID": "run-one", "epoch": "epoch-one", "clusterUID": "cluster-one", "namespace": "opsloop-demo-b",
              "policyUID": "policy-uid", "deploymentUID": "deployment-uid", "policyGeneration": 3,
              "policyHash": "e" * 64, "incident": "incident"}
@@ -238,9 +240,9 @@ class EvidenceTests(unittest.TestCase):
         self.assertNotEqual(normalized_policy(raw), normalized_policy(changed))
         for invalid in ("-1s", "1d", "NaN", "1s trailing", "9223372036854775808ns", "0s", 60):
             with self.subTest(value=invalid), self.assertRaises(EvidenceError): normalized_policy({"budget": {"cooldown": invalid}})
-        self.raw["policy.json"]["spec"].update(raw)
+        self.raw["policy.json"]["spec"]["budget"].update(raw["budget"])
         self.raw["policy.json"]["spec"]["budget"]["maxActionsPerIncident"] = 1
-        self.raw["incident.json"]["spec"]["policy"].update(typed)
+        self.raw["incident.json"]["spec"]["policy"]["budget"].update(typed["budget"])
         self.raw["incident.json"]["spec"]["policy"]["budget"]["maxActionsPerIncident"] = 1
         self.build()
         self.raw["incident.json"]["spec"]["policy"]["budget"]["cooldown"] = "2m1s"

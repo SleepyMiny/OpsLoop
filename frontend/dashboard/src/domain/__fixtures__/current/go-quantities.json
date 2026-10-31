@@ -1,0 +1,130 @@
+[
+  {
+    "input": "1e6",
+    "bytes": "1000000"
+  },
+  {
+    "input": "1E+6",
+    "bytes": "1000000"
+  },
+  {
+    "input": "1m",
+    "bytes": "1"
+  },
+  {
+    "input": "100m",
+    "bytes": "1"
+  },
+  {
+    "input": "1Pi",
+    "bytes": "1125899906842624"
+  },
+  {
+    "input": "512Mi",
+    "bytes": "536870912"
+  },
+  {
+    "input": "1.5Gi",
+    "bytes": "1610612736"
+  },
+  {
+    "input": "0.1",
+    "bytes": "1"
+  },
+  {
+    "input": "1.1",
+    "bytes": "2"
+  },
+  {
+    "input": ".5",
+    "bytes": "1"
+  },
+  {
+    "input": "1.",
+    "bytes": "1"
+  },
+  {
+    "input": "+1",
+    "bytes": "1"
+  },
+  {
+    "input": "0",
+    "bytes": "0"
+  },
+  {
+    "input": "-0",
+    "bytes": "0"
+  },
+  {
+    "input": "1n",
+    "bytes": "1"
+  },
+  {
+    "input": "1u",
+    "bytes": "1"
+  },
+  {
+    "input": "1e-100",
+    "bytes": "1"
+  },
+  {
+    "input": "0e100000",
+    "bytes": "0"
+  },
+  {
+    "input": "1.25Ki",
+    "bytes": "1280"
+  },
+  {
+    "input": "9007199254740991",
+    "bytes": "9007199254740991"
+  },
+  {
+    "input": "9007199254740990.1",
+    "bytes": "9007199254740991"
+  },
+  {
+    "input": "9007199254740991.1",
+    "bytes": "9007199254740992"
+  },
+  {
+    "input": "8Pi",
+    "bytes": "9007199254740992"
+  },
+  {
+    "input": "1Ei",
+    "bytes": "1152921504606846976"
+  },
+  {
+    "input": "1MiB",
+    "invalid": true
+  },
+  {
+    "input": "1K",
+    "invalid": true
+  },
+  {
+    "input": " 1",
+    "invalid": true
+  },
+  {
+    "input": "1 ",
+    "invalid": true
+  },
+  {
+    "input": "",
+    "invalid": true
+  },
+  {
+    "input": ".",
+    "bytes": "0"
+  },
+  {
+    "input": "1e",
+    "invalid": true
+  },
+  {
+    "input": "1e1.5",
+    "invalid": true
+  }
+]

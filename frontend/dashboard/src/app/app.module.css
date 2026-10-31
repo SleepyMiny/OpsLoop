@@ -730,7 +730,7 @@
   min-height: 0;
   overflow: visible;
 }
-.app[data-integrated] > section { width: 100%; }
+.app[data-integrated] > section { width: auto; }
 .app[data-integrated] > .sourceNotice { width: auto; max-height: none; }
 .app[data-integrated] .stage {
   max-width: 1660px;
@@ -757,3 +757,5 @@
   .app[data-integrated] .decision,
   .app[data-integrated] .detail { min-height: 420px; }
 }
+.app[data-integrated] > .sourceNotice { display:flex; gap:12px; flex-wrap:wrap; align-items:baseline; margin:6px 3vw; padding:6px 10px; font-size:11px; }
+.app[data-integrated] > .sourceNotice p { margin:0; }

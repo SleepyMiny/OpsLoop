@@ -83,3 +83,6 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 /deploy/owner/kustomization.yaml
+
+# Private subprocess audit receipts; never include in a source publication.
+/command-diagnostics/
