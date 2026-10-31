@@ -108,18 +108,38 @@ def issue(payload_path, payload_sha, approval_path, approval_sha, key_path, ledg
     require(receipt.get('schema') in ('opsloop-exhibition-completion/v1','opsloop-exhibition-migration-completion/v1'),'ISSUANCE_COMPLETION_SCHEMA')
     from tools.exhibition_lifecycle import verify_completion
     verify_completion(approval['previousCompletion'],approval['previousCompletionSHA256'])
+    replay_authorization=None
+    # Cache only times from the exact documents already validated by host pins.
+    # Subsequent deadline checks perform no file reads or signature operations.
+    not_before=instant(payload['grant']['notBefore'])
+    deadline=min(instant(approval['expiresAt']),instant(payload['grant']['notAfter']))
+    if 'modelBudget' in payload:deadline=min(deadline,instant(payload['modelBudget']['expiresAt']))
     if payload.get('circuitReplay') is not None:
-        from tools.exhibition_replay import approved_replay
+        from tools.exhibition_replay import approved_replay,replay_intent
         ref=approval.get('circuitReplayApproval')
         require(isinstance(ref,dict),'EXPLICIT_REPLAY_APPROVAL_REQUIRED')
         controller_ref=approval.get('controllerReceipt');controller=pinned(controller_ref['path'],controller_ref['sha256']) if controller_ref else None
         require(approved_replay(ref,payload,payload['circuitReplay']['workloadImage'],controller)==payload['circuitReplay'],'ISSUANCE_REPLAY_APPROVAL_CHANGED')
+        intent_document=pinned(ref['path'],ref['sha256'])
+        if intent_document.get('schema') in ('opsloop-circuit-replay-intent/v1','opsloop-circuit-replay-intent/v2','opsloop-circuit-replay-intent/v3','opsloop-circuit-replay-intent/v4'):
+            intent_document=replay_intent(ref)
+            not_before=max(not_before,instant(intent_document['notBefore']))
+            deadline=min(deadline,instant(intent_document['notAfter']))
+            if intent_document['schema']=='opsloop-circuit-replay-intent/v4':
+                from tools.exhibition_finite_rounds import finite_approval
+                replay_authorization=intent_document
+                finite,_=finite_approval(replay_authorization)
+                not_before=max(not_before,instant(finite['notBefore']))
+                deadline=min(deadline,instant(finite['notAfter']))
         if payload['schema'] in ('opsloop-exhibition-permit/v2','opsloop-exhibition-permit/v3'):
             from tools.exhibition_replay import v2_roles,verified_predecessor
             require(all(payload[k]==v for k,v in v2_roles(ref,payload,payload['circuitReplay']['workloadImage']).items()),'ISSUANCE_V2_ROLES_CHANGED')
             require(verified_predecessor({'path':approval['previousCompletion'],'sha256':approval['previousCompletionSHA256']},payload['grant']['scope'])==payload['predecessorCompletion'],'ISSUANCE_PREDECESSOR_CHANGED')
     else:
         require('circuitReplayApproval' not in approval and 'controllerReceipt' not in approval,'ISSUANCE_UNUSED_REPLAY_APPROVAL')
+    def current_window():
+        require(not_before<=time.time()<deadline,'ISSUANCE_AUTHORIZATION_EXPIRED_OR_FUTURE')
+
     key_path=Path(key_path); st=key_path.stat(follow_symlinks=False)
     require(key_path.is_absolute() and not key_path.is_symlink() and stat.S_ISREG(st.st_mode) and st.st_uid==os.getuid() and not st.st_mode&0o077,'ISSUANCE_PRIVATE_KEY_REQUIRED')
     root=Path(ledger_path); root.mkdir(mode=0o700,parents=True,exist_ok=True)
@@ -130,8 +150,10 @@ def issue(payload_path, payload_sha, approval_path, approval_sha, key_path, ledg
     db.execute('CREATE TABLE IF NOT EXISTS completion_chain (completion TEXT PRIMARY KEY, authorization TEXT UNIQUE, predecessorRun TEXT, predecessorEpoch TEXT, receiptPath TEXT)')
     db.execute('CREATE TABLE IF NOT EXISTS target_migrations (policyUID TEXT PRIMARY KEY, deploymentUID TEXT, migrationSHA256 TEXT, receiptPath TEXT)')
     db.execute('CREATE TABLE IF NOT EXISTS circuit_replays (approvalSHA256 TEXT PRIMARY KEY, authorization TEXT UNIQUE, evidenceSHA256 TEXT, state TEXT)')
+    db.execute('CREATE TABLE IF NOT EXISTS finite_rounds (approvalSHA256 TEXT, ordinal INTEGER, authorization TEXT UNIQUE, PRIMARY KEY(approvalSHA256,ordinal))')
     try:
         db.execute('BEGIN IMMEDIATE')
+        current_window()  # Lock acquisition may outlast approval.
         for checksum,path in db.execute('SELECT completion,receiptPath FROM completion_chain').fetchall():
             verify_completion(path,checksum)
         g=payload['grant']; s=g['scope']
@@ -153,6 +175,9 @@ def issue(payload_path, payload_sha, approval_path, approval_sha, key_path, ledg
             require(previous[2]=='ISSUED' and receipt.get('schema')=='opsloop-exhibition-completion/v1' and receipt.get('binding',{}).get('runID')==previous[0] and receipt.get('binding',{}).get('epoch')==previous[1],'ISSUANCE_PREDECESSOR_NOT_COMPLETE')
         else:
             require(receipt.get('schema')=='opsloop-exhibition-migration-completion/v1','ISSUANCE_BOOTSTRAP_REQUIRED')
+        if replay_authorization is not None:
+            from tools.exhibition_finite_rounds import reserve_finite_round
+            reserve_finite_round(db,replay_authorization,root)
         db.execute('INSERT INTO completion_chain VALUES (?,?,?,?,?)',(payload['previousCompletionSHA256'],payload['authorizationID'],previous[0] if previous else None,previous[1] if previous else None,approval['previousCompletion']))
         if payload.get('circuitReplay') is not None:
             replay=payload['circuitReplay']
@@ -160,22 +185,45 @@ def issue(payload_path, payload_sha, approval_path, approval_sha, key_path, ledg
         g=payload['grant']; s=g['scope']
         maximum=db.execute('SELECT COALESCE(MAX(ordinal),0) FROM permits WHERE instance=?',(g['instance'],)).fetchone()[0]
         require(payload['ordinal']>maximum,'ISSUANCE_ORDINAL_REPLAY')
+        current_window()
         db.execute('INSERT INTO permits VALUES (?,?,?,?,?,?,?)',(payload['authorizationID'],s['runID'],s['epoch'],g['instance'],payload['ordinal'],payload_sha,'RESERVED_NO_RETRY'))
+        current_window()
         db.execute('COMMIT')
+        current_window()  # A committed reservation is never retried.
         raw=canonical(payload).encode()
         with tempfile.TemporaryDirectory(prefix='opsloop-sign-permit-') as directory:
             source=Path(directory)/'payload'; source.write_bytes(raw)
             signed=subprocess.run(['/usr/bin/openssl','pkeyutl','-sign','-inkey',str(key_path),'-rawin','-in',str(source)],capture_output=True,timeout=5)
         require(signed.returncode==0 and len(signed.stdout)==64,'ISSUANCE_SIGNING_UNCONFIRMED')
+        current_window()
         envelope={'payload':base64.b64encode(raw).decode(),'signature':base64.b64encode(signed.stdout).decode()}
+        envelope_bytes=canonical(envelope).encode()
+        checksum=hashlib.sha256(envelope_bytes).hexdigest()
         output=Path(output)
         require(output.parent.is_dir() and not output.parent.is_symlink() and not output.parent.stat().st_mode&0o077,'ISSUANCE_PRIVATE_OUTPUT_REQUIRED')
+        current_window()  # No output is created when signing/stat crossed expiry.
         with os.fdopen(os.open(output,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600),'wb') as f:
-            f.write(canonical(envelope).encode());f.flush();os.fsync(f.fileno())
+            f.write(envelope_bytes);f.flush();os.fsync(f.fileno())
+        current_window()
+        # Persist the output directory entry before marking issuance complete.
+        directory_fd=os.open(output.parent,os.O_RDONLY|os.O_DIRECTORY)
+        try:os.fsync(directory_fd)
+        finally:os.close(directory_fd)
+        current_window()
+        # Keep the durable reservation if lock acquisition or UPDATE crosses the
+        # deadline: closing an uncommitted transaction rolls this update back.
+        db.execute('BEGIN IMMEDIATE')
+        current_window()
         db.execute('UPDATE permits SET state=? WHERE authorization=?',('ISSUED',payload['authorizationID']))
-        return hashlib.sha256(output.read_bytes()).hexdigest()
+        current_window()
+        db.execute('COMMIT')
+        current_window()
+        # If final COMMIT/close crosses expiry, fail without rewriting committed
+        # history. ISSUED alone never replaces the next run's verified completion.
     except sqlite3.IntegrityError: raise ControlError('ISSUANCE_ALREADY_CONSUMED') from None
     finally: db.close()
+    current_window()  # Last operation before success; no following disk I/O.
+    return checksum
 
 
 def main():

@@ -30,11 +30,17 @@ def approved_circuit_signatures(plan,key,policy):
 
 
 def fresh_payload(plan,key,objects,controller_receipt,*,policy_hash,run_id,epoch,authorization_id,ordinal,previous_completion_sha,now):
-    require(key in ('a','b') and 1<=ordinal<=4 and ('a' if ordinal<=2 else 'b')==key,'SESSION_ORDER_CHANGED')
+    replay_ref=plan['executionInputs'].get('circuitReplayApproval',{}).get(key)
+    intent=None
+    if replay_ref is not None:
+        from tools.exhibition_replay import replay_intent
+        intent=replay_intent(replay_ref)
+    finite=intent is not None and intent['schema']=='opsloop-circuit-replay-intent/v4'
+    require((finite and key=='b' and ordinal==intent['ordinal']) or (not finite and key in ('a','b') and 1<=ordinal<=4 and ('a' if ordinal<=2 else 'b')==key),'SESSION_ORDER_CHANGED')
     t=plan['fixedTargets'][key];dep=objects[key+'-deployment'];pol=objects[key+'-policy'];c=controller_receipt
     experiment_gate(plan,key,dep,pol,objects[key+'-replicasets'],objects[key+'-quotas'],c['instance'],c['expectedInstance'])
     require(c['state']=='STATIC_CONTROLLER_READY' and c['deploymentUID']==plan['deployment']['controller']['uid']
-            and c['podUID']!=c['priorPodUID'] and c['instance']!=c['priorInstance'],'NEW_CONTROLLER_RECEIPT_REQUIRED')
+            and (finite or (c['podUID']!=c['priorPodUID'] and c['instance']!=c['priorInstance'])),'NEW_CONTROLLER_RECEIPT_REQUIRED')
     scope={'clusterUID':plan['clusterUID'],'namespaceUID':t['namespaceUID'],'namespace':t['namespace'],'policy':t['policy'],
            'policyUID':t['policyUID'],'policyGeneration':pol['metadata']['generation']+2,'policyHash':policy_hash,
            'deployment':t['deployment'],'deploymentUID':t['deploymentUID'],
@@ -59,7 +65,8 @@ def fresh_payload(plan,key,objects,controller_receipt,*,policy_hash,run_id,epoch
         from tools.exhibition_replay import approved_replay,replay_intent,v2_roles
         intent=replay_intent(replay_ref)
         if intent['schema'] in ('opsloop-circuit-replay-intent/v2','opsloop-circuit-replay-intent/v3'):result['schema']=intent['schema'].replace('opsloop-circuit-replay-intent/','opsloop-exhibition-permit/')
-        if intent['schema']=='opsloop-circuit-replay-intent/v3':require(intent['approvedReproduction']['baselineTemplate']==dep['spec']['template'],'REPRODUCTION_BASELINE_CHANGED')
+        if finite:result['schema']='opsloop-exhibition-permit/v3'
+        if intent['schema'] in ('opsloop-circuit-replay-intent/v3','opsloop-circuit-replay-intent/v4'):require(intent['approvedReproduction']['baselineTemplate']==dep['spec']['template'],'REPRODUCTION_BASELINE_CHANGED')
         containers=dep['spec']['template']['spec']['containers']
         require(len(containers)==1,'REPLAY_SINGLE_IMAGE_REQUIRED')
         replay=approved_replay(replay_ref,result,containers[0]['image'],c)

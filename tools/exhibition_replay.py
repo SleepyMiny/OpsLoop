@@ -40,7 +40,7 @@ def expected_history(plan,key,policy):
 
 def approved_replay(ref,payload,image,controller_receipt=None):
  approval=pinned(ref['path'],ref['sha256']);scope=payload['grant']['scope'];grant=payload['grant']
- if approval.get('schema') in ('opsloop-circuit-replay-intent/v1','opsloop-circuit-replay-intent/v2','opsloop-circuit-replay-intent/v3'):
+ if approval.get('schema') in ('opsloop-circuit-replay-intent/v1','opsloop-circuit-replay-intent/v2','opsloop-circuit-replay-intent/v3','opsloop-circuit-replay-intent/v4'):
   return bind_intent(ref,payload,image,controller_receipt)
  require(set(approval)=={'schema','approved','purpose','grant','authorizationID','evidence','workloadImage','signature','previousCompletionSHA256'},'REPLAY_APPROVAL_SCHEMA')
  require(approval['schema']=='opsloop-circuit-replay-approval/v1' and approval['approved'] is True and approval['purpose']=='ONE_APPROVED_EXHIBITION_CIRCUIT_EXCEPTION','EXPLICIT_REPLAY_APPROVAL_REQUIRED')
@@ -68,18 +68,23 @@ def replay_intent(ref):
  """Host-only operator intent, fixed before deployment; never inferred from history."""
  a=pinned(ref['path'],ref['sha256'])
  fields={'schema','approved','purpose','scope','authorizationID','ordinal','baseIncidentSequence','maxIncidents','maxActions','evidence','workloadImage','signature','previousCompletionSHA256','notBefore','notAfter','controller'}
- v2=a.get('schema') in ('opsloop-circuit-replay-intent/v2','opsloop-circuit-replay-intent/v3')
+ v2=a.get('schema') in ('opsloop-circuit-replay-intent/v2','opsloop-circuit-replay-intent/v3','opsloop-circuit-replay-intent/v4')
  if v2:fields=(fields-{'evidence','previousCompletionSHA256'})|{'circuitEvidence','predecessorCompletion'}
- if a.get('schema')=='opsloop-circuit-replay-intent/v3':fields.add('approvedReproduction')
- require(set(a)==fields and a['schema'] in ('opsloop-circuit-replay-intent/v1','opsloop-circuit-replay-intent/v2','opsloop-circuit-replay-intent/v3') and a['approved'] is True and a['purpose']=='ONE_APPROVED_EXHIBITION_CIRCUIT_EXCEPTION','EXPLICIT_REPLAY_APPROVAL_REQUIRED')
- require(a['ordinal']==4 and a['maxIncidents']==a['maxActions']==1,'REPLAY_ONE_B2_ONLY')
+ if a.get('schema') in ('opsloop-circuit-replay-intent/v3','opsloop-circuit-replay-intent/v4'):fields.add('approvedReproduction')
+ if a.get('schema')=='opsloop-circuit-replay-intent/v4':fields.add('finiteRoundsApproval')
+ require(set(a)==fields and a['schema'] in ('opsloop-circuit-replay-intent/v1','opsloop-circuit-replay-intent/v2','opsloop-circuit-replay-intent/v3','opsloop-circuit-replay-intent/v4') and a['approved'] is True and a['purpose']=='ONE_APPROVED_EXHIBITION_CIRCUIT_EXCEPTION','EXPLICIT_REPLAY_APPROVAL_REQUIRED')
+ finite=a['schema']=='opsloop-circuit-replay-intent/v4'
+ require((finite or a['ordinal']==4) and type(a['maxIncidents']) is int and type(a['maxActions']) is int and a['maxIncidents']==a['maxActions']==1,'REPLAY_ONE_B2_ONLY')
+ if finite:
+  from tools.exhibition_finite_rounds import finite_approval
+  finite_approval(a)
  require(instant(a['notBefore'])<=time.time()<instant(a['notAfter']) and 0<instant(a['notAfter'])-instant(a['notBefore'])<=21600,'REPLAY_INTENT_EXPIRED')
  c=a['controller']
- require(set(c)=={'deploymentUID','imageID','priorInstance','priorPodUID'} and all(c.values()),'REPLAY_CONTROLLER_BINDING_REQUIRED')
+ require(set(c)==({'deploymentUID','imageID','instance','podUID'} if finite else {'deploymentUID','imageID','priorInstance','priorPodUID'}) and all(c.values()),'REPLAY_CONTROLLER_BINDING_REQUIRED')
  require(re.fullmatch(r'[^\s@]+@sha256:[a-f0-9]{64}',c['imageID']) and re.fullmatch(r'[^\s@]+@sha256:[a-f0-9]{64}',a['workloadImage']),'REPLAY_IMMUTABLE_IMAGE_REQUIRED')
  proof=evidence(a['circuitEvidence'] if v2 else a['evidence'],a['scope'])
  if v2:verified_predecessor(a['predecessorCompletion'],a['scope'])
- if a['schema']=='opsloop-circuit-replay-intent/v3':
+ if a['schema'] in ('opsloop-circuit-replay-intent/v3','opsloop-circuit-replay-intent/v4'):
   validate_reproduction(a['approvedReproduction'],a['scope'],a['workloadImage'])
   inc=pinned(a['circuitEvidence']['incident']['path'],a['circuitEvidence']['incident']['sha256'])
   require(all(inc['spec']['trigger'].get(k)==v for k,v in a['approvedReproduction']['classification'].items()),'REPRODUCTION_SOURCE_CLASSIFICATION_CHANGED')
@@ -100,9 +105,10 @@ def pretransition_replay(plan,key,objects,prior,policy_hash):
  require(s['policyGeneration']==p['metadata']['generation']+2 and s['policyHash']==policy_hash and a['baseIncidentSequence']==p['status'].get('incidentSequence',0),'REPLAY_POLICY_STATE_CHANGED')
  require(s['incident']==t['policy']+'-'+t['policyUID'][:8]+'-'+str(a['baseIncidentSequence']+1).zfill(5),'REPLAY_INCIDENT_CHANGED')
  require(len(d['spec']['template']['spec']['containers'])==1 and not d['spec']['template']['spec'].get('initContainers') and d['spec']['template']['spec']['containers'][0]['image']==a['workloadImage'],'REPLAY_IMAGE_CHANGED')
- if a['schema']=='opsloop-circuit-replay-intent/v3':require(d['spec']['template']==a['approvedReproduction']['baselineTemplate'],'REPRODUCTION_BASELINE_TEMPLATE_CHANGED')
- require(c['deploymentUID']==plan['deployment']['controller']['uid'] and c['priorInstance']==prior['instance'] and c['priorPodUID']==prior['podUID'] and c['imageID'].endswith('@'+plan['deployment']['imagePublication']['digest']),'REPLAY_CONTROLLER_CHANGED')
- if a['schema'] in ('opsloop-circuit-replay-intent/v2','opsloop-circuit-replay-intent/v3'):
+ if a['schema'] in ('opsloop-circuit-replay-intent/v3','opsloop-circuit-replay-intent/v4'):require(d['spec']['template']==a['approvedReproduction']['baselineTemplate'],'REPRODUCTION_BASELINE_TEMPLATE_CHANGED')
+ finite=a['schema']=='opsloop-circuit-replay-intent/v4'
+ require(c['deploymentUID']==plan['deployment']['controller']['uid'] and c['instance' if finite else 'priorInstance']==prior['instance'] and c['podUID' if finite else 'priorPodUID']==prior['podUID'] and c['imageID'].endswith('@'+plan['deployment']['imagePublication']['digest']),'REPLAY_CONTROLLER_CHANGED')
+ if a['schema'] in ('opsloop-circuit-replay-intent/v2','opsloop-circuit-replay-intent/v3','opsloop-circuit-replay-intent/v4'):
   require(a['predecessorCompletion']==plan['newInterval']['continuation']['predecessorCompletion'],'REPLAY_PREDECESSOR_CHANGED')
  else:require(a['previousCompletionSHA256']==plan['newInterval']['continuation']['completion']['sha256'],'REPLAY_PREDECESSOR_CHANGED')
  unconsumed_intent(ref,plan['executionInputs']['integration']['issuanceState'])
@@ -111,15 +117,19 @@ def pretransition_replay(plan,key,objects,prior,policy_hash):
 
 def bind_intent(ref,payload,image,receipt):
  a=replay_intent(ref);g=payload['grant'];s=g['scope'];c=a['controller']
- v2=a['schema'] in ('opsloop-circuit-replay-intent/v2','opsloop-circuit-replay-intent/v3')
- require(payload['schema']==a['schema'].replace('opsloop-circuit-replay-intent/','opsloop-exhibition-permit/'),'REPLAY_CONTRACT_VERSION_CHANGED')
+ v2=a['schema'] in ('opsloop-circuit-replay-intent/v2','opsloop-circuit-replay-intent/v3','opsloop-circuit-replay-intent/v4')
+ finite=a['schema']=='opsloop-circuit-replay-intent/v4'
+ wire='opsloop-exhibition-permit/v3' if finite else a['schema'].replace('opsloop-circuit-replay-intent/','opsloop-exhibition-permit/')
+ require(payload['schema']==wire,'REPLAY_CONTRACT_VERSION_CHANGED')
  fields=('authorizationID','ordinal','baseIncidentSequence','maxIncidents','maxActions')
  require(s==a['scope'] and all(payload[k]==a[k] for k in fields) and payload['previousCompletionSHA256']==(a['predecessorCompletion']['sha256'] if v2 else a['previousCompletionSHA256']),'REPLAY_APPROVAL_SCOPE_CHANGED')
  require(instant(a['notBefore'])<=instant(g['notBefore'])<instant(g['notAfter'])<=instant(a['notAfter']) and instant(g['notAfter'])-instant(g['notBefore'])<=600,'REPLAY_GRANT_WINDOW_CHANGED')
  require(image==a['workloadImage'],'REPLAY_IMAGE_CHANGED')
  budget=payload.get('modelBudget',{});require(budget.get('model')=='gpt-6-luna' and budget.get('reasoningEffort')=='medium' and budget.get('authMode')=='chatgpt' and budget.get('maxModelCalls')==1 and budget.get('totalSeconds')==900 and instant(budget['expiresAt'])<=instant(a['notAfter']),'REPLAY_MODEL_BUDGET_CHANGED')
  require(isinstance(receipt,dict) and receipt.get('state')=='STATIC_CONTROLLER_READY','REPLAY_CONTROLLER_RECEIPT_REQUIRED')
- require(all(receipt.get(k)==v for k,v in c.items()) and receipt['instance']==receipt['expectedInstance']==g['instance'] and receipt['instance']!=c['priorInstance'] and receipt['podUID']!=c['priorPodUID'],'REPLAY_CONTROLLER_RECEIPT_CHANGED')
+ require(all(receipt.get(k)==v for k,v in c.items()) and receipt['instance']==receipt['expectedInstance']==g['instance'],'REPLAY_CONTROLLER_RECEIPT_CHANGED')
+ if not finite:require(receipt['instance']!=c['priorInstance'] and receipt['podUID']!=c['priorPodUID'],'REPLAY_CONTROLLER_RECEIPT_CHANGED')
+ if finite:require(instant(budget['expiresAt'])==instant(g['notBefore'])+900,'FINITE_MODEL_WINDOW_CHANGED')
  proof=evidence(a['circuitEvidence'] if v2 else a['evidence'],s);proof.pop('imageDigest')
  return {'purpose':a['purpose'],'workloadImage':image,**proof,'approvalSHA256':ref['sha256']}
 
@@ -129,7 +139,11 @@ def unconsumed_intent(ref,ledger_path):
  import sqlite3
  from pathlib import Path
  a=replay_intent(ref);s=a['scope'];path=Path(ledger_path)/'issuance.sqlite3'
- v2=a['schema'] in ('opsloop-circuit-replay-intent/v2','opsloop-circuit-replay-intent/v3')
+ if a['schema']=='opsloop-circuit-replay-intent/v4':
+  from tools.exhibition_finite_rounds import finite_approval
+  approval,_=finite_approval(a)
+  require(Path(ledger_path).resolve()==Path(approval['issuerLedger']).resolve(),'FINITE_LEDGER_CHANGED')
+ v2=a['schema'] in ('opsloop-circuit-replay-intent/v2','opsloop-circuit-replay-intent/v3','opsloop-circuit-replay-intent/v4')
  predecessor=verified_predecessor(a['predecessorCompletion'],s) if v2 else None
  completion=a['predecessorCompletion']['sha256'] if v2 else a['previousCompletionSHA256']
  require(path.is_file(),'REPLAY_ISSUANCE_LEDGER_REQUIRED')
@@ -167,13 +181,13 @@ def verified_predecessor(ref,target):
  return {**{k:binding[k] for k in ('runID','epoch','policyUID','deploymentUID')},'completionSHA256':ref['sha256'],'retirementSHA256':retirement_sha}
 
 def v2_roles(ref,payload,image):
- a=replay_intent(ref);require(a['schema'] in ('opsloop-circuit-replay-intent/v2','opsloop-circuit-replay-intent/v3'),'REPLAY_V2_INTENT_REQUIRED')
+ a=replay_intent(ref);require(a['schema'] in ('opsloop-circuit-replay-intent/v2','opsloop-circuit-replay-intent/v3','opsloop-circuit-replay-intent/v4'),'REPLAY_V2_INTENT_REQUIRED')
  scope=payload['grant']['scope'];proof=evidence(a['circuitEvidence'],scope);proof.pop('imageDigest')
  circuit={**proof,'workloadImage':image,'policyUID':scope['policyUID'],'deploymentUID':scope['deploymentUID']}
  predecessor=verified_predecessor(a['predecessorCompletion'],scope)
  authorization={'authorizationID':payload['authorizationID'],'approvalSHA256':ref['sha256'],'circuitEvidenceSHA256':projection_hash(circuit),'predecessorCompletionSHA256':projection_hash(predecessor)}
  result={'circuitEvidence':circuit,'predecessorCompletion':predecessor,'newExecutionAuthorization':authorization}
- if a['schema']=='opsloop-circuit-replay-intent/v3':
+ if a['schema'] in ('opsloop-circuit-replay-intent/v3','opsloop-circuit-replay-intent/v4'):
   result['approvedReproduction']=a['approvedReproduction']
   authorization['approvedReproductionSHA256']=projection_hash(a['approvedReproduction'])
  return result

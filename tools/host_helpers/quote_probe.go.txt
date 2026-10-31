@@ -1,0 +1,47 @@
+// Trusted coordinator probe: fixed TLS API origin, namespace, method and fixture.
+package main
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"regexp"
+	"time"
+
+	"k8s.io/client-go/tools/clientcmd"
+)
+
+func main() {
+	if err := run(); err != nil { fmt.Fprintln(os.Stderr, "fixed quote probe failed:", err); os.Exit(1) }
+}
+
+func run() error {
+	if len(os.Args)!=3 || !regexp.MustCompile(`^engineering-demo-[a-z0-9-]+$`).MatchString(os.Args[1]) || !regexp.MustCompile(`^[a-f0-9-]{36}$`).MatchString(os.Args[2]) { return fmt.Errorf("invalid explicit Pod identity") }
+	raw,err:=os.ReadFile(__CONFIG_LITERAL__);if err!=nil{return fmt.Errorf("configuration unavailable")}
+	k,err:=clientcmd.Load(raw);if err!=nil{return fmt.Errorf("configuration invalid")}
+	c:=k.Contexts[k.CurrentContext];if c==nil || k.CurrentContext!="default" {return fmt.Errorf("context mismatch")}
+	cluster,u:=k.Clusters[c.Cluster],k.AuthInfos[c.AuthInfo]
+	const origin=__API_ORIGIN_LITERAL__
+	if cluster==nil || u==nil || cluster.Server!=origin || cluster.InsecureSkipTLSVerify || cluster.ProxyURL!="" || cluster.CertificateAuthority!="" || cluster.TLSServerName!="" || len(cluster.CertificateAuthorityData)==0 || u.Exec!=nil || u.AuthProvider!=nil || u.ClientCertificate!="" || u.ClientKey!="" || u.Token!="" || u.TokenFile!="" || u.Username!="" || u.Password!="" || u.Impersonate!="" || u.ImpersonateUID!="" || len(u.ImpersonateGroups)!=0 || len(u.ImpersonateUserExtra)!=0 {return fmt.Errorf("only explicit embedded TLS allowed")}
+	roots:=x509.NewCertPool();if !roots.AppendCertsFromPEM(cluster.CertificateAuthorityData){return fmt.Errorf("CA invalid")}
+	cert,err:=tls.X509KeyPair(u.ClientCertificateData,u.ClientKeyData);if err!=nil{return fmt.Errorf("TLS identity invalid")}
+	transport:=&http.Transport{TLSClientConfig:&tls.Config{MinVersion:tls.VersionTLS12,RootCAs:roots,Certificates:[]tls.Certificate{cert}},Proxy:nil,DisableKeepAlives:true}
+	defer transport.CloseIdleConnections()
+	client:=&http.Client{Transport:transport,Timeout:5*time.Second,CheckRedirect:func(*http.Request,[]*http.Request)error{return fmt.Errorf("redirect refused")}}
+	fixture:=[]byte(`{"items":[]}`)
+	path:="/api/v1/namespaces/opsloop-demo-b/pods/http:"+os.Args[1]+":8080/proxy/quote"
+	req,_:=http.NewRequest(http.MethodPost,origin+path,bytes.NewReader(fixture));req.Header.Set("Content-Type","application/json")
+	start:=time.Now().UTC();resp,err:=client.Do(req);if err!=nil{return fmt.Errorf("application request unconfirmed")};defer resp.Body.Close()
+	body,err:=io.ReadAll(io.LimitReader(resp.Body,16385));if err!=nil || len(body)>16384 {return fmt.Errorf("response unavailable/oversized")}
+	var result map[string]any;if json.Unmarshal(body,&result)!=nil{return fmt.Errorf("response invalid JSON")}
+	if resp.StatusCode!=500 || result["podUID"]!=os.Args[2] || result["error"]!="QUOTE_DIVISION_BY_ZERO" {return fmt.Errorf("expected defect and Pod identity not observed (status %d)",resp.StatusCode)}
+	sha:=func(b []byte)string{s:=sha256.Sum256(b);return hex.EncodeToString(s[:])}
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{"evidence_kind":"observed","transport":"kubernetes-pod-proxy","namespace":"opsloop-demo-b","pod_name":os.Args[1],"pod_uid":os.Args[2],"method":"POST","path":"/quote","http_status":resp.StatusCode,"error_code":result["error"],"request_sha256":sha(fixture),"response_sha256":sha(body),"raw_response":json.RawMessage(body),"observed_at":time.Now().UTC().Format(time.RFC3339Nano),"request_started_at":start.Format(time.RFC3339Nano)})
+}
