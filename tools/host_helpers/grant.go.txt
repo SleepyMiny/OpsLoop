@@ -1,0 +1,160 @@
+// Demo A local wire helper. Default: stdin JSON -> native grant/binding JSON.
+// Explicit clock mode: one pinned namespace GET with embedded static TLS only.
+package main
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/SleepyMiny/OpsLoop/internal/controller"
+	"golang.org/x/sys/unix"
+	"k8s.io/client-go/tools/clientcmd"
+)
+
+const clockOrigin = __API_ORIGIN_LITERAL__
+const clockClusterUID = __CLUSTER_UID_LITERAL__
+const clockConfig = __CONFIG_LITERAL__
+
+func bootTick() (int64, error) {
+	var t unix.Timespec
+	err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &t)
+	return t.Nano(), err
+}
+
+type clockResult struct {
+	APIServerDate string `json:"apiServerDate"`
+	ClusterUID    string `json:"clusterUID"`
+	HostBoot      string `json:"hostBoot"`
+	BeforeTick    int64  `json:"beforeTick"`
+	AfterTick     int64  `json:"afterTick"`
+	Origin        string `json:"origin"`
+}
+
+func serverClock(file, origin, uid string) (clockResult, error) {
+	var out clockResult
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return out, errors.New("static configuration unavailable")
+	}
+	k, err := clientcmd.Load(raw)
+	if err != nil {
+		return out, errors.New("invalid static configuration")
+	}
+	ctx := k.Contexts[k.CurrentContext]
+	if k.CurrentContext != "default" || ctx == nil {
+		return out, errors.New("wrong explicit context")
+	}
+	c, u := k.Clusters[ctx.Cluster], k.AuthInfos[ctx.AuthInfo]
+	if c == nil || u == nil || c.Server != origin || c.ProxyURL != "" || c.InsecureSkipTLSVerify || c.TLSServerName != "" || c.CertificateAuthority != "" || len(c.CertificateAuthorityData) == 0 || u.Exec != nil || u.AuthProvider != nil || u.ClientCertificate != "" || u.ClientKey != "" || len(u.ClientCertificateData) == 0 || len(u.ClientKeyData) == 0 || u.Token != "" || u.TokenFile != "" || u.Username != "" || u.Password != "" || u.Impersonate != "" || u.ImpersonateUID != "" || len(u.ImpersonateGroups) != 0 || len(u.ImpersonateUserExtra) != 0 {
+		return out, errors.New("only embedded static TLS and direct API allowed")
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(c.CertificateAuthorityData) {
+		return out, errors.New("invalid embedded CA")
+	}
+	cert, err := tls.X509KeyPair(u.ClientCertificateData, u.ClientKeyData)
+	if err != nil {
+		return out, errors.New("invalid embedded client certificate")
+	}
+	transport := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, Certificates: []tls.Certificate{cert}}, Proxy: nil, DisableKeepAlives: true}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: 2 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("redirect refused") }}
+	request, err := http.NewRequest(http.MethodGet, origin+"/api/v1/namespaces/kube-system", nil)
+	if err != nil {
+		return out, errors.New("invalid pinned URL")
+	}
+	request.Header.Set("Cache-Control", "no-cache")
+	request.Header.Set("Accept", "application/json")
+	before, err := bootTick()
+	if err != nil {
+		return out, errors.New("boot clock unavailable")
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return out, errors.New("API server clock GET unconfirmed")
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20+1))
+	after, clockErr := bootTick()
+	if err != nil || clockErr != nil || len(body) > 1<<20 || response.StatusCode != http.StatusOK || after < before || after-before > int64(2*time.Second) {
+		return out, errors.New("API clock response invalid/late")
+	}
+	var ns struct {
+		Metadata struct {
+			UID string `json:"uid"`
+		} `json:"metadata"`
+	}
+	if json.Unmarshal(body, &ns) != nil || ns.Metadata.UID != uid {
+		return out, errors.New("API cluster UID mismatch")
+	}
+	date, err := http.ParseTime(response.Header.Get("Date"))
+	if err != nil {
+		return out, errors.New("API Date header unavailable")
+	}
+	boot, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return out, errors.New("host boot identity unavailable")
+	}
+	out = clockResult{date.UTC().Format(time.RFC3339), uid, string(bytesTrimSpace(boot)), before, after, origin}
+	return out, nil
+}
+func bytesTrimSpace(b []byte) []byte {
+	for len(b) > 0 && (b[len(b)-1] == '\n' || b[len(b)-1] == ' ') {
+		b = b[:len(b)-1]
+	}
+	return b
+}
+func wire(input io.Reader, output io.Writer) error {
+	rawInput, readErr := io.ReadAll(io.LimitReader(input, 8193))
+	if readErr != nil || len(rawInput) > 8192 {
+		return errors.New("grant input oversize/unavailable")
+	}
+	var grant controller.ExecutionGrant
+	decoder := json.NewDecoder(bytes.NewReader(rawInput))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&grant) != nil || decoder.Decode(new(any)) != io.EOF {
+		return errors.New("invalid grant input")
+	}
+	if grant.Scope == (controller.ExecutionScope{}) || grant.Scope.Validate() != nil || grant.Version != "opsloop-execution-grant/v1" || len(grant.Instance) != 64 || grant.HeartbeatSequence == 0 || grant.NotBefore.IsZero() || !grant.NotAfter.After(grant.NotBefore) || grant.NotAfter.Sub(grant.NotBefore) > 600*time.Second || grant.HeartbeatAt.Before(grant.NotBefore) || !grant.HeartbeatAt.Before(grant.NotAfter) {
+		return errors.New("grant outside fixed scope/time")
+	}
+	if _, err := hex.DecodeString(grant.Instance); err != nil {
+		return errors.New("invalid process binding")
+	}
+	core, _ := json.Marshal(grant.ExecutionGrantCore)
+	sum := sha256.Sum256(core)
+	raw, _ := json.Marshal(grant)
+	return json.NewEncoder(output).Encode(map[string]string{"annotation": string(raw), "binding": hex.EncodeToString(sum[:])})
+}
+func main() {
+	read := flag.Bool("read-server-clock", false, "one pinned static-TLS namespace GET")
+	flag.Parse()
+	if flag.NArg() != 0 {
+		os.Exit(2)
+	}
+	var err error
+	if *read {
+		var result clockResult
+		result, err = serverClock(clockConfig, clockOrigin, clockClusterUID)
+		if err == nil {
+			err = json.NewEncoder(os.Stdout).Encode(result)
+		}
+	} else {
+		err = wire(os.Stdin, os.Stdout)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}

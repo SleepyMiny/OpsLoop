@@ -1,0 +1,21 @@
+"""Fixed target transport identity; extracted without deployment capabilities."""
+from pathlib import Path
+import yaml
+
+CLIENT=__CLIENT_LITERAL__
+CONFIG=__CONFIG_LITERAL__
+ORIGINS=__ORIGINS_LITERAL__
+class Stop(Exception):pass
+
+def identity():
+ kube=yaml.safe_load(Path(CONFIG).read_bytes());context=kube.get('current-context')
+ contexts=[x['context'] for x in kube.get('contexts',[]) if x.get('name')==context]
+ if len(contexts)!=1:raise Stop('ambiguous kubeconfig context')
+ c=contexts[0];clusters=[x['cluster'] for x in kube.get('clusters',[]) if x.get('name')==c.get('cluster')];users=[x['user'] for x in kube.get('users',[]) if x.get('name')==c.get('user')]
+ if len(clusters)!=1 or len(users)!=1 or clusters[0].get('server') not in ORIGINS:raise Stop('unapproved API identity')
+ cluster,user=clusters[0],users[0]
+ if cluster.get('insecure-skip-tls-verify') or cluster.get('proxy-url') or 'certificate-authority' in cluster or not cluster.get('certificate-authority-data'):raise Stop('explicit embedded CA and no proxy required')
+ if any(k in user for k in ['exec','auth-provider','client-certificate','client-key','tokenFile','username','password']) or not (user.get('token') or (user.get('client-certificate-data') and user.get('client-key-data'))):raise Stop('explicit static credentials only; no fallback')
+ with Path(CLIENT).open('rb') as f:
+  if f.read(4)!=b'\x7fELF':raise Stop('unreviewed client wrapper')
+ return context,cluster['server']

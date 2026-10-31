@@ -1,0 +1,35 @@
+{
+  "schema": "opsloop-host-helper-template-provenance/v1",
+  "templates": {
+    "policy_hash.go.txt": {
+      "origin": "opsloop-host-helper-source/policy_hash.go",
+      "originalSHA256": "4f4b790103f8544237663dec373c069be4bfa53ab49a61478db89aa0c7441842",
+      "templateSHA256": "4f4b790103f8544237663dec373c069be4bfa53ab49a61478db89aa0c7441842",
+      "transformation": "Verbatim source."
+    },
+    "grant.go.txt": {
+      "origin": "opsloop-host-helper-source/grant.go",
+      "originalSHA256": "518c9f4e77efae40eae2614ab027625f7df2be1acc3ac0cc22fd7240f1cd8e90",
+      "templateSHA256": "45e7c6a98d2a7a2642aae43c4e56dc99ae27a03d5097fa5b98e792a80216290d",
+      "transformation": "Only kubeconfig, API origin and cluster UID literals replaced with symbolic placeholders."
+    },
+    "quote_probe.go.txt": {
+      "origin": "opsloop-host-helper-source/quote_probe.go",
+      "originalSHA256": "10afb05e6699e1b465f289d84df238e2c6b737221ccf287361c13b3c7fb06155",
+      "templateSHA256": "c38c5a3325646b1b4a4cb411b9b30d5e8a503ad5ff19f3cb91f44b093933e50d",
+      "transformation": "Only kubeconfig and API origin literals replaced with symbolic placeholders."
+    },
+    "audit.py.txt": {
+      "origin": "opsloop-host-helper-source/audit.py",
+      "originalSHA256": "7c282c141a85eb0ffabc3737bd980aca5ca0e9902349f110aac85db71c146207",
+      "templateSHA256": "7c282c141a85eb0ffabc3737bd980aca5ca0e9902349f110aac85db71c146207",
+      "transformation": "Verbatim source."
+    },
+    "kubernetes.py.txt": {
+      "origin": "opsloop-host-helper-source/kubernetes.py",
+      "originalSHA256": "9dbd0c3a9d4830344093e0bdeed99cd24f0ba1f98fd3ec9ff52a4bcdbd316546",
+      "templateSHA256": "18e071dbef61dd31e81f9fbfd3c19985695314bcec53427448e88bbcc9d81d34",
+      "transformation": "Original identity() body retained; ORIGINS, CLIENT and CONFIG are symbolic placeholders. Required imports/class retained; no deployment functions."
+    }
+  }
+}
