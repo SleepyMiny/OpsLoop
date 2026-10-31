@@ -119,6 +119,7 @@ export interface CrdCandidate {
   rejectReasons?: string[];
   details?: string[];
   measurements: CrdMeasurements;
+  resourceCondition?: { runID: string; epoch: string; policyUID: string; configSHA256: string; expiresAt: string; appliedMeasurements: CrdMeasurements };
   score?: {
     cpuHeadroomPermille: number;
     memoryHeadroomPermille: number;

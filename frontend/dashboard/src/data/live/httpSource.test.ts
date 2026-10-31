@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createDataSource } from '../createDataSource';
 import { DemoSimulation } from '../demo/engine';
 import { DEMO_SCENARIOS } from '../demo/scenarios';
@@ -146,4 +146,34 @@ describe('HttpDataSource lifecycle', () => {
     // Two loops would overlap their 30 ms requests; one loop never has two in flight.
     expect(maxInFlight).toBe(1);
   });
+});
+
+
+it('retains the final snapshot on observation closure and stops polling', async () => {
+  vi.useFakeTimers();
+  const body = JSON.parse(JSON.stringify(sample()));
+  const fetchImpl = vi.fn(async () => new Response(JSON.stringify({snapshot: body}), {status: 410}));
+  const src = new HttpDataSource({baseUrl: 'http://bff.test', pollMs: 5, fetchImpl});
+  try {
+    src.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(src.getStatus()).toEqual({
+      state: 'error',
+      message: '실측 연결을 종료했습니다. 마지막 관측 기록입니다.',
+      lastUpdate: body.observedAt,
+    });
+    expect(src.getSnapshot()?.source).toBe('live');
+    expect(src.getSnapshot()?.observedAt).toBe(body.observedAt);
+    // Closing observation retains historical data, never a synthetic/current replacement.
+    expect(src.getSnapshot()?.narration).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(src.getStatus().state).toBe('error');
+    expect(src.getSnapshot()?.observedAt).toBe(body.observedAt);
+  } finally {
+    src.stop();
+    vi.useRealTimers();
+  }
 });

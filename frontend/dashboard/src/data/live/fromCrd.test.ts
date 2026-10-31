@@ -249,6 +249,18 @@ describe('policyFromCrd', () => {
 });
 
 describe('incidentFromCrd', () => {
+  it('preserves measured resource values and separately displays run-only applied inputs', () => {
+    const crd = crdIncident('WAITING');
+    const candidate = crd.status!.runtime!.decision!.candidates![0]!;
+    candidate.resourceCondition = {runID: 'run-1', epoch: 'epoch-1', policyUID: 'pol-1', configSHA256: 'a'.repeat(64), expiresAt: '2026-10-13T05:10:00Z', appliedMeasurements: {...candidate.measurements, cpuUtilizationPermille: 950, memAvailableBytes: 1024}};
+    const before = JSON.stringify(crd);
+    const converted = incidentFromCrd(crd).status.runtime.decision!.candidates[0]!;
+    expect(converted.measurements.cpuUtilization).toBe(0.31);
+    expect(converted.resourceCondition!.appliedMeasurements.cpuUtilization).toBe(0.95);
+    expect(converted.resourceCondition!.appliedMeasurements.memAvailableBytes).toBe(1024);
+    expect(JSON.stringify(crd)).toBe(before);
+  });
+
   it('converts a recovered Node Failure incident', () => {
     const inc = incidentFromCrd(crdIncident('RECOVERED'), {
       incident: 'demo-api-recovery-0007',

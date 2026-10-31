@@ -32,11 +32,12 @@ type Reader interface {
 }
 type MetricsReader func(context.Context, time.Time, time.Duration) (candidates.Metrics, error)
 type Input struct {
-	Policy     v1alpha1.RecoveryPolicy
-	Incidents  []v1alpha1.RecoveryIncident
-	Deployment appsv1.Deployment
-	Nodes      []corev1.Node
-	Pods       []corev1.Pod
+	Policy             v1alpha1.RecoveryPolicy
+	Incidents          []v1alpha1.RecoveryIncident
+	Deployment         appsv1.Deployment
+	Nodes              []corev1.Node
+	Pods               []corev1.Pod
+	PodInventoryScoped bool
 }
 type Service struct {
 	Reader                Reader
@@ -44,6 +45,7 @@ type Service struct {
 	Namespace, PolicyName string
 	Now                   func() time.Time
 	Timeout               time.Duration
+	Until                 time.Time
 }
 
 // GetOnly is defense in depth even when a local owner's kubeconfig is used.
@@ -58,8 +60,9 @@ func (t GetOnly) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 type KubernetesReader struct {
-	client  kubernetes.Interface
-	dynamic dynamic.Interface
+	client        kubernetes.Interface
+	dynamic       dynamic.Interface
+	PodNamespaces []string
 }
 
 func NewKubernetesReader(config *rest.Config) (*KubernetesReader, error) {
@@ -80,7 +83,7 @@ func NewKubernetesReader(config *rest.Config) (*KubernetesReader, error) {
 	if e != nil {
 		return nil, e
 	}
-	return &KubernetesReader{k, d}, nil
+	return &KubernetesReader{client: k, dynamic: d}, nil
 }
 func (r *KubernetesReader) Read(ctx context.Context, ns, name string) (Input, error) {
 	var in Input
@@ -101,11 +104,22 @@ func (r *KubernetesReader) Read(ctx context.Context, ns, name string) (Input, er
 		return in, e
 	}
 	in.Nodes = nodes.Items
-	pods, e := r.client.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
-	if e != nil {
-		return in, e
+	namespaces := r.PodNamespaces
+	if len(namespaces) == 0 {
+		namespaces = []string{""}
+	} else {
+		in.PodInventoryScoped = true
 	}
-	in.Pods = pods.Items
+	for _, namespace := range namespaces {
+		pods, err := r.client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{Limit: 500})
+		if err != nil {
+			return in, err
+		}
+		if pods.Continue != "" {
+			return in, errors.New("scoped pod inventory incomplete")
+		}
+		in.Pods = append(in.Pods, pods.Items...)
+	}
 	incidents, e := r.dynamic.Resource(schema.GroupVersionResource{Group: "opsloop.io", Version: "v1alpha1", Resource: "recoveryincidents"}).Namespace(ns).List(ctx, metav1.ListOptions{})
 	if e != nil {
 		return in, e
@@ -356,6 +370,9 @@ func Assemble(in Input, m candidates.Metrics, at time.Time, metricError bool) (O
 		}
 	}
 	warnings := []string{"Image platform index not queried: preview fails closed until a verified manifest source is configured.", "HTTP recovery probes/driver timings are not collected by this BFF.", "Pod requests use the Controller contract; native sidecar/Pod overhead limitations apply."}
+	if in.PodInventoryScoped {
+		warnings = append(warnings, "Pod inventory limited to approved namespaces; displayed requests are partial, not cluster-wide available capacity.")
+	}
 	if validMetrics < len(nodes) {
 		warnings = append(warnings, fmt.Sprintf("Complete finite metric tuples available for %d/%d nodes; missing/ambiguous metrics remain null.", validMetrics, len(nodes)))
 	}
@@ -386,6 +403,16 @@ func (s Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	timeout := s.Timeout
 	if timeout == 0 {
 		timeout = 3 * time.Second
+	}
+	if !s.Until.IsZero() {
+		remaining := time.Until(s.Until)
+		if remaining <= 0 {
+			w.WriteHeader(http.StatusGone)
+			return
+		}
+		if remaining < timeout {
+			timeout = remaining
+		}
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()

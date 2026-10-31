@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -27,6 +28,8 @@ func main() {
 	endpoint := flags.String("prometheus-url", "", "Server-side Prometheus URL; empty returns missing metrics")
 	ns := flags.String("namespace", "opsloop-demo", "Observed policy namespace")
 	policy := flags.String("policy", "demo-api", "Observed policy")
+	until := flags.String("observe-until", "", "Absolute RFC3339 observation approval deadline")
+	podNamespaces := flags.String("pod-namespaces", "", "Comma-separated approved Pod observation namespaces; empty reads cluster-wide")
 	_ = flags.Parse(os.Args[1:])
 	var cfg *rest.Config
 	var e error
@@ -42,7 +45,17 @@ func main() {
 	if e != nil {
 		log.Fatal("Kubernetes read-only client unavailable")
 	}
+	if *podNamespaces != "" {
+		reader.PodNamespaces = strings.Split(*podNamespaces, ",")
+	}
 	service := dashboardbff.Service{Reader: reader, Namespace: *ns, PolicyName: *policy}
+	if *until != "" {
+		end, err := time.Parse(time.RFC3339, *until)
+		if err != nil || !end.After(time.Now()) {
+			log.Fatal("Observation deadline invalid")
+		}
+		service.Until = end
+	}
 	if *endpoint != "" {
 		client, e := prom.NewClient(prom.Config{Address: *endpoint, RoundTripper: dashboardbff.PrometheusQueryOnly{Base: http.DefaultTransport}})
 		if e != nil {

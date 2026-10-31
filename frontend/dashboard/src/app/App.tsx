@@ -5,6 +5,7 @@ import { EngineeringTrack } from '../components/engineering/EngineeringTrack';
 import { IncidentPanel } from '../components/incident/IncidentPanel';
 import { PipelineLadder } from '../components/incident/PipelineLadder';
 import { PolicyPanel } from '../components/policy/PolicyPanel';
+import type { Narration as NarrationType } from '../domain/types';
 import type { DashboardDataSource, SourceStatus } from '../data/source';
 import { useDashboard } from '../data/useDashboard';
 import { DetailTabs } from './DetailTabs';
@@ -20,7 +21,7 @@ import { LiveOverview } from '../m3/LiveOverview';
 
 const NEXT_THEME: Record<Theme, Theme> = { auto: 'dark', dark: 'light', light: 'auto' };
 
-export function App({ source, kiosk, publicView = false, integrated = false }: { source: DashboardDataSource; kiosk: boolean; publicView?: boolean; integrated?: boolean }) {
+export function App({ source, kiosk, publicView = false, integrated = false, eventFocus }: { source: DashboardDataSource; kiosk: boolean; publicView?: boolean; integrated?: boolean; eventFocus?: NarrationType['focus'] }) {
   const { snapshot, status, playback } = useDashboard(source);
   const [theme, setTheme] = useTheme();
   const [realityOpen, setRealityOpen] = useState(false);
@@ -38,7 +39,7 @@ export function App({ source, kiosk, publicView = false, integrated = false }: {
   const closeReality = useCallback(() => setRealityOpen(false), []);
 
   const scenario = source.demo?.listScenarios().find((s) => s.id === playback?.scenarioId);
-  const focus = snapshot?.narration?.focus;
+  const focus = eventFocus ?? snapshot?.narration?.focus;
   const resetKey = snapshot?.observedAt;
 
   return (
@@ -114,13 +115,13 @@ function LiveUnavailable({ status }: { status: SourceStatus }) {
       : '첫 응답을 기다리는 중입니다.';
   return (
     <main className={styles.unavailable}>
-      <h2>Live 데이터에 연결하지 못했습니다</h2>
+      <h2>관측 API에 연결하지 못했습니다</h2>
       <p>{message}</p>
       <p>
-        읽기 전용 BFF 실행 상태와 VITE_OPSLOOP_API_BASE 설정을 확인하세요. Demo와 Replay는 명시적으로 선택할 수 있습니다.
+        관측 연결 실패는 실험 대상 서비스의 장애 판정이 아닙니다. 마지막 실측과 현재 run을 구분해 확인하세요.
       </p>
-      <a className={styles.toolButton} href="?source=demo">
-        Demo Mode로 보기
+      <a className={styles.toolButton} href="?source=replay">
+        지난 실행 Replay 보기
       </a>
     </main>
   );

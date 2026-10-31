@@ -12,13 +12,13 @@ const render = (search: string) => {
 };
 
 describe('M3 sealed evidence exhibition', () => {
-  it('defaults to historical Exhibition, including the previous demo URL', () => {
-    expect(route('').mode).toBe('exhibition');
-    expect(route('?source=demo').mode).toBe('exhibition');
+  it('defaults to Live without starting an experiment', () => {
+    expect(route('').mode).toBe('live');
+    expect(route('?source=demo').mode).toBe('live');
     const html = render('');
-    expect(html).toContain('EXHIBITION · 현재 표시: 기록 Replay');
-    expect(html).toContain('현재 클러스터 상태가 아닙니다');
-    expect(html).toContain('PR_CREATED');
+    expect(html).toContain('LIVE · 실측 / 승인된 실행');
+    expect(html).toContain('서버의 관측·실행 기능');
+    expect(html).not.toContain('PR_CREATED');
   });
 
   it('renders both real run bindings without network access', () => {

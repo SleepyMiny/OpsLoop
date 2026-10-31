@@ -26,6 +26,14 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: 1.27.3
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version-file: '.python-version'
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      - name: Install hash-locked Python test dependencies
+        run: |
+          python3 -m pip install --disable-pip-version-check --require-hashes --only-binary=:all: -r requirements-ci.txt
       - name: Install pinned security scanner (isolated tool cache)
         run: |
           mkdir -p "$RUNNER_TEMP/security-tools/home" "$RUNNER_TEMP/security-tools/bin"
@@ -49,7 +57,9 @@ jobs:
           go build -o "$cli" ./cmd/demo-driver
           export P2C_CLI="$cli" P2D_CLI="$cli" P2E_CLI="$cli" P2F_CLI="$cli"
           export P3B_CLI="$cli" WORKLOAD_SAFETY_CLI="$cli"
-          OPSLOOP_REQUIRE_ENVTEST=1 go test -timeout=45m ./...
+          python3 -B scripts/m3-ci-contract.py environment --go "$(command -v go)" --envtest-assets "$KUBEBUILDER_ASSETS"
+          OPSLOOP_REQUIRE_ENVTEST=1 go test -json -count=1 -timeout=45m ./... | tee "$RUNNER_TEMP/go-tests.jsonl"
+          python3 -B scripts/m3-ci-contract.py go-log "$RUNNER_TEMP/go-tests.jsonl"
       - name: Demo A reset safety (mock only)
         run: |
           bash -n demos/node-failure/run.sh
@@ -71,6 +81,7 @@ jobs:
         with:
           name: security-evidence
           path: |
+            ${{ runner.temp }}/go-tests.jsonl
             ${{ runner.temp }}/security-evidence/**/*.json
             ${{ runner.temp }}/security-evidence/**/*.stdout
             ${{ runner.temp }}/security-evidence/**/*.stderr
@@ -125,7 +136,7 @@ jobs:
           go-version: 1.27.3
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24.14.1'
+          node-version: '24.22.0'
           cache: npm
           cache-dependency-path: frontend/dashboard/package-lock.json
       - name: install locked Dashboard dependencies

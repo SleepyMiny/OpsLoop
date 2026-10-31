@@ -181,7 +181,7 @@ func TestGetOnlyTransportAndActualClientPaths(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(in.Deployment)
 		case "/api/v1/nodes":
 			_ = json.NewEncoder(w).Encode(corev1.NodeList{Items: in.Nodes})
-		case "/api/v1/pods":
+		case "/api/v1/pods", "/api/v1/namespaces/opsloop-demo-a/pods", "/api/v1/namespaces/opsloop-demo-b/pods", "/api/v1/namespaces/opsloop-system/pods":
 			_ = json.NewEncoder(w).Encode(corev1.PodList{Items: in.Pods})
 		case "/apis/opsloop.io/v1alpha1/namespaces/opsloop-demo/recoveryincidents":
 			_ = json.NewEncoder(w).Encode(Object{"apiVersion": "opsloop.io/v1alpha1", "kind": "RecoveryIncidentList", "items": []any{}})
@@ -207,6 +207,21 @@ func TestGetOnlyTransportAndActualClientPaths(t *testing.T) {
 	if len(calls) != 5 {
 		t.Fatal("forbidden request reached server")
 	}
+	calls = nil
+	reader.PodNamespaces = []string{"opsloop-demo-a", "opsloop-demo-b", "opsloop-system"}
+	scoped, err := reader.Read(context.Background(), "opsloop-demo", "demo-api")
+	if err != nil || !scoped.PodInventoryScoped {
+		t.Fatalf("scoped read: %v", err)
+	}
+	for _, call := range calls {
+		if call == "GET /api/v1/pods" {
+			t.Fatal("cluster-wide Pod read escaped scope")
+		}
+	}
+	if len(calls) != 7 {
+		t.Fatal(calls)
+	}
+
 }
 
 func TestFreeFormDiagnosticsAreNotForwarded(t *testing.T) {
@@ -304,5 +319,15 @@ func TestPrometheusUsesSevenGETQueriesAndRejectsAdminPaths(t *testing.T) {
 	}
 	if calls != 7 {
 		t.Fatal("forbidden request reached upstream")
+	}
+}
+
+func TestExpiredObservationNeverReads(t *testing.T) {
+	calls := 0
+	s := Service{Until: time.Now().Add(-time.Second), Reader: readerFunc(func(context.Context, string, string) (Input, error) { calls++; return Input{}, nil })}
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/snapshot", nil))
+	if w.Code != 410 || calls != 0 {
+		t.Fatalf("status=%d reads=%d", w.Code, calls)
 	}
 }

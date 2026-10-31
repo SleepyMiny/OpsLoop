@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { App } from '../app/App';
 import { toggleFullscreen, useTheme } from '../app/hooks';
 import { HttpDataSource } from '../data/live/httpSource';
+import { ExhibitionConsole } from './ExhibitionConsole';
+import { getJSON, parseCapabilities, type Capabilities, type eventFocus } from './exhibition';
 import catalogData from '../data/m3/evidence.json';
 import { displayValue, eventIndex, factLabel, factValue, recordedAt, route, safePrURL, type EvidenceCatalog, type EvidenceEvent, type EvidenceRun, type Section } from './model';
 import styles from './m3.module.css';
@@ -19,10 +21,20 @@ export function M3App() {
   const [frame, setFrame] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [theme, setTheme] = useTheme();
-  const mode = initial.mode;
+  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  const [capabilityError, setCapabilityError] = useState(false);
+  const [focus, setFocus] = useState<ReturnType<typeof eventFocus>>(undefined);
+  const [history, setHistory] = useState(false);
+  const [scope, setScope] = useState(new URLSearchParams(window.location.search).get('scope') === 'b' ? 'b' : 'a');
+  const mode = initial.mode === 'live' && capabilities?.mode === 'replay' ? 'replay' : initial.mode;
+  useEffect(() => {
+    const controller = new AbortController();
+    getJSON('/api/exhibition/capabilities', controller.signal).then(parseCapabilities).then(setCapabilities).catch(() => { if (!controller.signal.aborted) setCapabilityError(true); });
+    return () => controller.abort();
+  }, []);
   const run = catalog.runs.find((item) => item.id === runId) ?? catalog.runs[0];
   // A Replay entry never constructs or starts a live source.
-  const source = useMemo(() => mode === 'live' ? new HttpDataSource({ baseUrl: import.meta.env.VITE_OPSLOOP_API_BASE ?? (new URLSearchParams(window.location.search).get('scope') === 'b' ? '/api/b' : '/api/a') }) : null, [mode]);
+  const source = useMemo(() => mode === 'live' && capabilities?.live ? new HttpDataSource({ baseUrl: capabilities.observationConfigured === false && capabilities.lastObservationAvailable !== true ? undefined : import.meta.env.VITE_OPSLOOP_API_BASE ?? (scope === 'b' ? '/api/b' : '/api/a') }) : null, [mode, capabilities?.live, capabilities?.observationConfigured, capabilities?.lastObservationAvailable, scope]);
   const selected = run?.events[eventIndex(frame, run.events.length)];
 
   useEffect(() => {
@@ -42,9 +54,9 @@ export function M3App() {
   return <div className={styles.shell}>
     <a href="#m3-content" className={styles.skip}>본문으로 건너뛰기</a>
     <header className={styles.header}>
-      <a className={styles.brand} href="?source=exhibition"><span className={styles.logo} aria-hidden="true">↻</span><span><b>OpsLoop</b><small>DEVOPS / SRE CONTROL ROOM</small></span></a>
+      <a className={styles.brand} href="?source=live"><span className={styles.logo} aria-hidden="true">↻</span><span><b>OpsLoop</b><small>DEVOPS / SRE CONTROL ROOM</small></span></a>
       <nav className={styles.modes} aria-label="관측 모드">
-        <a href="?source=live" aria-current={mode === 'live' ? 'page' : undefined}>Live <small>현재 실측</small></a>
+        <a href={capabilities?.live ? "?source=live" : undefined} aria-disabled={!capabilities?.live} aria-current={mode === 'live' ? 'page' : undefined}>Live <small>{capabilities?.mode === 'replay' ? '이 서버에서 사용 불가' : '현재 실측'}</small></a>
         <a href="?source=replay" aria-current={mode === 'replay' ? 'page' : undefined}>Replay <small>봉인 기록</small></a>
         <a href="?source=exhibition" aria-current={mode === 'exhibition' ? 'page' : undefined}>Exhibition <small>전시 안내</small></a>
       </nav>
@@ -52,16 +64,19 @@ export function M3App() {
     </header>
     <div className={styles.sourceBanner} data-live={mode === 'live'} role="note">
       <span className={styles.dot} />
-      <strong>{mode === 'live' ? 'LIVE · 읽기 전용' : mode === 'replay' ? 'REPLAY · 과거 실증 기록' : 'EXHIBITION · 현재 표시: 기록 Replay'}</strong>
+      <strong>{mode === 'live' ? 'LIVE · 실측 / 승인된 실행' : mode === 'replay' ? 'REPLAY · 과거 실증 기록' : 'EXHIBITION · 현재 표시: 기록 Replay'}</strong>
       <span>{mode === 'live' ? 'Kubernetes / Prometheus 관측 · 연결 상태와 관측 시각을 확인하세요.' : 'Demo A · B 원본 ZIP에서 검증한 기록입니다. 현재 클러스터 상태가 아닙니다.'}</span>
       <span className={styles.boundary}>모드 선택은 장애 주입·Enforce를 실행하지 않습니다</span>
     </div>
-    {mode === 'live' && source ? <div id="m3-content"><App source={source} kiosk={false} integrated /></div> : <>
+    {mode === 'live' ? <div id="m3-content">
+      {capabilities ? <ExhibitionConsole capabilities={capabilities} onFocus={setFocus} onHistory={setHistory} onTrack={setScope} /> : <section className={styles.content} role="status"><h1>Live 관제 연결</h1><p>{capabilityError ? '서버 기능을 확인하지 못했습니다. 실험 대상 서비스의 장애 판정과는 별개입니다.' : '서버의 관측·실행 기능을 확인하고 있습니다.'}</p><a href="?source=replay">지난 실행 Replay 열기</a></section>}
+      {source && !history ? <App source={source} kiosk={false} integrated eventFocus={focus} /> : history ? <p className={styles.content}>완료된 run의 기록을 재생 중입니다. 현재 클러스터 관측과 혼합하지 않습니다.</p> : capabilities ? <p className={styles.content}>관측 API가 설정되지 않았습니다. 실행 원장과 서비스 상태는 별도로 확인합니다.</p> : null}
+    </div> : <>
       <nav className={styles.sectionNav} aria-label="관제 화면">
         {sections.map(([key, label, sub]) => <button key={key} aria-current={section === key ? 'page' : undefined} onClick={() => navigate(key)}><strong>{label}</strong><span>{sub}</span></button>)}
       </nav>
       <main id="m3-content" className={styles.content}>
-        {section === 'overview' ? <Overview runs={catalog.runs} navigate={navigate} /> : run ? <>
+        {section === 'overview' ? <Overview runs={catalog.runs} navigate={navigate} liveAvailable={capabilities?.live ?? false} /> : run ? <>
           <div className={styles.pageHeading}><div><p className={styles.eyebrow}>SEALED EXECUTION / {run.track.toUpperCase()}</p><h1>{section === 'evidence' ? '근거를 따라가는 기록 재생' : run.track === 'runtime' ? '자원을 평가하고, 서비스를 복구합니다' : 'Runtime의 한계에서, 검증된 수정 PR까지'}</h1><p>{run.title}</p></div><span className={styles.historyPill}>과거 실행 · {run.status}</span></div>
           <div className={styles.runSelector} role="group" aria-label="실증 기록 선택">{catalog.runs.map((item) => <button key={item.id} aria-pressed={item.id === run.id} onClick={() => selectRun(item.id)}>{item.id === 'demo-a' ? 'Demo A · Runtime' : 'Demo B · Engineering'}</button>)}<span>동일 이름이어도 UID / run binding이 다르면 별도 기록</span></div>
           {run.track === 'runtime' ? <RuntimePlacement run={run} frame={frame} /> : null}
@@ -87,10 +102,10 @@ export function M3App() {
   </div>;
 }
 
-function Overview({ runs, navigate }: { runs: EvidenceRun[]; navigate: (section: Section) => void }) {
+function Overview({ runs, navigate, liveAvailable }: { runs: EvidenceRun[]; navigate: (section: Section) => void; liveAvailable: boolean }) {
   return <>
     <div className={styles.pageHeading}><div><p className={styles.eyebrow}>INTEGRATED DEVOPS / SRE PLATFORM</p><h1>두 복구 루프, 하나의 증거 흐름.</h1><p>인프라 장애는 Runtime에서, 코드 결함은 독립 검증을 거친 Engineering에서.</p></div><span className={styles.historyPill}>기록 Replay · 오프라인 사용 가능</span></div>
-    <section className={styles.overviewNotice}><div><strong>현재 시스템 상태는 Live에서 확인합니다</strong><p>이 화면은 봉인된 실증 결과입니다. 현재 Node Ready, 서비스 건강도, Policy·Guard 상태를 과거 결과로 대신하지 않습니다.</p></div><a href="?source=live">Live 관제 열기 ↗</a></section>
+    <section className={styles.overviewNotice}><div><strong>현재 시스템 상태는 Live에서 확인합니다</strong><p>이 화면은 봉인된 실증 결과입니다. 현재 Node Ready, 서비스 건강도, Policy·Guard 상태를 과거 결과로 대신하지 않습니다.</p></div><a href={liveAvailable ? "?source=live" : undefined} aria-disabled={!liveAvailable}>{liveAvailable ? 'Live 관제 열기 ↗' : 'Live 관측 서버 연결 필요'}</a></section>
     <div className={styles.runCards}>{runs.map((run) => <article className={styles.runCard} key={run.id} data-track={run.track}>
       <div className={styles.cardTop}><span className={styles.eyebrow}>{run.id.toUpperCase()} / {run.track.toUpperCase()}</span><span className={styles.status}>{run.status} · 해당 범위</span></div>
       <h2>{run.track === 'runtime' ? 'Runtime Self-Healing' : 'Engineering Self-Healing'}</h2>

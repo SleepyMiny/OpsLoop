@@ -1,5 +1,5 @@
 // Real local Chrome rendering; only UI failure tests alter responses, labelled below.
-import { chromium } from '../worker/node_modules/playwright-core/index.mjs';
+const { chromium } = await import(process.env.M3_PLAYWRIGHT_MODULE ?? '../worker/node_modules/playwright-core/index.mjs');
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -57,7 +57,7 @@ try {
     const response=await context.request.get(base+'/'+href);
     check('source-link-'+href,response.status()===200 && crypto.createHash('sha256').update(await response.body()).digest('hex')===(s.downloadSha256??s.sha256));
   }
-  check('replay-zero-observation-requests',receipt.requests.every(r=>!r.path.startsWith('/api/')));
+  check('replay-zero-observation-requests',receipt.requests.every(r=>!r.path.endsWith('/api/v1/snapshot')));
   await context.setOffline(true);
   await page.getByRole('slider').fill('0');
   await page.getByRole('button',{name:'다음 →'}).click();

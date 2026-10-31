@@ -223,6 +223,13 @@ function candidateFromCrd(
     },
     rejectReasons,
   };
+  if (c.resourceCondition) {
+    const condition = c.resourceCondition;
+    if (![condition.runID, condition.epoch, condition.policyUID].every(v => typeof v === 'string' && v.length > 0) || !/^[a-f0-9]{64}$/.test(condition.configSHA256)) throw new Error(`${path}.resourceCondition binding missing`);
+    parseTime(condition.expiresAt, `${path}.resourceCondition.expiresAt`);
+    const applied = candidateFromCrd({...c, resourceCondition: undefined, measurements: condition.appliedMeasurements}, ctx, `${path}.resourceCondition`);
+    evaluation.resourceCondition = {...condition, appliedMeasurements: applied.measurements};
+  }
   if (ctx.failedNode && c.nodeName === ctx.failedNode) evaluation.exclusion = 'FAILED_NODE';
   if (c.score) {
     const h = {

@@ -17,7 +17,7 @@ export function Narration({ narration, scenario, source = 'demo' }: { source?: D
       ) : (
         <>
           <h2 className={styles.narrationTitle}>{source === 'replay' ? '과거 ObserveOnly 실증' : '실시간 상태'}</h2>
-          <p className={styles.narrationBody}>{source === 'replay' ? '장애 분류·후보 선택의 보존 기록입니다. 실제 복구 조치는 수행하지 않았습니다.' : '현재 클러스터 관측입니다. 아래 단계와 Incident 기록을 확인하세요.'}</p>
+          <p className={styles.narrationBody}>{source === 'replay' ? '장애 분류·후보 선택의 보존 기록입니다. 실제 복구 조치는 수행하지 않았습니다.' : '표시된 관측 시각의 클러스터 기록입니다. 아래 단계와 Incident 기록을 확인하세요.'}</p>
         </>
       )}
     </section>

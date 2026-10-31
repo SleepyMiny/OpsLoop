@@ -195,7 +195,7 @@ export interface CriteriaContext {
  * numbers, so a bar can never disagree with the chips next to it.
  */
 export function buildCriteria(c: CandidateEvaluation, ctx: CriteriaContext): CriterionModel[] {
-  const m = c.measurements;
+  const m = c.resourceCondition?.appliedMeasurements ?? c.measurements;
   const reasons = new Set<RejectReason>(c.rejectReasons);
   const stale = reasons.has('METRICS_STALE');
   const missingAny = reasons.has('METRICS_MISSING');
