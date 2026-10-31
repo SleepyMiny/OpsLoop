@@ -4,6 +4,12 @@ GitHub credentials remain in the host's existing gh config. The Runner's existin
 network/filesystem isolation, not a Python caller label, protects those credentials.
 Every write is journaled before dispatch. An uncertain write is reconciled by GET
 only, including after restart; it is never automatically sent again.
+
+GitHub create-pull-request accepts a base branch name, not an expected base SHA
+(https://docs.github.com/en/rest/pulls/pulls#create-a-pull-request). Its final
+GET -> POST boundary is non-atomic. Every remote write therefore requires a
+separate, exact-plan residual-risk approval. Legacy publication approval alone
+fails closed. A GET-proven mismatched Draft is quarantined, never auto-cleaned.
 """
 from __future__ import annotations
 import argparse
@@ -107,8 +113,30 @@ def _approval(plan, plan_sha, a, now):
         require(a.get(key) == plan.get(key), 'publication approval binding mismatch')
 
 
+def _risk_approval(plan, plan_sha, approval_sha, risk, now):
+    """A separate host/user decision; evidence or a model proposal cannot opt in."""
+    require(risk.get('schema_version') == 'opsloop-nonatomic-base-risk-approval/v1' and
+            risk.get('approved') is True and risk.get('plan_sha256') == plan_sha and
+            risk.get('publication_approval_sha256') == approval_sha,
+            'separate non-atomic base risk approval missing')
+    require(isinstance(risk.get('approved_by'), str) and bool(risk['approved_by'].strip()) and len(risk['approved_by']) <= 128,
+            'risk approval requires explicit user attribution')
+    require(instant(risk.get('issued_at')) <= now < instant(risk.get('expires_at')),
+            'non-atomic base risk approval expired')
+    for field in ('repository', 'repository_id', 'base_ref', 'base_commit', 'base_tree',
+                  'head_ref', 'patch_sha256', 'candidate_source_sha256'):
+        require(risk.get(field) == plan.get(field), 'risk approval binding mismatch')
+    for field in ('run_id', 'epoch'):
+        require(risk.get(field) == plan['incident'].get(field), 'risk approval run binding mismatch')
+    require(canonical(risk.get('allowed_remote_side_effects')) == canonical({
+        'reviewed_git_objects': True, 'approved_head_ref': True,
+        'draft_pr_count': 1, 'base_ref_drift_draft': True,
+        'automatic_close_delete_retarget_merge': False}), 'remote side effect scope not approved')
+
+
 def publish(*, plan_path, plan_sha256, approval_path, approval_sha256, prepare_arguments,
-            state_root, transport, clock=None, context='host-coordinator'):
+            state_root, transport, clock=None, context='host-coordinator',
+            risk_approval_path=None, risk_approval_sha256=None):
     """Execute/reconcile one approved publication using an injected host transport.
 
     prepare_arguments supplies the original pinned result/review/target, not new
@@ -130,23 +158,36 @@ def publish(*, plan_path, plan_sha256, approval_path, approval_sha256, prepare_a
         require(not path.is_symlink(), 'unsafe publication journal')
         journal = json.loads(regular_file(path, 4 * 1024 * 1024)) if path.exists() else {
             'schema_version': 'opsloop-publication-intent/v1', 'identity': identity,
-            'plan_sha256': plan_sha256, 'operations': {}, 'state': 'INTENT'}
+            'plan_sha256': plan_sha256, 'risk_approval_sha256': risk_approval_sha256,
+            'operations': {}, 'state': 'INTENT'}
         require(journal.get('identity') == identity and journal.get('plan_sha256') == plan_sha256,
                 'publication already belongs to another exact plan; reconcile original intent')
+        require(journal.get('risk_approval_sha256') == risk_approval_sha256,
+                'risk approval differs from original intent')
         _save(path, journal)
+        ops = journal['operations']
+        reconcile_only = 'pr' in ops
         args = dict(prepare_arguments); args.pop('now', None)
         def valid():
             require(prepare(**args, now=clock()) == plan, 'prepared plan differs from original reviewed evidence')
             approval = read_json(approval_path, approval_sha256)
             review = read_json(args['review_path'], args['review_sha256'])
+            require(risk_approval_path is not None and risk_approval_sha256 is not None,
+                    'separate non-atomic base risk approval required before remote writes')
+            risk = read_json(risk_approval_path, risk_approval_sha256)
             # All local artifact I/O precedes one fresh clock observation. No
             # further I/O is allowed between these pure checks and dispatch.
+            return approval, review, risk
+        def fresh(evidence):
+            approval, review, risk = evidence
             now = clock()
             _approval(plan, plan_sha256, approval, now)
             require(dt.timedelta(0) <= now - instant(review['reviewed_at']) <= dt.timedelta(hours=24),
                     'independent review expired during preparation')
             validate_target(plan['target'], now)
-        valid()
+            _risk_approval(plan, plan_sha256, approval_sha256, risk, now)
+        if not reconcile_only:
+            fresh(valid())
         for f in plan['files']:
             require(f['path'] in ALLOWED_PATHS and digest(f['content'].encode()) == f['sha256'], 'publication file changed')
             secret_free(f['content'])
@@ -162,10 +203,61 @@ def publish(*, plan_path, plan_sha256, approval_path, approval_sha256, prepare_a
                 out.extend(batch)
                 if len(batch) < 100: return out
             raise Rejected('GitHub list exceeds bound')
+        def observe_pr():
+            """GET-only reconciliation remains available after expiry or base drift.
+
+            Store only identity/commit metadata, never a raw response/body/token.
+            A quarantine is a latch: retargeting later cannot upgrade it to success.
+            """
+            latched = journal.get('state') == 'QUARANTINED_REMOTE_PR'
+            try:
+                matches = [p for p in listing('/pulls?state=all')
+                           if p.get('head', {}).get('ref') == plan['head_ref']]
+                require(len(matches) == 1, 'remote PR identity unconfirmed')
+                number = matches[0].get('number')
+                require(type(number) is int and number > 0, 'remote PR number unconfirmed')
+                pr = get('/pulls/' + str(number))
+                require(pr.get('number') == number and
+                        pr.get('html_url') == f'https://github.com/{REPOSITORY}/pull/{number}' and
+                        all(pr.get(side, {}).get('repo', {}).get('full_name') == REPOSITORY and
+                            pr[side]['repo'].get('id') == REPOSITORY_ID for side in ('base', 'head')),
+                        'remote PR repository identity unconfirmed')
+                observed = {}
+                for side in ('base', 'head'):
+                    ref = pr[side].get('ref')
+                    require(isinstance(ref, str) and len(ref) <= 256 and
+                            all(c.isalnum() or c in '/._-' for c in ref), 'remote ref malformed')
+                    observed[side] = {'ref': ref, 'sha': sha(pr[side].get('sha'), 40)}
+                journal['remote_pr'] = {'method': 'GET', 'number': number, 'url': pr['html_url'],
+                    'observed_at': clock().isoformat(), 'observed': observed,
+                    'expected': {'base_ref': plan['base_ref'], 'base_commit': plan['base_commit'],
+                                 'base_tree': plan['base_tree'], 'head_ref': plan['head_ref'],
+                                 'head_commit': ops.get('commit', {}).get('response', {}).get('sha')}}
+                mismatch = (observed['base'] != {'ref': plan['base_ref'], 'sha': plan['base_commit']} or
+                            observed['head'] != {'ref': plan['head_ref'], 'sha': ops.get('commit', {}).get('response', {}).get('sha')})
+                if mismatch:
+                    journal.setdefault('quarantined_pr', journal['remote_pr'])
+                journal['state'] = 'QUARANTINED_REMOTE_PR' if mismatch or latched else 'RECONCILIATION_REQUIRED'
+                journal['reconciliation_reason'] = 'REMOTE_BINDING_MISMATCH' if mismatch else (
+                    'QUARANTINE_REQUIRES_MANUAL_REVIEW' if latched else 'FULL_PROOF_REQUIRED')
+                _save(path, journal)
+                require(not mismatch and not latched, 'remote Draft quarantined; manual review required')
+                return pr
+            except Exception:
+                if journal.get('state') != 'QUARANTINED_REMOTE_PR':
+                    journal['state'] = 'RECONCILIATION_REQUIRED'
+                    journal['reconciliation_reason'] = 'REMOTE_PROOF_INCOMPLETE'
+                    _save(path, journal)
+                raise
+        if reconcile_only:
+            require(ops['pr'].get('state') != 'NOT_SENT',
+                    'PR dispatch was blocked; manual review required')
+            observe_pr()
         repo = get('')
         require(repo.get('id') == REPOSITORY_ID and repo.get('full_name') == REPOSITORY, 'remote repository changed')
         base_ref = get('/git/ref/heads/' + quote(plan['base_ref'], safe=''))
-        require(base_ref and base_ref.get('object', {}).get('sha') == plan['base_commit'], 'remote base moved')
+        if not reconcile_only:
+            require(base_ref and base_ref.get('object', {}).get('sha') == plan['base_commit'], 'remote base moved')
         base_commit = get('/git/commits/' + plan['base_commit'])
         require(base_commit.get('sha') == plan['base_commit'] and base_commit.get('tree', {}).get('sha') == plan['base_tree'], 'remote base tree mismatch')
         base_tree = get('/git/trees/' + plan['base_tree'] + '?recursive=1')
@@ -191,7 +283,6 @@ def publish(*, plan_path, plan_sha256, approval_path, approval_sha256, prepare_a
         matching = [pr for pr in prs if pr.get('head', {}).get('ref') == plan['head_ref'] or
                     (plan['patch_sha256'] in (pr.get('body') or '') and
                      (f"`{binding['run_id']}`" in (pr.get('body') or '') or f"`{binding['epoch']}`" in (pr.get('body') or '')))]
-        ops = journal['operations']
         known_commit = ops.get('commit', {}).get('response', {}).get('sha')
         require(not matching or 'pr' in ops, 'existing publication must not be duplicated')
         require(head is None or ('ref' in ops and known_commit and head.get('object', {}).get('sha') == known_commit), 'head exists outside this intent')
@@ -200,20 +291,32 @@ def publish(*, plan_path, plan_sha256, approval_path, approval_sha256, prepare_a
             if name in ops:
                 require(ops[name]['state'] == 'CONFIRMED', 'uncertain write requires GET reconciliation')
                 return ops[name]['response']
-            valid()  # after the final preflight I/O, immediately before dispatch
+            fresh(valid())
             ops[name] = {'state': 'DISPATCHED', 'method': 'POST', 'path': api + suffix,
                          'input_sha256': digest(canonical(body)), 'dispatched_at': clock().isoformat()}
             _save(path, journal)
             try:
-                valid()  # durable journal I/O must not consume approval freshness
+                evidence = valid()  # includes durable journal and artifact I/O delay
+                if name == 'pr':
+                    # Last remote I/O before POST; the residual race is explicitly
+                    # approved, not eliminated by this GET. No artifact I/O follows.
+                    current_base = get('/git/ref/heads/' + quote(plan['base_ref'], safe=''))
+                    require(current_base and current_base.get('object', {}).get('sha') == plan['base_commit'],
+                            'base moved before PR')
+                fresh(evidence)
+            except Exception:
+                ops[name]['state'] = 'NOT_SENT'
+                journal['state'] = 'BLOCKED_BEFORE_DISPATCH'; _save(path, journal)
+                raise
+            try:
                 response = transport.request('POST', api + suffix, body)
             except Exception:
                 journal['state'] = 'RECONCILIATION_REQUIRED'; _save(path, journal)
                 raise TransportError('publication write outcome uncertain; GET only') from None
-            ops[name].update(state='CONFIRMED', response=response)
+            ops[name].update(state='CONFIRMED', response={} if name == 'pr' else response)
             _save(path, journal)
             return response
-        if not uncertain:
+        if not uncertain and not reconcile_only:
             for i, f in enumerate(plan['files']):
                 blob = write('blob-' + str(i), '/git/blobs', {'content': f['content'], 'encoding': 'utf-8'})
                 require(blob.get('sha') == f['git_blob_sha'], 'remote blob differs')
@@ -230,9 +333,9 @@ def publish(*, plan_path, plan_sha256, approval_path, approval_sha256, prepare_a
             require(remote_tree.get('sha') == tree['sha'] and remote_tree.get('truncated') is False and
                     leaves(remote_tree) == expected, 'unapproved remote tree before branch publication')
             write('ref', '/git/refs', {'ref': 'refs/heads/' + plan['head_ref'], 'sha': known_commit})
-            # Recheck base after branch publication; never open PR against a moved base.
-            require(get('/git/ref/heads/' + quote(plan['base_ref'], safe=''))['object']['sha'] == plan['base_commit'], 'base moved before PR')
             write('pr', '/pulls', plan['pull_request'])
+        if 'pr' in ops:
+            observe_pr()
         # All final proof is newly observed GET data, never POST assertions.
         head = get(head_path)
         prs = listing('/pulls?state=all')
@@ -240,7 +343,7 @@ def publish(*, plan_path, plan_sha256, approval_path, approval_sha256, prepare_a
         require(head is not None and len(matches) == 1, 'remote publication unconfirmed')
         observed_head = sha(head['object']['sha'], 40)
         require(known_commit == observed_head, 'remote head commit mismatch')
-        number = matches[0]['number']; pr = get('/pulls/' + str(number))
+        pr = observe_pr(); number = pr['number']
         commit = get('/git/commits/' + observed_head)
         tree_sha = sha(commit['tree']['sha'], 40)
         tree = get('/git/trees/' + tree_sha + '?recursive=1')
@@ -253,7 +356,7 @@ def publish(*, plan_path, plan_sha256, approval_path, approval_sha256, prepare_a
                    'head_commit': {'sha': commit['sha'], 'parents': [{'sha': v['sha']} for v in commit['parents']], 'tree_sha': tree_sha},
                    'files_path': api + '/pulls/' + str(number) + '/files', 'files_complete': True, 'files': files,
                    'head_tree_path': api + '/git/trees/' + tree_sha + '?recursive=1', 'head_tree': tree}
-        valid()
+        fresh(valid())
         receipt_path = root / (key + '-remote.json'); _save(receipt_path, receipt)
         result = record_pr(plan_path, plan_sha256=plan_sha256, approval_path=approval_path,
                            approval_sha256=approval_sha256, remote_path=receipt_path,
@@ -270,6 +373,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for arg in ('plan-path', 'plan-sha256', 'approval-path', 'approval-sha256', 'inputs-path', 'inputs-sha256', 'state-root', 'gh-config-dir'):
         parser.add_argument('--' + arg, required=True)
+    # Optional syntax preserves old invocations, but absent risk evidence fails
+    # closed before any remote write. It is never inferred from the old approval.
+    parser.add_argument('--risk-approval-path')
+    parser.add_argument('--risk-approval-sha256')
     a = vars(parser.parse_args())
     inputs = read_json(a.pop('inputs_path'), a.pop('inputs_sha256'))
     transport = GitHubHostTransport(gh_config_dir=a.pop('gh_config_dir'))

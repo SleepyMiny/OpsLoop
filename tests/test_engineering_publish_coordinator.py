@@ -20,6 +20,8 @@ class FakeGitHub:
         self.plan = plan; self.posts = []; self.head = None; self.pr = None
         self.fail = None; self.lose_after = None; self.modify_tree = False; self.other_prs = []
         self.commit_sha = 'c' * 40; self.tree_sha = 'd' * 40
+        self.base_sha = plan['base_commit']; self.base_reads = 0
+        self.before_final_base = None; self.after_final_base = None; self.requests = []
         import hashlib
         self.original = []
         for name in ('discount.go', 'discount_test.go', 'main.go'):
@@ -29,6 +31,7 @@ class FakeGitHub:
         self.original += [{'path': 'unrelated.txt', 'mode': '100644', 'type': 'blob', 'sha': '1' * 40}]
     def request(self, method, path, body=None):
         path = path.removeprefix('/repos/' + REPOSITORY)
+        self.requests.append((method, path))
         if method == 'POST':
             self.posts.append(path)
             if self.fail == path: raise TransportError('synthetic timeout before response')
@@ -41,7 +44,7 @@ class FakeGitHub:
             elif path == '/pulls':
                 repo = {'full_name': REPOSITORY, 'id': REPOSITORY_ID}
                 self.pr = {**body, 'number': 123, 'html_url': f'https://github.com/{REPOSITORY}/pull/123', 'state': 'open', 'merged': False, 'auto_merge': None,
-                           'base': {'ref': self.plan['base_ref'], 'sha': self.plan['base_commit'], 'repo': repo},
+                           'base': {'ref': self.plan['base_ref'], 'sha': self.base_sha, 'repo': repo},
                            'head': {'ref': self.plan['head_ref'], 'sha': self.commit_sha, 'repo': repo}}
                 result = self.pr
             else: raise AssertionError(path)
@@ -51,7 +54,12 @@ class FakeGitHub:
         if path.startswith('/git/ref/heads/'):
             from urllib.parse import unquote
             name = unquote(path.removeprefix('/git/ref/heads/'))
-            return {'object': {'sha': self.plan['base_commit']}} if name == self.plan['base_ref'] else self.head
+            if name != self.plan['base_ref']: return self.head
+            self.base_reads += 1
+            if self.base_reads == 2 and self.before_final_base: self.before_final_base()
+            response = {'object': {'sha': self.base_sha}}
+            if self.base_reads == 2 and self.after_final_base: self.after_final_base()
+            return response
         if path == '/git/commits/' + self.plan['base_commit']:
             return {'sha': self.plan['base_commit'], 'tree': {'sha': self.plan['base_tree']}}
         if path == '/git/commits/' + self.commit_sha:
@@ -83,6 +91,19 @@ class CoordinatorTests(unittest.TestCase):
         self.api = FakeGitHub(self.plan, self.f.run/"baseline")
         self.args = {k: args[k] for k in ('plan_path', 'plan_sha256', 'approval_path', 'approval_sha256')}
         self.args.update(prepare_arguments=self.prep, state_root=self.f.root/'state', transport=self.api, clock=lambda: NOW)
+        # Synthetic explicit user decision, separate from unchanged B1 evidence
+        # and the legacy publication approval. No production approval is issued.
+        self.risk = {k: self.plan[k] for k in ('repository', 'repository_id', 'base_ref', 'base_commit',
+            'base_tree', 'head_ref', 'patch_sha256', 'candidate_source_sha256')}
+        self.risk.update(schema_version='opsloop-nonatomic-base-risk-approval/v1', approved=True,
+            approved_by='synthetic-test-user', plan_sha256=self.args['plan_sha256'],
+            publication_approval_sha256=self.args['approval_sha256'],
+            run_id=self.plan['incident']['run_id'], epoch=self.plan['incident']['epoch'],
+            issued_at=when(-1), expires_at=when(60), allowed_remote_side_effects={
+                'reviewed_git_objects': True, 'approved_head_ref': True, 'draft_pr_count': 1,
+                'base_ref_drift_draft': True, 'automatic_close_delete_retarget_merge': False})
+        self.args['risk_approval_path'] = self.f.root/'risk-approval.json'
+        self.args['risk_approval_sha256'] = self.f.write(self.args['risk_approval_path'], self.risk)
     def run_publish(self): return publish(**self.args)
     def test_real_prepare_to_remote_get_proof(self):
         result = self.run_publish()
@@ -119,6 +140,7 @@ class CoordinatorTests(unittest.TestCase):
         for field in ('base_commit', 'base_tree'):
             with self.subTest(field=field):
                 self.setUp(); self.api.plan = copy.deepcopy(self.plan); self.api.plan[field] = 'f'*40
+                if field == 'base_commit': self.api.base_sha = 'f'*40
                 with self.assertRaises(Rejected): self.run_publish()
                 self.assertEqual(self.api.posts, [])
     def test_full_remote_tree_rejects_unrelated_change(self):
@@ -205,6 +227,159 @@ class CoordinatorTests(unittest.TestCase):
                 with self.assertRaises(Rejected): self.run_publish()
                 self.assertNotIn('"state":"PR_CREATED"', ''.join(p.read_text() for p in self.args['state_root'].glob('*.json')))
                 if kind in ('parent', 'blob'): self.assertNotIn('/git/refs', self.api.posts)
+    def journal(self):
+        return next(json.loads(p.read_bytes()) for p in self.args['state_root'].glob('*.json')
+                    if 'operations' in json.loads(p.read_bytes()))
+
+    def test_legacy_approval_without_separate_risk_decision_blocks_all_writes(self):
+        self.args.pop('risk_approval_path'); self.args.pop('risk_approval_sha256')
+        with self.assertRaisesRegex(Rejected, 'separate non-atomic'):
+            self.run_publish()
+        self.assertEqual(self.api.posts, [])
+        self.assertIsNone(self.api.pr)
+
+    def test_risk_approval_requires_exact_scope_identity_and_time(self):
+        for field in ('repository', 'repository_id', 'base_ref', 'base_commit', 'base_tree',
+                      'head_ref', 'run_id', 'epoch', 'patch_sha256', 'candidate_source_sha256',
+                      'publication_approval_sha256', 'plan_sha256', 'approved', 'approved_by',
+                      'expires_at', 'allowed_remote_side_effects'):
+            with self.subTest(field=field):
+                self.setUp()
+                self.risk[field] = {'approved': False, 'approved_by': '', 'expires_at': when(0),
+                    'allowed_remote_side_effects': {}}.get(field, 'mismatch')
+                self.args['risk_approval_sha256'] = self.f.write(self.args['risk_approval_path'], self.risk)
+                with self.assertRaises(Rejected): self.run_publish()
+                self.assertEqual(self.api.posts, [])
+
+    def test_base_moves_before_final_get_blocks_pr_and_records_not_sent(self):
+        self.api.before_final_base = lambda: setattr(self.api, 'base_sha', 'f'*40)
+        with self.assertRaisesRegex(Rejected, 'base moved before PR'): self.run_publish()
+        self.assertEqual(self.api.posts.count('/pulls'), 0)
+        self.assertIsNone(self.api.pr)
+        self.assertEqual(self.journal()['state'], 'BLOCKED_BEFORE_DISPATCH')
+        self.assertEqual(self.journal()['operations']['pr']['state'], 'NOT_SENT')
+        before = list(self.api.posts)
+        with self.assertRaises(Rejected): self.run_publish()
+        self.assertEqual(self.api.posts, before)
+
+    def test_base_moves_after_final_get_is_get_proven_and_quarantined(self):
+        self.api.after_final_base = lambda: setattr(self.api, 'base_sha', 'f'*40)
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_publish()
+        self.assertEqual(self.api.posts.count('/pulls'), 1)
+        self.assertTrue(self.api.pr['draft'])
+        journal = self.journal()
+        self.assertEqual(journal['state'], 'QUARANTINED_REMOTE_PR')
+        self.assertNotIn('result', journal)
+        observation = journal['quarantined_pr']
+        self.assertEqual(observation['method'], 'GET')
+        self.assertEqual(observation['number'], 123)
+        self.assertEqual(observation['url'], f'https://github.com/{REPOSITORY}/pull/123')
+        self.assertEqual(observation['observed']['base']['sha'], 'f'*40)
+        self.assertEqual(observation['expected']['base_commit'], self.plan['base_commit'])
+        self.assertEqual(observation['observed']['head']['sha'], self.api.commit_sha)
+        before = list(self.api.posts)
+        # Even a later manual retarget cannot silently promote this intent.
+        self.api.pr['base']['sha'] = self.plan['base_commit']
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_publish()
+        self.assertEqual(self.api.posts, before)
+        self.assertEqual(self.journal()['quarantined_pr'], observation)
+
+    def test_final_get_has_no_artifact_or_journal_io_before_post(self):
+        from tools import engineering_publish_coordinator as coordinator
+        final_get = [False]; actual_read = coordinator.read_json; actual_save = coordinator._save
+        def read(*args, **kwargs):
+            self.assertFalse(final_get[0], 'artifact read in final GET/POST gap')
+            return actual_read(*args, **kwargs)
+        def save(*args, **kwargs):
+            self.assertFalse(final_get[0], 'journal write in final GET/POST gap')
+            return actual_save(*args, **kwargs)
+        self.api.after_final_base = lambda: final_get.__setitem__(0, True)
+        actual_request = self.api.request
+        def request(method, path, body=None):
+            if method == 'POST' and path.endswith('/pulls'):
+                self.assertTrue(final_get[0]); final_get[0] = False
+            return actual_request(method, path, body)
+        self.api.request = request
+        with patch.object(coordinator, 'read_json', side_effect=read), patch.object(coordinator, '_save', side_effect=save):
+            self.assertEqual(self.run_publish()['state'], 'PR_CREATED')
+
+    def test_expiry_during_final_base_get_blocks_pr_post(self):
+        for kind in ('approval', 'risk', 'review'):
+            with self.subTest(kind=kind):
+                self.setUp(); current = [NOW]
+                if kind == 'review':
+                    review = json.loads(self.prep['review_path'].read_bytes())
+                    review['reviewed_at'] = when(-86400 + 1)
+                    self.prep['review_sha256'] = self.f.write(self.prep['review_path'], review)
+                if kind == 'approval':
+                    self.approval['expires_at'] = when(1)
+                    self.args['approval_sha256'] = self.f.write(self.args['approval_path'], self.approval)
+                    self.risk['publication_approval_sha256'] = self.args['approval_sha256']
+                if kind == 'risk': self.risk['expires_at'] = when(1)
+                self.args['risk_approval_sha256'] = self.f.write(self.args['risk_approval_path'], self.risk)
+                self.args['clock'] = lambda: current[0]
+                self.api.after_final_base = lambda: current.__setitem__(0, NOW + dt.timedelta(seconds=2))
+                with self.assertRaises(Rejected): self.run_publish()
+                self.assertEqual(self.api.posts.count('/pulls'), 0)
+
+    def test_journal_failure_before_post_never_dispatches(self):
+        from tools import engineering_publish_coordinator as coordinator
+        actual = coordinator._save
+        def save(path, value):
+            if value.get('operations', {}).get('pr', {}).get('state') == 'DISPATCHED':
+                raise OSError('synthetic durable storage failure')
+            actual(path, value)
+        with patch.object(coordinator, '_save', side_effect=save):
+            with self.assertRaises(OSError): self.run_publish()
+        self.assertEqual(self.api.posts.count('/pulls'), 0)
+
+    def test_confirmed_save_failure_restarts_with_get_only(self):
+        from tools import engineering_publish_coordinator as coordinator
+        actual = coordinator._save
+        def save(path, value):
+            if value.get('operations', {}).get('pr', {}).get('state') == 'CONFIRMED':
+                raise OSError('synthetic confirmed journal failure')
+            actual(path, value)
+        with patch.object(coordinator, '_save', side_effect=save):
+            with self.assertRaises(OSError): self.run_publish()
+        self.assertEqual(self.journal()['operations']['pr']['state'], 'DISPATCHED')
+        before = list(self.api.posts)
+        self.assertEqual(self.run_publish()['state'], 'PR_CREATED')
+        self.assertEqual(self.api.posts, before)
+
+    def test_lost_response_moved_base_reconciles_after_approval_and_review_expiry(self):
+        self.api.after_final_base = lambda: setattr(self.api, 'base_sha', 'f'*40)
+        self.api.lose_after = '/pulls'
+        with self.assertRaises(TransportError): self.run_publish()
+        before = list(self.api.posts)
+        self.args['clock'] = lambda: NOW + dt.timedelta(days=2)
+        with self.assertRaisesRegex(Rejected, 'quarantined'): self.run_publish()
+        self.assertEqual(self.journal()['state'], 'QUARANTINED_REMOTE_PR')
+        self.assertEqual(self.api.posts, before)
+
+    def test_post_response_without_get_proof_is_unknown_not_success(self):
+        actual = self.api.request
+        def request(method, path, body=None):
+            if method == 'GET' and path.endswith('/pulls/123'):
+                raise TransportError('synthetic GET response lost')
+            return actual(method, path, body)
+        self.api.request = request
+        with self.assertRaises(TransportError): self.run_publish()
+        before = list(self.api.posts)
+        self.assertEqual(self.journal()['state'], 'RECONCILIATION_REQUIRED')
+        self.assertNotIn('remote_pr', self.journal())
+        with self.assertRaises(TransportError): self.run_publish()
+        self.assertEqual(self.api.posts, before)
+
+    def test_risk_approval_cannot_be_replaced_after_uncertain_post(self):
+        self.api.lose_after = '/pulls'
+        with self.assertRaises(TransportError): self.run_publish()
+        before = list(self.api.posts)
+        self.risk['expires_at'] = when(120)
+        self.args['risk_approval_sha256'] = self.f.write(self.args['risk_approval_path'], self.risk)
+        with self.assertRaisesRegex(Rejected, 'risk approval differs'): self.run_publish()
+        self.assertEqual(self.api.posts, before)
+
     def test_actual_gh_subprocess_adapter_connects_to_full_pipeline(self):
         config = self.f.root/'gh'; config.mkdir(mode=0o700)
         transport = GitHubHostTransport(gh_config_dir=config, gh_path='/usr/bin/gh')
