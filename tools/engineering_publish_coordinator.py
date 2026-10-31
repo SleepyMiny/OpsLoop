@@ -10,6 +10,8 @@ GitHub create-pull-request accepts a base branch name, not an expected base SHA
 GET -> POST boundary is non-atomic. Every remote write therefore requires a
 separate, exact-plan residual-risk approval. Legacy publication approval alone
 fails closed. A GET-proven mismatched Draft is quarantined, never auto-cleaned.
+PR observation has a durable start barrier. A restarted observation is diagnostic
+only: a lost mismatch must never be replaced by a later matching remote state.
 """
 from __future__ import annotations
 import argparse
@@ -156,17 +158,29 @@ def publish(*, plan_path, plan_sha256, approval_path, approval_sha256, prepare_a
         fcntl.flock(lockfd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         path = root / (key + '.json')
         require(not path.is_symlink(), 'unsafe publication journal')
-        journal = json.loads(regular_file(path, 4 * 1024 * 1024)) if path.exists() else {
+        existing = path.exists()
+        journal = json.loads(regular_file(path, 4 * 1024 * 1024)) if existing else {
             'schema_version': 'opsloop-publication-intent/v1', 'identity': identity,
             'plan_sha256': plan_sha256, 'risk_approval_sha256': risk_approval_sha256,
+            'observation_protocol': 'durable-before-get/v1', 'remote_observation_started': False,
             'operations': {}, 'state': 'INTENT'}
         require(journal.get('identity') == identity and journal.get('plan_sha256') == plan_sha256,
                 'publication already belongs to another exact plan; reconcile original intent')
         require(journal.get('risk_approval_sha256') == risk_approval_sha256,
                 'risk approval differs from original intent')
-        _save(path, journal)
         ops = journal['operations']
         reconcile_only = 'pr' in ops
+        # Never retrofit a protocol onto an old journal: CONFIRMED/INTENT may
+        # already conceal a lost mismatch. Keep its original bytes for review.
+        legacy = (journal.get('observation_protocol') != 'durable-before-get/v1' or
+                  type(journal.get('remote_observation_started')) is not bool)
+        # Snapshot on entry: setting the barrier during this uninterrupted call
+        # must not prevent its own first completion, only a later invocation's.
+        observation_recovery = (legacy or journal.get('remote_observation_started') or
+                                journal.get('state') == 'PR_CREATED')
+        require(not legacy or reconcile_only, 'legacy publication journal requires manual review')
+        if not existing:
+            _save(path, journal)
         args = dict(prepare_arguments); args.pop('now', None)
         def valid():
             require(prepare(**args, now=clock()) == plan, 'prepared plan differs from original reviewed evidence')
@@ -210,6 +224,16 @@ def publish(*, plan_path, plan_sha256, approval_path, approval_sha256, prepare_a
             A quarantine is a latch: retargeting later cannot upgrade it to success.
             """
             latched = journal.get('state') == 'QUARANTINED_REMOTE_PR'
+            if not legacy and not journal['remote_observation_started']:
+                # This must finish (including directory fsync) before any PR GET.
+                # Keep the bit even in PR_CREATED: clearing it in the final save
+                # would allow replace-success/fsync-failure to hide uncertainty.
+                # Only this uninterrupted invocation may produce a new success.
+                journal['remote_observation_started'] = True
+                if not latched:
+                    journal['state'] = 'RECONCILIATION_REQUIRED'
+                journal['reconciliation_reason'] = 'REMOTE_OBSERVATION_IN_PROGRESS'
+                _save(path, journal)
             try:
                 matches = [p for p in listing('/pulls?state=all')
                            if p.get('head', {}).get('ref') == plan['head_ref']]
@@ -237,17 +261,25 @@ def publish(*, plan_path, plan_sha256, approval_path, approval_sha256, prepare_a
                             observed['head'] != {'ref': plan['head_ref'], 'sha': ops.get('commit', {}).get('response', {}).get('sha')})
                 if mismatch:
                     journal.setdefault('quarantined_pr', journal['remote_pr'])
+                # Preserve any historical result and receipt. The journal state
+                # below describes this diagnostic attempt, not a revocation or
+                # a fresh confirmation of that previous completion record.
                 journal['state'] = 'QUARANTINED_REMOTE_PR' if mismatch or latched else 'RECONCILIATION_REQUIRED'
                 journal['reconciliation_reason'] = 'REMOTE_BINDING_MISMATCH' if mismatch else (
-                    'QUARANTINE_REQUIRES_MANUAL_REVIEW' if latched else 'FULL_PROOF_REQUIRED')
-                _save(path, journal)
+                    'QUARANTINE_REQUIRES_MANUAL_REVIEW' if latched else (
+                    'OBSERVATION_REQUIRES_MANUAL_REVIEW' if observation_recovery else 'FULL_PROOF_REQUIRED'))
+                if not legacy:
+                    _save(path, journal)
                 require(not mismatch and not latched, 'remote Draft quarantined; manual review required')
+                require(not observation_recovery, 'prior PR observation requires manual review')
                 return pr
             except Exception:
                 if journal.get('state') != 'QUARANTINED_REMOTE_PR':
                     journal['state'] = 'RECONCILIATION_REQUIRED'
-                    journal['reconciliation_reason'] = 'REMOTE_PROOF_INCOMPLETE'
-                    _save(path, journal)
+                    journal['reconciliation_reason'] = ('OBSERVATION_REQUIRES_MANUAL_REVIEW'
+                        if observation_recovery else 'REMOTE_PROOF_INCOMPLETE')
+                    if not legacy:
+                        _save(path, journal)
                 raise
         if reconcile_only:
             require(ops['pr'].get('state') != 'NOT_SENT',

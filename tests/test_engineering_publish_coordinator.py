@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import unittest
 from unittest.mock import patch
@@ -113,8 +114,16 @@ class CoordinatorTests(unittest.TestCase):
         self.assertTrue(all((p.stat().st_mode & 0o077) == 0 for p in self.args['state_root'].iterdir()))
         self.assertNotIn('nil/empty-slice', self.plan['pull_request']['body'])
     def test_restart_does_not_send_again(self):
-        self.run_publish(); before = list(self.api.posts)
-        self.assertEqual(self.run_publish()['state'], 'PR_CREATED'); self.assertEqual(before, self.api.posts)
+        result = self.run_publish(); before = list(self.api.posts)
+        receipt = next(self.args['state_root'].glob('*-remote.json'))
+        receipt_bytes = receipt.read_bytes()
+        self.assertTrue(self.journal()['remote_observation_started'])
+        with self.assertRaisesRegex(Rejected, 'prior PR observation requires manual review'):
+            self.run_publish()
+        self.assertEqual(before, self.api.posts)
+        self.assertEqual(self.journal()['state'], 'RECONCILIATION_REQUIRED')
+        self.assertEqual(self.journal()['result'], result)
+        self.assertEqual(receipt.read_bytes(), receipt_bytes)
     def test_lost_pr_response_reconciles_get_only_after_restart(self):
         self.api.lose_after = '/pulls'
         with self.assertRaises(TransportError): self.run_publish()
@@ -231,6 +240,199 @@ class CoordinatorTests(unittest.TestCase):
         return next(json.loads(p.read_bytes()) for p in self.args['state_root'].glob('*.json')
                     if 'operations' in json.loads(p.read_bytes()))
 
+    def journal_path(self):
+        return next(p for p in self.args['state_root'].glob('*.json')
+                    if 'operations' in json.loads(p.read_bytes()))
+
+    def fail_save(self, actual, path, value, failure):
+        """Inject process exceptions or syscall errors, not real power loss."""
+        from tools import engineering_publish_coordinator as coordinator
+        if failure == 'before-save': raise OSError('synthetic save failure')
+        if failure == 'exit-before-save': raise SystemExit('synthetic termination')
+        if failure == 'exit-after-save':
+            actual(path, value)
+            raise SystemExit('synthetic termination')
+        if failure == 'replace':
+            with patch.object(coordinator.os, 'replace', side_effect=OSError('synthetic replace failure')):
+                return actual(path, value)
+        real_fsync = coordinator.os.fsync
+        def fsync(fd):
+            directory = stat.S_ISDIR(os.fstat(fd).st_mode)
+            if directory == (failure == 'directory-fsync'):
+                raise OSError('synthetic fsync failure')
+            return real_fsync(fd)
+        self.assertIn(failure, ('file-fsync', 'directory-fsync'))
+        with patch.object(coordinator.os, 'fsync', side_effect=fsync):
+            return actual(path, value)
+
+    def assert_diagnostic_restart(self):
+        before = list(self.api.posts); start = len(self.api.requests)
+        self.api.base_sha = self.plan['base_commit']
+        self.api.pr['base']['sha'] = self.plan['base_commit']
+        with self.assertRaisesRegex(Rejected, 'manual review'):
+            self.run_publish()
+        self.assertEqual(self.api.posts, before)
+        self.assertTrue(self.api.requests[start:])
+        self.assertTrue(all(method == 'GET' for method, _ in self.api.requests[start:]))
+        self.assertNotEqual(self.journal()['state'], 'PR_CREATED')
+
+    def test_lost_quarantine_save_never_upgrades_restored_base(self):
+        from tools import engineering_publish_coordinator as coordinator
+        for failure in ('before-save', 'file-fsync', 'replace', 'directory-fsync',
+                        'exit-before-save', 'exit-after-save'):
+            with self.subTest(failure=failure):
+                self.setUp(); actual = coordinator._save; seen = []
+                self.api.after_final_base = lambda: setattr(self.api, 'base_sha', 'f'*40)
+                def save(path, value):
+                    if value.get('state') == 'QUARANTINED_REMOTE_PR':
+                        seen.append(copy.deepcopy(value['remote_pr']))
+                        return self.fail_save(actual, path, value, failure)
+                    return actual(path, value)
+                with patch.object(coordinator, '_save', side_effect=save):
+                    with self.assertRaises((OSError, SystemExit)): self.run_publish()
+                self.assertEqual(seen[0]['observed']['base']['sha'], 'f'*40)
+                self.assertTrue(self.journal()['remote_observation_started'])
+                self.assertEqual(self.journal()['operations']['pr']['state'], 'CONFIRMED')
+                self.assertNotIn('result', self.journal())
+                self.assertEqual(self.api.posts.count('/pulls'), 1)
+                self.assert_diagnostic_restart()
+                self.assert_diagnostic_restart()  # The diagnostic itself cannot clear the latch.
+
+    def test_directory_fsync_uncertainty_allows_either_surviving_journal(self):
+        from tools import engineering_publish_coordinator as coordinator
+        for phase in ('quarantine', 'final-success'):
+            for survivor in ('before-replace', 'after-replace'):
+                with self.subTest(phase=phase, survivor=survivor):
+                    self.setUp(); actual = coordinator._save; previous = []
+                    target = 'QUARANTINED_REMOTE_PR' if phase == 'quarantine' else 'PR_CREATED'
+                    if phase == 'quarantine':
+                        self.api.after_final_base = lambda: setattr(self.api, 'base_sha', 'f'*40)
+                    def save(path, value):
+                        if value.get('state') == target:
+                            previous.append(path.read_bytes())
+                            return self.fail_save(actual, path, value, 'directory-fsync')
+                        return actual(path, value)
+                    with patch.object(coordinator, '_save', side_effect=save):
+                        with self.assertRaises(OSError): self.run_publish()
+                    self.assertEqual(self.journal()['state'], target)  # replace was visible.
+                    if survivor == 'before-replace':
+                        # Model the older surviving directory entry; this is not
+                        # an actual filesystem crash/power-loss experiment.
+                        self.journal_path().write_bytes(previous[0])
+                    self.assertTrue(self.journal()['remote_observation_started'])
+                    self.assert_diagnostic_restart()
+
+    def test_observation_barrier_precedes_get_and_interrupted_start_is_safe(self):
+        from tools import engineering_publish_coordinator as coordinator
+        for failure in ('before-save', 'file-fsync', 'replace', 'directory-fsync',
+                        'exit-before-save', 'exit-after-save'):
+            with self.subTest(failure=failure):
+                self.setUp(); actual = coordinator._save; hit = []
+                def save(path, value):
+                    if value.get('remote_observation_started') and not hit:
+                        hit.append(True)
+                        self.assertFalse(any(p.endswith('/pulls/123') for _, p in self.api.requests))
+                        return self.fail_save(actual, path, value, failure)
+                    return actual(path, value)
+                with patch.object(coordinator, '_save', side_effect=save):
+                    with self.assertRaises((OSError, SystemExit)): self.run_publish()
+                self.assertTrue(hit)
+                self.assertFalse(any(p.endswith('/pulls/123') for _, p in self.api.requests))
+                before = list(self.api.posts)
+                if failure in ('directory-fsync', 'exit-after-save'):
+                    self.assert_diagnostic_restart()
+                else:
+                    # No PR observation was started, so GET-only completion is
+                    # safe, just like a failed CONFIRMED save after the POST.
+                    self.assertFalse(self.journal()['remote_observation_started'])
+                    self.assertEqual(self.run_publish()['state'], 'PR_CREATED')
+                self.assertEqual(self.api.posts, before)
+
+    def test_final_success_save_failure_cannot_be_reconfirmed_after_restart(self):
+        from tools import engineering_publish_coordinator as coordinator
+        for failure in ('before-save', 'file-fsync', 'replace', 'directory-fsync',
+                        'exit-before-save', 'exit-after-save'):
+            with self.subTest(failure=failure):
+                self.setUp(); actual = coordinator._save
+                def save(path, value):
+                    if value.get('state') == 'PR_CREATED':
+                        return self.fail_save(actual, path, value, failure)
+                    return actual(path, value)
+                with patch.object(coordinator, '_save', side_effect=save):
+                    with self.assertRaises((OSError, SystemExit)): self.run_publish()
+                self.assertTrue(self.journal()['remote_observation_started'])
+                receipt = next(self.args['state_root'].glob('*-remote.json'))
+                receipt_bytes = receipt.read_bytes()
+                self.assert_diagnostic_restart()
+                self.assertEqual(receipt.read_bytes(), receipt_bytes)
+
+    def test_completed_intent_reobservation_cannot_lose_mismatch(self):
+        from tools import engineering_publish_coordinator as coordinator
+        result = self.run_publish(); actual = coordinator._save
+        receipt = next(self.args['state_root'].glob('*-remote.json'))
+        receipt_bytes = receipt.read_bytes()
+        self.api.pr['base']['sha'] = 'f'*40
+        def save(path, value):
+            if value.get('state') == 'QUARANTINED_REMOTE_PR':
+                raise OSError('synthetic lost quarantine')
+            return actual(path, value)
+        with patch.object(coordinator, '_save', side_effect=save):
+            with self.assertRaises(OSError): self.run_publish()
+        self.assertEqual(self.journal()['state'], 'PR_CREATED')
+        self.assert_diagnostic_restart()
+        self.assertEqual(self.journal()['result'], result)
+        self.assertEqual(receipt.read_bytes(), receipt_bytes)
+
+    def test_legacy_journal_is_diagnostic_only_and_original_bytes_are_preserved(self):
+        for state, op_state in (('INTENT', 'CONFIRMED'), ('INTENT', 'DISPATCHED'),
+                               ('RECONCILIATION_REQUIRED', 'DISPATCHED'),
+                               ('BLOCKED_BEFORE_DISPATCH', 'NOT_SENT'),
+                               ('QUARANTINED_REMOTE_PR', 'CONFIRMED'),
+                               ('PR_CREATED', 'CONFIRMED')):
+            with self.subTest(state=state, op_state=op_state):
+                self.setUp(); self.run_publish()
+                path = self.journal_path(); old = self.journal()
+                del old['observation_protocol']; del old['remote_observation_started']
+                old['state'] = state; old['operations']['pr']['state'] = op_state
+                original = (json.dumps(old, indent=2) + '\n').encode()
+                path.write_bytes(original); before = list(self.api.posts)
+                start = len(self.api.requests)
+                with self.assertRaisesRegex(Rejected, 'manual review'): self.run_publish()
+                self.assertEqual(path.read_bytes(), original)
+                self.assertEqual(self.api.posts, before)
+                self.assertTrue(all(m == 'GET' for m, _ in self.api.requests[start:]))
+
+    def test_legacy_intent_without_pr_is_never_upgraded(self):
+        self.api.fail = '/git/blobs'
+        with self.assertRaises(TransportError): self.run_publish()
+        old = self.journal(); del old['observation_protocol']; del old['remote_observation_started']
+        path = self.journal_path(); original = canonical(old); path.write_bytes(original)
+        before = list(self.api.requests)
+        with self.assertRaisesRegex(Rejected, 'legacy publication journal'): self.run_publish()
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(self.api.requests, before)
+
+    def test_expiry_after_observation_stays_diagnostic_even_if_clock_recovers(self):
+        for kind in ('approval', 'risk'):
+            with self.subTest(kind=kind):
+                self.setUp(); current = [NOW]; actual = self.api.request
+                self.args['clock'] = lambda: current[0]
+                if kind == 'approval':
+                    self.approval['expires_at'] = when(1)
+                    self.args['approval_sha256'] = self.f.write(self.args['approval_path'], self.approval)
+                    self.risk['publication_approval_sha256'] = self.args['approval_sha256']
+                else: self.risk['expires_at'] = when(1)
+                self.args['risk_approval_sha256'] = self.f.write(self.args['risk_approval_path'], self.risk)
+                def request(method, path, body=None):
+                    response = actual(method, path, body)
+                    if method == 'GET' and path.endswith('/pulls/123'):
+                        current[0] = NOW + dt.timedelta(seconds=2)
+                    return response
+                self.api.request = request
+                with self.assertRaisesRegex(Rejected, 'expired'): self.run_publish()
+                current[0] = NOW; self.api.request = actual
+                self.assert_diagnostic_restart()
+
     def test_legacy_approval_without_separate_risk_decision_blocks_all_writes(self):
         self.args.pop('risk_approval_path'); self.args.pop('risk_approval_sha256')
         with self.assertRaisesRegex(Rejected, 'separate non-atomic'):
@@ -335,17 +537,24 @@ class CoordinatorTests(unittest.TestCase):
 
     def test_confirmed_save_failure_restarts_with_get_only(self):
         from tools import engineering_publish_coordinator as coordinator
-        actual = coordinator._save
-        def save(path, value):
-            if value.get('operations', {}).get('pr', {}).get('state') == 'CONFIRMED':
-                raise OSError('synthetic confirmed journal failure')
-            actual(path, value)
-        with patch.object(coordinator, '_save', side_effect=save):
-            with self.assertRaises(OSError): self.run_publish()
-        self.assertEqual(self.journal()['operations']['pr']['state'], 'DISPATCHED')
-        before = list(self.api.posts)
-        self.assertEqual(self.run_publish()['state'], 'PR_CREATED')
-        self.assertEqual(self.api.posts, before)
+        for failure in ('before-save', 'file-fsync', 'replace', 'directory-fsync',
+                        'exit-before-save', 'exit-after-save'):
+            with self.subTest(failure=failure):
+                self.setUp(); actual = coordinator._save
+                def save(path, value):
+                    if value.get('operations', {}).get('pr', {}).get('state') == 'CONFIRMED':
+                        return self.fail_save(actual, path, value, failure)
+                    return actual(path, value)
+                with patch.object(coordinator, '_save', side_effect=save):
+                    with self.assertRaises((OSError, SystemExit)): self.run_publish()
+                self.assertEqual(self.journal()['operations']['pr']['state'],
+                    'CONFIRMED' if failure in ('directory-fsync', 'exit-after-save') else 'DISPATCHED')
+                self.assertFalse(self.journal()['remote_observation_started'])
+                self.assertFalse(any(p.endswith('/pulls/123') for _, p in self.api.requests))
+                before = list(self.api.posts); start = len(self.api.requests)
+                self.assertEqual(self.run_publish()['state'], 'PR_CREATED')
+                self.assertEqual(self.api.posts, before)
+                self.assertTrue(all(m == 'GET' for m, _ in self.api.requests[start:]))
 
     def test_lost_response_moved_base_reconciles_after_approval_and_review_expiry(self):
         self.api.after_final_base = lambda: setattr(self.api, 'base_sha', 'f'*40)
