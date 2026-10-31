@@ -115,22 +115,6 @@ func (x deploymentExecution) AdvanceAttempt(ctx context.Context, p *v1alpha1.Rec
 	if err != nil || reason != "" {
 		return out, err
 	}
-	now := x.r.Now()
-	if !now.Before(inc.Spec.Deadline.Time) {
-		out.HaltReason = ReasonDeadlineExceeded
-		return out, nil
-	}
-	if inputs.ResourceConditions != nil {
-		inputs.Now = now
-		if err := x.r.bindResourceInput(current, inc, &inputs); err != nil {
-			out.HaltReason = "RESOURCE_CONDITIONS_UNCONFIRMED: " + err.Error()
-			return out, nil
-		}
-	}
-	if !attemptMetricsFresh(dec, a, inc.Spec.Policy.Filter.MaxSampleAge.Duration, now) {
-		out.Deferred = true
-		return out, nil
-	}
 	// v3 binds a live source incarnation, not only the failure class. Recheck it
 	// after candidate/Policy I/O, then re-read the Policy and authority after that source I/O.
 	// Kubernetes cannot atomically CAS this Pod and Deployment together.
@@ -145,11 +129,47 @@ func (x deploymentExecution) AdvanceAttempt(ctx context.Context, p *v1alpha1.Rec
 		if err != nil || reason != "" {
 			return out, err
 		}
-		if !x.r.Now().Before(inc.Spec.Deadline.Time) {
-			out.HaltReason = ReasonDeadlineExceeded
+	}
+	// All potentially blocking source/Policy/Deployment reads are complete.
+	// executionPolicy itself performs I/O after authorizing, so its earlier
+	// approval cannot cover the time spent in that final Deployment GET.
+	if err := x.r.authorizeExecution(current, inc); err != nil {
+		out.Unauthorized = ReasonExecutionAuthority
+		return out, nil
+	}
+	if inputs.ResourceConditions != nil {
+		inputs.Now = x.r.Now()
+		if err := x.r.bindResourceInput(current, inc, &inputs); err != nil {
+			// Keep authority expiry distinct from invalid/expired resource data.
+			if authErr := x.r.authorizeExecution(current, inc); authErr != nil {
+				out.Unauthorized = ReasonExecutionAuthority
+			} else {
+				out.HaltReason = "RESOURCE_CONDITIONS_UNCONFIRMED: " + err.Error()
+			}
+			return out, nil
+		}
+		// Binding samples authority too; finish with a fresh process/time check.
+		if err := x.r.authorizeExecution(current, inc); err != nil {
+			out.Unauthorized = ReasonExecutionAuthority
 			return out, nil
 		}
 	}
+	now := x.r.Now()
+	if !now.Before(inc.Spec.Deadline.Time) {
+		out.HaltReason = ReasonDeadlineExceeded
+		return out, nil
+	}
+	inputs.Now = now
+	if err := candidates.ValidateResourceInput(inputs); err != nil {
+		out.HaltReason = "RESOURCE_CONDITIONS_UNCONFIRMED: " + err.Error()
+		return out, nil
+	}
+	if !attemptMetricsFresh(dec, a, inc.Spec.Policy.Filter.MaxSampleAge.Duration, now) {
+		out.Deferred = true
+		return out, nil
+	}
+	// No further API reads precede this Deployment CAS. Other objects may still
+	// change after their observations; this is not cross-object atomicity.
 	out.PreResourceVersion = d.ResourceVersion
 	recovery.Mutate(&d.Spec.Template, a.Hostname, a.ActionID)
 	if err := x.r.Update(ctx, d, client.FieldOwner(fieldOwner)); err != nil {

@@ -35,12 +35,20 @@ func newReproductionEnforceStages(t *testing.T, startup bool, steps ...func(*enf
 }
 
 func newReproductionEnforceDurationStages(t *testing.T, startup, rawDurations bool, steps ...func(*enforceFixture, *exhibitionFixture, string, func())) (*enforceFixture, *corev1.Pod, *exhibitionFixture) {
+	return newReproductionEnforceConfigured(t, startup, rawDurations, nil, nil, steps...)
+}
+
+// Configure immutable policy/permit inputs before signing or observing the run.
+func newReproductionEnforceConfigured(t *testing.T, startup, rawDurations bool, policy func(*v1alpha1.RecoveryPolicy), permit func(*enforceFixture, *exhibitionFixture), steps ...func(*enforceFixture, *exhibitionFixture, string, func())) (*enforceFixture, *corev1.Pod, *exhibitionFixture) {
 	e, old := newReadinessEnforce(t)
 	e.updateDeployment(func(d *appsv1.Deployment) {
 		d.Spec.Template.Spec.Containers[0].Env = append(d.Spec.Template.Spec.Containers[0].Env, corev1.EnvVar{Name: "DEMO_B_REPLAY", Value: ""})
 	})
 	baseline := *e.liveDeployment().Spec.Template.DeepCopy()
 	p := e.policy()
+	if policy != nil {
+		policy(p)
+	}
 	p.Spec.Enabled = false
 	e.must(e.c.Update(e.ctx, p))
 	p.Status.Conditions = []metav1.Condition{{Type: CondQuiesced, Status: metav1.ConditionTrue, Reason: "FenceClosed", LastTransitionTime: metav1.NewTime(e.now), ObservedGeneration: p.Generation}}
@@ -78,6 +86,9 @@ func newReproductionEnforceDurationStages(t *testing.T, startup, rawDurations bo
 	f.permit.CircuitReplay.Signature = historical
 	f.permit.AllowedCircuitSignatures = []string{historical}
 	promoteReproductionPermit(&f.permit, baseline)
+	if permit != nil {
+		permit(e, f)
+	}
 	beforePermit := f.p.DeepCopy()
 	f.publish(t)
 	e.must(e.c.Patch(e.ctx, f.p, client.MergeFrom(beforePermit)))
