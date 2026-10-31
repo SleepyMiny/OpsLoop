@@ -173,6 +173,8 @@ def require_live_view(root,deadline):
 
 
 def execute(plan,approval_sha):
+    from tools.exhibition_finite_cli import reject_legacy_mix
+    reject_legacy_mix(plan)
     now=dt.datetime.now(dt.timezone.utc);cfg=plan['newInterval'];auth=private_read(cfg['authorization']['path'],cfg['authorization']['sha256'])
     require(dt.datetime.fromisoformat(auth['receivedAt'])<=now<dt.datetime.fromisoformat(auth['workDeadline']),'NEW_INTERVAL_EXPIRED')
     for ref in cfg['sourcePins']:require(pin(ref['path'])==ref,'RESUME_SOURCE_CHANGED')
@@ -345,5 +347,11 @@ def execute(plan,approval_sha):
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--plan',required=True);parser.add_argument('--sha256',required=True)
-    args=parser.parse_args();plan=private_read(args.plan,args.sha256);execute(plan,args.sha256)
+    actions=parser.add_mutually_exclusive_group();actions.add_argument('--finite-slot',metavar='AUTHORIZATION_ID');actions.add_argument('--finite-close',action='store_true')
+    args=parser.parse_args();plan=private_read(args.plan,args.sha256)
+    if args.finite_slot is not None or args.finite_close:
+        from tools.exhibition_finite_cli import execute as finite_execute
+        result=finite_execute(plan,args.sha256,authorization_id=args.finite_slot,close=args.finite_close)
+        print(json.dumps(result))
+    else:execute(plan,args.sha256)
 if __name__=='__main__':main()
