@@ -126,6 +126,11 @@ func (r *PolicyReconciler) readinessTrigger(ctx context.Context, inc *v1alpha1.R
 	if applied {
 		return true, nil
 	}
+	if authority, ok := r.Authority.(*ExhibitionAuthority); ok {
+		if err := authority.validateCurrentReproductionSource(inc, pod, rs, node); err != nil {
+			return false, err
+		}
+	}
 	expectedContainer := classification.ReadinessTriggerContainerHash(t)
 	if expectedContainer == "" || classification.ReadinessContainerHash(pod) != expectedContainer {
 		return false, fmt.Errorf("readiness source container incarnation changed or is unbound")

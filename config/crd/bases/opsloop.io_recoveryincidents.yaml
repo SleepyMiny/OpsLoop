@@ -596,6 +596,89 @@ spec:
                                       type: string
                                     maxItems: 15
                                     type: array
+                                  resourceCondition:
+                                    description: Original observations remain in Measurements;
+                                      only this copy affects experiment evaluation.
+                                    properties:
+                                      appliedMeasurements:
+                                        description: Measurements uses nil pointers
+                                          for "not measured"; never fill them with
+                                          zero.
+                                        properties:
+                                          allocatableCPUMilli:
+                                            format: int64
+                                            type: integer
+                                          allocatableMemoryBytes:
+                                            format: int64
+                                            type: integer
+                                          cpuSampleCount:
+                                            format: int32
+                                            type: integer
+                                          cpuSampleTime:
+                                            description: Oldest raw sample timestamp.
+                                            format: date-time
+                                            type: string
+                                          cpuUtilizationPermille:
+                                            format: int32
+                                            type: integer
+                                          memAvailableBytes:
+                                            format: int64
+                                            type: integer
+                                          memSampleTime:
+                                            format: date-time
+                                            type: string
+                                          memTotalBytes:
+                                            format: int64
+                                            type: integer
+                                          newPodCPUMilli:
+                                            format: int64
+                                            type: integer
+                                          newPodMemoryBytes:
+                                            format: int64
+                                            type: integer
+                                          requestedCPUMilli:
+                                            description: Sum over existing non-terminated
+                                              Pods.
+                                            format: int64
+                                            type: integer
+                                          requestedMemoryBytes:
+                                            format: int64
+                                            type: integer
+                                          reserveCPUMilli:
+                                            format: int64
+                                            type: integer
+                                          reserveMemoryBytes:
+                                            format: int64
+                                            type: integer
+                                        required:
+                                        - allocatableCPUMilli
+                                        - allocatableMemoryBytes
+                                        - newPodCPUMilli
+                                        - newPodMemoryBytes
+                                        - requestedCPUMilli
+                                        - requestedMemoryBytes
+                                        - reserveCPUMilli
+                                        - reserveMemoryBytes
+                                        type: object
+                                      configSHA256:
+                                        type: string
+                                      epoch:
+                                        type: string
+                                      expiresAt:
+                                        format: date-time
+                                        type: string
+                                      policyUID:
+                                        type: string
+                                      runID:
+                                        type: string
+                                    required:
+                                    - appliedMeasurements
+                                    - configSHA256
+                                    - epoch
+                                    - expiresAt
+                                    - policyUID
+                                    - runID
+                                    type: object
                                   score:
                                     description: Set only when eligible.
                                     properties:
@@ -878,6 +961,88 @@ spec:
                                 type: string
                               maxItems: 15
                               type: array
+                            resourceCondition:
+                              description: Original observations remain in Measurements;
+                                only this copy affects experiment evaluation.
+                              properties:
+                                appliedMeasurements:
+                                  description: Measurements uses nil pointers for
+                                    "not measured"; never fill them with zero.
+                                  properties:
+                                    allocatableCPUMilli:
+                                      format: int64
+                                      type: integer
+                                    allocatableMemoryBytes:
+                                      format: int64
+                                      type: integer
+                                    cpuSampleCount:
+                                      format: int32
+                                      type: integer
+                                    cpuSampleTime:
+                                      description: Oldest raw sample timestamp.
+                                      format: date-time
+                                      type: string
+                                    cpuUtilizationPermille:
+                                      format: int32
+                                      type: integer
+                                    memAvailableBytes:
+                                      format: int64
+                                      type: integer
+                                    memSampleTime:
+                                      format: date-time
+                                      type: string
+                                    memTotalBytes:
+                                      format: int64
+                                      type: integer
+                                    newPodCPUMilli:
+                                      format: int64
+                                      type: integer
+                                    newPodMemoryBytes:
+                                      format: int64
+                                      type: integer
+                                    requestedCPUMilli:
+                                      description: Sum over existing non-terminated
+                                        Pods.
+                                      format: int64
+                                      type: integer
+                                    requestedMemoryBytes:
+                                      format: int64
+                                      type: integer
+                                    reserveCPUMilli:
+                                      format: int64
+                                      type: integer
+                                    reserveMemoryBytes:
+                                      format: int64
+                                      type: integer
+                                  required:
+                                  - allocatableCPUMilli
+                                  - allocatableMemoryBytes
+                                  - newPodCPUMilli
+                                  - newPodMemoryBytes
+                                  - requestedCPUMilli
+                                  - requestedMemoryBytes
+                                  - reserveCPUMilli
+                                  - reserveMemoryBytes
+                                  type: object
+                                configSHA256:
+                                  type: string
+                                epoch:
+                                  type: string
+                                expiresAt:
+                                  format: date-time
+                                  type: string
+                                policyUID:
+                                  type: string
+                                runID:
+                                  type: string
+                              required:
+                              - appliedMeasurements
+                              - configSHA256
+                              - epoch
+                              - expiresAt
+                              - policyUID
+                              - runID
+                              type: object
                             score:
                               description: Set only when eligible.
                               properties:

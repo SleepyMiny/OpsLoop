@@ -80,6 +80,13 @@ func (x deploymentExecution) AdvanceAttempt(ctx context.Context, p *v1alpha1.Rec
 	if err := recordDispatch(); err != nil {
 		return out, err
 	}
+	if inputs.ResourceConditions != nil {
+		reserved := lastReserved(inc)
+		if reserved == nil || inc.Status.Runtime.Decision == nil || !resourceEvidenceBound(reserved.Decision, inputs.ResourceConditions) || !resourceEvidenceBound(*inc.Status.Runtime.Decision, inputs.ResourceConditions) {
+			out.HaltReason = "RESOURCE_CONDITIONS_UNCONFIRMED: persisted evidence missing or changed"
+			return out, nil
+		}
+	}
 	current, reason, err = x.executionPolicy(ctx, current, inc)
 	out.Policy, out.Unauthorized = current, reason
 	if err != nil || reason != "" {
@@ -113,9 +120,35 @@ func (x deploymentExecution) AdvanceAttempt(ctx context.Context, p *v1alpha1.Rec
 		out.HaltReason = ReasonDeadlineExceeded
 		return out, nil
 	}
+	if inputs.ResourceConditions != nil {
+		inputs.Now = now
+		if err := x.r.bindResourceInput(current, inc, &inputs); err != nil {
+			out.HaltReason = "RESOURCE_CONDITIONS_UNCONFIRMED: " + err.Error()
+			return out, nil
+		}
+	}
 	if !attemptMetricsFresh(dec, a, inc.Spec.Policy.Filter.MaxSampleAge.Duration, now) {
 		out.Deferred = true
 		return out, nil
+	}
+	// v3 binds a live source incarnation, not only the failure class. Recheck it
+	// after candidate/Policy I/O, then re-read the Policy and authority after that source I/O.
+	// Kubernetes cannot atomically CAS this Pod and Deployment together.
+	if authority, ok := x.r.Authority.(*ExhibitionAuthority); ok && authority.reproductionEnabled(current) {
+		valid, sourceErr := x.r.readinessTrigger(ctx, inc, false)
+		if sourceErr != nil || !valid {
+			out.HaltReason = "REPRODUCTION_SOURCE_UNCONFIRMED"
+			return out, nil
+		}
+		current, reason, err = x.executionPolicy(ctx, current, inc)
+		out.Policy, out.Unauthorized = current, reason
+		if err != nil || reason != "" {
+			return out, err
+		}
+		if !x.r.Now().Before(inc.Spec.Deadline.Time) {
+			out.HaltReason = ReasonDeadlineExceeded
+			return out, nil
+		}
 	}
 	out.PreResourceVersion = d.ResourceVersion
 	recovery.Mutate(&d.Spec.Template, a.Hostname, a.ActionID)
@@ -287,10 +320,31 @@ func (x deploymentExecution) executionNodes(ctx context.Context, inc *v1alpha1.R
 	}
 	// Keep the collection evaluation time here; the exclusive metric expiry
 	// and deadline are checked after these reads without cancelling the action.
-	inputs.Nodes = []corev1.Node{*node}
-	inputs.PodsByNode = map[string][]corev1.Pod{node.Name: pods.Items}
-	current := candidates.Evaluate(inputs).Candidates[0]
-	return current.Eligible, false, strings.Join(current.RejectReasons, ","), nil
+	// Preserve the complete bound candidate set for condition validation while
+	// replacing the reserved target with its fresh API identity and requests.
+	inputs.Nodes = append([]corev1.Node(nil), inputs.Nodes...)
+	replaced := false
+	for i := range inputs.Nodes {
+		if inputs.Nodes[i].Name == node.Name {
+			inputs.Nodes[i] = *node
+			replaced = true
+		}
+	}
+	if !replaced {
+		return false, false, "reserved node absent from evaluation", nil
+	}
+	freshPods := map[string][]corev1.Pod{}
+	for name, observed := range inputs.PodsByNode {
+		freshPods[name] = observed
+	}
+	freshPods[node.Name] = pods.Items
+	inputs.PodsByNode = freshPods
+	for _, current := range candidates.Evaluate(inputs).Candidates {
+		if current.NodeUID == a.NodeUID && current.NodeName == a.NodeName {
+			return current.Eligible, false, strings.Join(current.RejectReasons, ","), nil
+		}
+	}
+	return false, false, "reserved node absent from decision", nil
 }
 
 // executionPolicy authorizes only the same, live Policy generation and active
@@ -317,6 +371,15 @@ func (x deploymentExecution) executionPolicy(ctx context.Context, p *v1alpha1.Re
 	}
 	if err := x.r.authorizeExecution(current, inc); err != nil {
 		return current, ReasonExecutionAuthority, nil
+	}
+	if authority, ok := x.r.Authority.(*ExhibitionAuthority); ok {
+		live, err := x.r.liveDeployment(ctx, current)
+		if err != nil {
+			return current, "", err
+		}
+		if err = authority.ValidateReplayWorkload(current, live); err != nil {
+			return current, ReasonExecutionAuthority, nil
+		}
 	}
 	return current, "", nil
 }

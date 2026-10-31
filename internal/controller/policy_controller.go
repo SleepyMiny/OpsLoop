@@ -95,10 +95,11 @@ const (
 type PolicyReconciler struct {
 	client.Client
 	// APIReader reads Policy, Incident, Deployment and final execution inputs live.
-	APIReader client.Reader
-	Now       func() time.Time
-	Prom      promv1.API
-	Authority ExecutionAuthorizer
+	APIReader          client.Reader
+	Now                func() time.Time
+	Prom               promv1.API
+	Authority          ExecutionAuthorizer
+	ResourceConditions *candidates.ResourceConditions
 	// Probe checks the attempt Pod directly during VERIFYING.
 	Probe func(ctx context.Context, podIP string, port int32, podUID string) error
 
@@ -133,7 +134,7 @@ func (r *PolicyReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manage
 // unrelated metadata/status churn. A delayed worker still fails closed.
 func policyExecutionPredicate() predicate.Predicate {
 	return predicate.Or(predicate.GenerationChangedPredicate{}, predicate.Funcs{UpdateFunc: func(e event.UpdateEvent) bool {
-		return e.ObjectOld != nil && e.ObjectNew != nil && e.ObjectOld.GetAnnotations()[ExecutionGrantAnnotation] != e.ObjectNew.GetAnnotations()[ExecutionGrantAnnotation]
+		return e.ObjectOld != nil && e.ObjectNew != nil && (e.ObjectOld.GetAnnotations()[ExecutionGrantAnnotation] != e.ObjectNew.GetAnnotations()[ExecutionGrantAnnotation] || e.ObjectOld.GetAnnotations()[ExhibitionPermitAnnotation] != e.ObjectNew.GetAnnotations()[ExhibitionPermitAnnotation])
 	}})
 }
 
@@ -193,6 +194,20 @@ func (r *PolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 func (r *PolicyReconciler) reconcileMonitoring(ctx context.Context, p *v1alpha1.RecoveryPolicy, now time.Time) (ctrl.Result, error) {
 	if p.Spec.Mode == v1alpha1.PolicyModeEnforce {
 		if err := r.authorizeExecution(p, nil); err != nil {
+			// A preceding monitor may have closed authority before its status
+			// CAS conflicted. Reconcile the display without reopening authority.
+			if authority, ok := r.Authority.(*ExhibitionAuthority); ok && authority.reproductionEnabled(p) {
+				for _, condition := range p.Status.Conditions {
+					if condition.Type == "ReproductionSource" && condition.ObservedGeneration == p.Generation && condition.Reason != "SourceRejected" {
+						setReadinessCondition(p, metav1.Condition{Type: "ReproductionSource", Status: metav1.ConditionFalse, Reason: "SourceRejected", Message: "Source authorization unavailable; execution blocked", ObservedGeneration: p.Generation, LastTransitionTime: metav1.NewTime(now)})
+						setCondition(p, ReasonExecutionAuthority, err.Error(), now)
+						if writeErr := r.writePolicy(ctx, p); writeErr != nil {
+							return requeueOnConflict(writeErr)
+						}
+						return ctrl.Result{RequeueAfter: monitorPeriod}, nil
+					}
+				}
+			}
 			return r.block(ctx, p, ReasonExecutionAuthority, err.Error(), now)
 		}
 	}
@@ -222,6 +237,11 @@ func (r *PolicyReconciler) reconcileMonitoring(ctx context.Context, p *v1alpha1.
 		if live == nil {
 			return r.block(ctx, p, CondTargetNotFound, "", now)
 		}
+		if authority, ok := r.Authority.(*ExhibitionAuthority); ok {
+			if err := authority.ValidateReplayWorkload(p, live); err != nil {
+				return r.block(ctx, p, ReasonExecutionAuthority, err.Error(), now)
+			}
+		}
 		f, err := readFence(live)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -231,13 +251,24 @@ func (r *PolicyReconciler) reconcileMonitoring(ctx context.Context, p *v1alpha1.
 		}
 	}
 	// arch §7:215 forbids automatic circuit removal, so a full list blocks every new Incident until reset.
-	if len(p.Status.Circuits) >= v1alpha1.MaxCircuits {
+	_, exhibition := r.Authority.(*ExhibitionAuthority)
+	if len(p.Status.Circuits) >= v1alpha1.MaxCircuits && !exhibition {
 		return r.block(ctx, p, CondCircuitCapacity, "circuits full; reset status.circuits", now)
 	}
 
 	conditionsBefore := append([]metav1.Condition(nil), p.Status.Conditions...)
 	res, digest, err := r.monitor(ctx, p, d, now)
+	if errors.Is(err, errReproductionPending) {
+		return r.block(ctx, p, "REPRODUCTION_SOURCE_PENDING", "Awaiting approved source runtime identity; no Incident or recovery action authorized", now)
+	}
 	if err != nil {
+		// Preserve source rejection/read uncertainty before returning the
+		// original error. A retired authority will bypass monitor next time.
+		if !equality.Semantic.DeepEqual(conditionsBefore, p.Status.Conditions) {
+			if writeErr := r.writePolicy(ctx, p); writeErr != nil {
+				return requeueOnConflict(writeErr)
+			}
+		}
 		return ctrl.Result{}, err
 	}
 	if !res.Detected {
@@ -253,10 +284,28 @@ func (r *PolicyReconciler) reconcileMonitoring(ctx context.Context, p *v1alpha1.
 		}
 		return ctrl.Result{RequeueAfter: after}, nil
 	}
+	allowCircuit := false
+	if authority, ok := r.Authority.(*ExhibitionAuthority); ok && p.Spec.Mode == v1alpha1.PolicyModeEnforce {
+		if err := authority.bindReproductionTrigger(p, res.Trigger, digest); err != nil {
+			return r.block(ctx, p, ReasonExecutionAuthority, err.Error(), now)
+		}
+		if err := authority.ValidateReplayTrigger(p, res.Trigger.Signature); err != nil {
+			return r.block(ctx, p, ReasonExecutionAuthority, err.Error(), now)
+		}
+		allowCircuit = authority.AllowsCircuit(p, res.Trigger.Signature, d)
+	}
+	existingCircuit := false
 	for _, c := range p.Status.Circuits {
 		if c.Signature == res.Trigger.Signature {
+			existingCircuit = true
+			if allowCircuit {
+				continue
+			}
 			return r.block(ctx, p, CondCircuitOpen, "circuit open for signature "+c.Signature, now)
 		}
+	}
+	if len(p.Status.Circuits) >= v1alpha1.MaxCircuits && !(existingCircuit && allowCircuit) {
+		return r.block(ctx, p, CondCircuitCapacity, "circuits full; no new signature allowed", now)
 	}
 	return r.reserve(ctx, p, d, res.Trigger, digest, now)
 }
@@ -286,6 +335,30 @@ func (r *PolicyReconciler) monitor(ctx context.Context, p *v1alpha1.RecoveryPoli
 		return !equality.Semantic.DeepEqual(*template, d.Spec.Template)
 	})
 	monitored := classification.MonitoredPods(d, current, pods.Items)
+	if authority, ok := r.Authority.(*ExhibitionAuthority); ok && p.Spec.Mode == v1alpha1.PolicyModeEnforce && authority.reproductionEnabled(p) {
+		monitored, nodes, err = r.reproductionInputs(ctx, p, d, now)
+		sourceCondition := metav1.Condition{Type: "ReproductionSource", Status: metav1.ConditionTrue, Reason: "SourceBound", Message: "Live approved source identity bound; readiness classification remains independently required", ObservedGeneration: p.Generation, LastTransitionTime: metav1.NewTime(now)}
+		if err == nil && !authority.reproductionSourceBound() {
+			sourceCondition.Status = metav1.ConditionFalse
+			sourceCondition.Reason = "AwaitingApprovedSource"
+			sourceCondition.Message = "Observing healthy baseline before reproduction; no source bound"
+		}
+		if errors.Is(err, errReproductionPending) {
+			sourceCondition.Status = metav1.ConditionUnknown
+			sourceCondition.Reason = "SourcePending"
+			sourceCondition.Message = "Approved source runtime identity pending; no Incident or recovery action authorized"
+		}
+		if err != nil && !errors.Is(err, errReproductionPending) {
+			sourceCondition.Status = metav1.ConditionFalse
+			sourceCondition.Reason = "SourceRejected"
+			sourceCondition.Message = "Source identity not confirmed; execution blocked"
+		}
+		setReadinessCondition(p, sourceCondition)
+		if err != nil {
+			delete(r.readiness, client.ObjectKeyFromObject(p))
+			return classification.Result{}, "", err
+		}
+	}
 	key := types.NamespacedName{Namespace: p.Namespace, Name: p.Name}
 	digest := imageDigest(d, monitored)
 	return classification.Classify(classification.Input{
@@ -350,6 +423,11 @@ func (r *PolicyReconciler) reserve(ctx context.Context, p *v1alpha1.RecoveryPoli
 		return ctrl.Result{RequeueAfter: conflictRequeue}, nil
 	}
 	if p.Spec.Mode == v1alpha1.PolicyModeEnforce {
+		if authority, ok := r.Authority.(*ExhibitionAuthority); ok {
+			if err := authority.ValidateReplayWorkload(p, live); err != nil {
+				return r.block(ctx, p, ReasonExecutionAuthority, err.Error(), now)
+			}
+		}
 		f, err := readFence(live)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -404,6 +482,11 @@ func reservation(p *v1alpha1.RecoveryPolicy, live *appsv1.Deployment, t v1alpha1
 func (r *PolicyReconciler) createAndProgress(ctx context.Context, p *v1alpha1.RecoveryPolicy, live *appsv1.Deployment, now time.Time) (ctrl.Result, error) {
 	a := p.Status.ActiveIncident
 	inc := incidentFor(p, live)
+	if authority, ok := r.Authority.(*ExhibitionAuthority); ok && p.Spec.Mode == v1alpha1.PolicyModeEnforce {
+		if err := authority.AnnotateIncident(p, inc); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 	if err := r.Create(ctx, inc); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
 			return ctrl.Result{}, err
@@ -561,6 +644,11 @@ func (r *PolicyReconciler) progress(ctx context.Context, p *v1alpha1.RecoveryPol
 		settleReserved(inc, live, now)
 		return r.finish(ctx, p, inc, phase, reason, "", now)
 	}
+	if authority, ok := r.Authority.(*ExhibitionAuthority); ok && p.Spec.Mode == v1alpha1.PolicyModeEnforce {
+		if err := authority.ValidateReplayWorkload(p, live); err != nil {
+			return r.haltAndSettle(ctx, p, inc, ReasonExecutionAuthority)
+		}
+	}
 	if lastReserved(inc) != nil {
 		return r.resume(ctx, p, inc, live, now)
 	}
@@ -697,6 +785,9 @@ func (r *PolicyReconciler) decide(ctx context.Context, p *v1alpha1.RecoveryPolic
 		ImageDigest:          inc.Spec.Baseline.ImageDigest,
 		BaselineTemplateHash: inc.Spec.Baseline.TemplateHash,
 	}
+	if err := r.bindResourceInput(p, inc, &inputs); err != nil {
+		return v1alpha1.RecoveryDecision{}, inputs, false, err
+	}
 	return candidates.Evaluate(inputs), inputs, false, nil
 }
 
@@ -761,6 +852,13 @@ func (r *PolicyReconciler) releaseLost(ctx context.Context, p *v1alpha1.Recovery
 }
 
 func addCircuit(p *v1alpha1.RecoveryPolicy, t v1alpha1.Trigger, incident, phase string, now time.Time) {
+	// Retain the first open circuit; repeated approved exhibitions do not erase
+	// history or accumulate duplicate circuit entries. Each Incident retains its own outcome.
+	for _, c := range p.Status.Circuits {
+		if c.Signature == t.Signature {
+			return
+		}
+	}
 	p.Status.Circuits = append(p.Status.Circuits, v1alpha1.Circuit{Signature: t.Signature, Class: t.Class, Incident: incident, Phase: phase, OpenedAt: metav1.NewTime(now)})
 }
 

@@ -87,9 +87,17 @@ func (r *PolicyReconciler) startAttempt(ctx context.Context, p *v1alpha1.Recover
 		ReservedAt:         metav1.NewTime(now),
 	})
 	setPhase(inc, PhaseExecuting, dec.DecisionReason, "", now)
+	expectedEvidence := dec.DeepCopy()
 	if err := r.Status().Update(ctx, inc); err != nil {
 		// The Deployment is untouched; a stale duplicate reservation ends here.
 		return requeueOnConflict(err)
+	}
+	if inputs.ResourceConditions != nil {
+		// An older installed CRD must not silently prune the distinction between
+		// measured and experimental values while still allowing workload writes.
+		if inc.Status.Runtime.Decision == nil || !resourceDecisionRecorded(*inc.Status.Runtime.Decision, *expectedEvidence) || len(inc.Status.Runtime.Attempts) == 0 || !resourceDecisionRecorded(inc.Status.Runtime.Attempts[len(inc.Status.Runtime.Attempts)-1].Decision, *expectedEvidence) {
+			return ctrl.Result{}, fmt.Errorf("resource condition evidence not persisted; update CRD before experiment")
+		}
 	}
 	return r.execute(ctx, p, inc, live, dec, inputs)
 }
@@ -233,6 +241,9 @@ func attemptMetricsFresh(dec v1alpha1.RecoveryDecision, a *v1alpha1.Attempt, max
 			continue
 		}
 		if !c.Eligible {
+			return false
+		}
+		if c.ResourceCondition != nil && !now.Before(c.ResourceCondition.ExpiresAt.Time) {
 			return false
 		}
 		for _, ts := range []*metav1.Time{c.Measurements.CPUSampleTime, c.Measurements.MemSampleTime} {

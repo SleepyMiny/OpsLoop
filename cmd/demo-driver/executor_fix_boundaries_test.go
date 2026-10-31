@@ -218,6 +218,7 @@ func TestFinishFixPreStart(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			reachedResumeBoundary := false
+			var startFailureInterpreter string
 			hook := func(j *finishJournal) {
 				j.before = func(k string) error {
 					if k == "resume-dispatch-durable" {
@@ -230,7 +231,7 @@ func TestFinishFixPreStart(t *testing.T) {
 						case "cancel":
 							cancel()
 						case "start-failure":
-							return os.Remove(filepath.Join(filepath.Dir(s.c.Executable), "interpreter"))
+							return os.Remove(startFailureInterpreter)
 						case "deadline":
 							time.Sleep(time.Duration(s.c.DeadlineMS) * time.Millisecond)
 						}
@@ -241,7 +242,16 @@ func TestFinishFixPreStart(t *testing.T) {
 			if kind == "start-failure" {
 				// Valid hash and executable permission; missing interpreter fails Start.
 				data, _ := os.ReadFile(s.c.Executable)
-				interpreter := filepath.Join(filepath.Dir(s.c.Executable), "interpreter")
+				// Linux shebang parsing has a fixed length limit. Keep the
+				// interpreter path short even when the evidence TMPDIR is deep,
+				// so this case fails at the intended resume Start, not the first GET.
+				interpreterDir, e := os.MkdirTemp("/tmp", "opsloop-test-interpreter-")
+				if e != nil {
+					t.Fatal(e)
+				}
+				t.Cleanup(func() { os.RemoveAll(interpreterDir) })
+				interpreter := filepath.Join(interpreterDir, "python3")
+				startFailureInterpreter = interpreter
 				if e := os.Symlink("/usr/bin/python3", interpreter); e != nil {
 					t.Fatal(e)
 				}
@@ -269,8 +279,8 @@ func TestFinishFixPreStart(t *testing.T) {
 				s.c.PollMS = 10
 			}
 			err := executeFinish(ctx, s.c, io.Discard, observerWallClock{}, fixtureVMRunner{s.c.Executable, s.c.ExecutableSHA256}, hook)
-			if kind == "deadline" && !reachedResumeBoundary {
-				t.Fatal("deadline fixture did not reach the intended resume boundary")
+			if (kind == "deadline" || kind == "start-failure") && !reachedResumeBoundary {
+				t.Fatal("fixture did not reach the intended resume boundary")
 			}
 			// Every negative preflight case reaches the resume path; no actual
 			// restore is requested when preflight or Start rejects it.

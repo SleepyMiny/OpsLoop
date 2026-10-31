@@ -159,6 +159,18 @@ type CandidateEvaluation struct {
 	Measurements Measurements `json:"measurements"`
 	// Set only when eligible.
 	Score *ScoreBreakdown `json:"score,omitempty"`
+	// Original observations remain in Measurements; only this copy affects experiment evaluation.
+	ResourceCondition *AppliedResourceCondition `json:"resourceCondition,omitempty"`
+}
+
+// AppliedResourceCondition distinguishes run-limited evaluation inputs from observations.
+type AppliedResourceCondition struct {
+	RunID               string       `json:"runID"`
+	Epoch               string       `json:"epoch"`
+	PolicyUID           string       `json:"policyUID"`
+	ConfigSHA256        string       `json:"configSHA256"`
+	ExpiresAt           metav1.Time  `json:"expiresAt"`
+	AppliedMeasurements Measurements `json:"appliedMeasurements"`
 }
 
 // Measurements uses nil pointers for "not measured"; never fill them with zero.

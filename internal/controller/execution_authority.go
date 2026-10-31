@@ -119,6 +119,8 @@ type ExecutionAuthority struct {
 	expiryTick  time.Duration
 	last        authoritySample
 	incidentUID string
+	// Nonzero only for a verified exhibition permit; legacy authority remains base zero.
+	baseIncidentSequence int64
 }
 
 func NewExecutionAuthority(scope ExecutionScope) (*ExecutionAuthority, error) {
@@ -180,7 +182,7 @@ func (a *ExecutionAuthority) Authorize(p *v1alpha1.RecoveryPolicy, inc *v1alpha1
 		if a.incidentUID != "" && a.incidentUID != string(inc.UID) {
 			return deny("execution authority: incident UID changed")
 		}
-	} else if p.Status.ActiveIncident == nil && p.Status.IncidentSequence != 0 {
+	} else if p.Status.ActiveIncident == nil && p.Status.IncidentSequence != a.baseIncidentSequence {
 		return deny("execution authority: single incident already consumed")
 	}
 	if !a.seen {
