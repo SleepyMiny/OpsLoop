@@ -13,16 +13,21 @@ type Quote struct {
 }
 
 // CalculateQuote prices an order in integer cents. Empty orders are valid.
-// This dedicated Demo B application deliberately starts with an unfixed defect;
-// the repair must come from the isolated Codex run, not the demo coordinator.
 func CalculateQuote(items []Item) (Quote, error) {
 	var total, count int64
 	for _, item := range items {
 		if item.UnitPrice < 0 || item.UnitPrice > 1000000 || item.Quantity < 1 || item.Quantity > 1000 {
 			return Quote{}, errors.New("invalid item")
 		}
-		total += item.UnitPrice * item.Quantity
+		itemTotal := item.UnitPrice * item.Quantity
+		if total > int64(^uint64(0)>>1)-itemTotal || count > int64(^uint64(0)>>1)-item.Quantity {
+			return Quote{}, errors.New("quote overflow")
+		}
+		total += itemTotal
 		count += item.Quantity
+	}
+	if count == 0 {
+		return Quote{}, nil
 	}
 	return Quote{Total: total, Average: total / count}, nil
 }
