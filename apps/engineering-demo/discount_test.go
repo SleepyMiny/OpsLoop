@@ -17,3 +17,10 @@ func TestQuoteRejectsInvalidItems(t *testing.T) {
 		}
 	}
 }
+
+func TestQuoteEmptyOrder(t *testing.T) {
+	q, err := CalculateQuote(nil)
+	if err != nil || q != (Quote{}) {
+		t.Fatalf("empty quote = %+v, %v; want zero quote and no error", q, err)
+	}
+}
